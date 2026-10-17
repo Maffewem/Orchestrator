@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node --test src/env.test.ts",
     "build": "tsc -b && vite build && touch dist/.gitkeep",
     "typecheck": "tsc -b"
   },

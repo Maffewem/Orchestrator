@@ -140,7 +140,7 @@ export interface Deployment {
   id: string;
   project_id: string;
   device_id: string;
-  trigger: "manual" | "push" | "retry";
+  trigger: "manual" | "push" | "retry" | "poll";
   commit: Commit | null;
   spec: DeploySpec;
   status: DeploymentStatus;

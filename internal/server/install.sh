@@ -19,7 +19,29 @@ done
 
 [ "$(id -u)" -eq 0 ] || { echo "please run as root (sudo)" >&2; exit 1; }
 [ -n "$TOKEN" ] || { echo "--token is required (Devices -> Add device)" >&2; exit 1; }
-command -v docker >/dev/null 2>&1 || echo "warning: docker is not installed; install it with: curl -fsSL https://get.docker.com | sh" >&2
+
+# Install Docker (and git, which GitHub builds need) when missing, so a bare
+# Raspberry Pi OS / Debian / Ubuntu install works from scratch.
+need_pkgs=""
+command -v curl >/dev/null 2>&1 || need_pkgs="$need_pkgs curl"
+command -v git >/dev/null 2>&1 || need_pkgs="$need_pkgs git"
+if [ -n "$need_pkgs" ]; then
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "Installing:$need_pkgs"
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates $need_pkgs
+  else
+    echo "warning: please install:$need_pkgs" >&2
+  fi
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker not found; installing it with get.docker.com"
+  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh || { echo "could not download the Docker installer" >&2; exit 1; }
+  sh /tmp/get-docker.sh || { echo "Docker installation failed; see https://docs.docker.com/engine/install/" >&2; exit 1; }
+  rm -f /tmp/get-docker.sh
+fi
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now docker >/dev/null 2>&1 || true
+fi
 
 case "$(uname -m)" in
   x86_64|amd64) ARCH=amd64 ;;

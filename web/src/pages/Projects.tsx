@@ -39,7 +39,7 @@ export function deploymentTitle(d: Deployment) {
   return `Deploy ${d.spec.image}`;
 }
 
-const triggerLabel = { manual: "Manual", push: "Push", retry: "Retry" };
+const triggerLabel = { manual: "Manual", push: "Push", retry: "Retry", poll: "New commit" };
 
 export function DeploymentRow({ d, title }: { d: Deployment; title?: string }) {
   useTick(1000);

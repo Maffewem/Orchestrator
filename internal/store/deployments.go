@@ -24,6 +24,7 @@ const (
 	TriggerManual = "manual"
 	TriggerPush   = "push"
 	TriggerRetry  = "retry"
+	TriggerPoll   = "poll"
 )
 
 // Commit is the git revision a deployment was built from.

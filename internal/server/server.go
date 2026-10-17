@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/store"
@@ -35,6 +36,9 @@ type Config struct {
 	GitHubAPI string
 	// DownloadsDir holds agent binaries (orchestrator-agent-linux-<arch>) for /install.sh.
 	DownloadsDir string
+	// PollInterval is how often GitHub projects are checked for new commits. Zero uses
+	// the default of 60s; negative disables polling.
+	PollInterval time.Duration
 }
 
 type Server struct {
@@ -44,6 +48,9 @@ type Server struct {
 	adminHash string
 	githubAPI string
 	metrics   *metricsHistory
+
+	pollMu sync.Mutex
+	polled map[string]string // project ID -> last commit SHA the poller acted on
 }
 
 // New prepares the server. It returns a freshly generated admin token when one had to be
@@ -52,13 +59,16 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.HeartbeatInterval <= 0 {
 		cfg.HeartbeatInterval = 5 * time.Second
 	}
+	if cfg.PollInterval == 0 {
+		cfg.PollInterval = 60 * time.Second
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 	if cfg.GitHubAPI == "" {
 		cfg.GitHubAPI = "https://api.github.com"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, metrics: newMetricsHistory(720)}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, metrics: newMetricsHistory(720), polled: map[string]string{}}
 
 	for _, key := range []string{settingJoinToken, settingWebhookSecret} {
 		if _, err := st.GetSetting(ctx, key); errors.Is(err, store.ErrNotFound) {
@@ -95,6 +105,7 @@ func (s *Server) offlineAfter() time.Duration { return 3 * s.cfg.HeartbeatInterv
 
 // Run performs background housekeeping until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) {
+	go s.pollLoop(ctx)
 	t := time.NewTicker(s.cfg.HeartbeatInterval)
 	defer t.Stop()
 	for {

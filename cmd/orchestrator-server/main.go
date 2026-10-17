@@ -32,6 +32,7 @@ func main() {
 	dbPath := flag.String("db", env("ORCH_DB", "orchestrator.db"), "SQLite database path")
 	downloads := flag.String("downloads", env("ORCH_DOWNLOADS", ""), "directory of agent binaries served to /install.sh")
 	interval := flag.Duration("heartbeat", 5*time.Second, "agent heartbeat interval")
+	poll := flag.Duration("poll", 60*time.Second, "how often to check GitHub projects for new commits (0 disables)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -52,6 +53,7 @@ func main() {
 		Version:           version,
 		Logger:            log,
 		DownloadsDir:      *downloads,
+		PollInterval:      pollInterval(*poll),
 	})
 	if err != nil {
 		log.Error("start server", "err", err)
@@ -74,4 +76,12 @@ func main() {
 		log.Error("serve", "err", err)
 		os.Exit(1)
 	}
+}
+
+// pollInterval maps the flag (0 disables) to Config's convention (negative disables).
+func pollInterval(d time.Duration) time.Duration {
+	if d == 0 {
+		return -1
+	}
+	return d
 }

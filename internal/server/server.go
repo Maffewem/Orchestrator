@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Maffewem/Orchestrator/internal/agent"
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
@@ -43,6 +44,8 @@ type Config struct {
 	PollInterval time.Duration
 	// BackupDir holds container backup archives.
 	BackupDir string
+	// DockerHost is the engine used for self-updates (default: the local socket).
+	DockerHost string
 }
 
 type Server struct {
@@ -52,6 +55,9 @@ type Server struct {
 	adminHash string
 	githubAPI string
 	metrics   *metricsHistory
+
+	docker *agent.Docker // nil when no Docker client could be configured
+	up     *updateState
 
 	pollMu sync.Mutex
 	polled map[string]string // project ID -> last commit SHA the poller acted on
@@ -75,7 +81,11 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.GitHubAPI == "" {
 		cfg.GitHubAPI = "https://api.github.com"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, metrics: newMetricsHistory(720), polled: map[string]string{}}
+	if cfg.DockerHost == "" {
+		cfg.DockerHost = "unix:///var/run/docker.sock"
+	}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState()}
+	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 
 	for _, key := range []string{settingJoinToken, settingWebhookSecret} {
 		if _, err := st.GetSetting(ctx, key); errors.Is(err, store.ErrNotFound) {
@@ -113,6 +123,8 @@ func (s *Server) offlineAfter() time.Duration { return 3 * s.cfg.HeartbeatInterv
 // Run performs background housekeeping until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) {
 	go s.pollLoop(ctx)
+	go s.updateLoop(ctx)
+	go s.afterBoot(ctx)
 	t := time.NewTicker(s.cfg.HeartbeatInterval)
 	defer t.Stop()
 	for {
@@ -158,6 +170,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agent/deployments/{id}/steps/{idx}", s.agentAuth(s.handleStepUpdate))
 	mux.Handle("POST /api/agent/backups/{id}", s.agentAuth(s.handleUploadBackup))
 	mux.Handle("GET /api/agent/backups/{id}", s.agentAuth(s.handleAgentDownloadBackup))
+	mux.Handle("GET /api/agent/update", s.agentAuth(s.handleAgentUpdateInfo))
 
 	// GitHub push webhooks, authenticated by their HMAC signature.
 	mux.HandleFunc("POST /api/github/webhook", s.handleGitHubWebhook)
@@ -174,6 +187,11 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/devices/{id}/commands", s.handleCreateCommand)
 	admin("GET /api/containers", s.handleListContainers)
 	admin("POST /api/devices/{id}/containers/{cid}/backup", s.handleCreateBackup)
+	admin("GET /api/system/update", s.handleUpdateStatus)
+	admin("PUT /api/system/update/schedule", s.handleSetUpdateSchedule)
+	admin("POST /api/system/update/check", s.handleUpdateCheck)
+	admin("POST /api/system/update/apply", s.handleUpdateApply)
+	admin("POST /api/system/update/agents", s.handleUpdateAgents)
 	admin("GET /api/backups", s.handleListBackups)
 	admin("GET /api/backups/{id}/download", s.handleDownloadBackup)
 	admin("DELETE /api/backups/{id}", s.handleDeleteBackup)

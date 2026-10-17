@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Maffewem/Orchestrator/internal/agent"
+	"github.com/Maffewem/Orchestrator/internal/selfupdate"
 	"github.com/Maffewem/Orchestrator/internal/server"
 	"github.com/Maffewem/Orchestrator/internal/store"
 	"github.com/Maffewem/Orchestrator/web"
@@ -29,6 +31,9 @@ func env(key, def string) string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "self-update" {
+		os.Exit(runSelfUpdate(os.Args[2:]))
+	}
 	addr := flag.String("addr", env("ORCH_ADDR", ":8080"), "listen address")
 	dbPath := flag.String("db", env("ORCH_DB", "orchestrator.db"), "SQLite database path")
 	downloads := flag.String("downloads", env("ORCH_DOWNLOADS", ""), "directory of agent binaries served to /install.sh")
@@ -57,6 +62,7 @@ func main() {
 		DownloadsDir:      *downloads,
 		PollInterval:      pollInterval(*poll),
 		BackupDir:         backupDir(*backups, *dbPath),
+		DockerHost:        env("DOCKER_HOST", ""),
 	})
 	if err != nil {
 		log.Error("start server", "err", err)
@@ -95,4 +101,28 @@ func backupDir(flagValue, dbPath string) string {
 		return flagValue
 	}
 	return filepath.Join(filepath.Dir(dbPath), "backups")
+}
+
+// runSelfUpdate is the updater helper: started by the server from the new image, it swaps
+// the server's container and rolls back if the new one doesn't come up healthy.
+func runSelfUpdate(args []string) int {
+	fs := flag.NewFlagSet("self-update", flag.ExitOnError)
+	container := fs.String("container", "", "name of the server container to replace")
+	image := fs.String("image", "", "image the new container should run")
+	host := fs.String("docker-host", env("DOCKER_HOST", "unix:///var/run/docker.sock"), "Docker engine address")
+	fs.Parse(args)
+	d, err := agent.NewDocker(*host)
+	if err != nil || *container == "" || *image == "" {
+		fmt.Fprintln(os.Stderr, "usage: orchestrator-server self-update -container NAME -image REF")
+		return 2
+	}
+	err = selfupdate.Swap(context.Background(), d, selfupdate.SwapOptions{
+		Container: *container, Image: *image,
+		Log: func(m string) { fmt.Fprintln(os.Stderr, "self-update:", m) },
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "self-update failed:", err)
+		return 1
+	}
+	return 0
 }

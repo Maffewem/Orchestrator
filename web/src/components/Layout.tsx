@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
-import { Activity, Archive, Boxes, ChevronRight, LayoutDashboard, LogOut, Menu, Rocket, Server, Settings, X } from "lucide-react";
+import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, LogOut, Menu, Rocket, Server, Settings, X } from "lucide-react";
 import { cx } from "../lib";
 
 export type Crumb = { label: string; to?: string };
@@ -23,6 +23,7 @@ const nav = [
   { to: "/devices", label: "Devices", icon: Server },
   { to: "/containers", label: "Workers", icon: Boxes },
   { to: "/backups", label: "Backups", icon: Archive },
+  { to: "/updates", label: "Updates", icon: RefreshCw },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

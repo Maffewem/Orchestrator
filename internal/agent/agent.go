@@ -49,6 +49,7 @@ type Agent struct {
 	state    state
 	interval time.Duration
 	work     chan api.Command
+	restart  bool // set by an update: exit after reporting
 
 	lastCPUTotal, lastCPUIdle uint64
 }
@@ -79,6 +80,7 @@ func New(cfg Config) (*Agent, error) {
 
 // Run registers if needed and heartbeats until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
+	a.checkTrial()
 	if err := a.ensureRegistered(ctx); err != nil {
 		return err
 	}
@@ -167,6 +169,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	if err := a.post(ctx, "/api/agent/heartbeat", a.state.AgentToken, req, &res); err != nil {
 		return err
 	}
+	a.confirmUpdate()
 	if res.IntervalSeconds > 0 {
 		a.interval = time.Duration(res.IntervalSeconds) * time.Second
 	}
@@ -190,6 +193,11 @@ func (a *Agent) worker(ctx context.Context) {
 			a.log.Info("running command", "id", c.ID, "action", c.Action)
 			res := a.execute(ctx, c)
 			a.report(ctx, c.ID, res)
+			if a.restart {
+				// The new binary is in place; systemd (Restart=always) starts it.
+				a.log.Info("restarting to finish the update")
+				os.Exit(0)
+			}
 		}
 	}
 }
@@ -221,6 +229,10 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		dctx, dcancel := context.WithTimeout(ctx, 25*time.Minute)
 		err = a.deploy(dctx, c.Target, *c.Deploy)
 		dcancel()
+	case api.ActionAgentUpdate:
+		uctx, ucancel := context.WithTimeout(ctx, 10*time.Minute)
+		output, a.restart, err = a.selfUpdate(uctx)
+		ucancel()
 	case api.ActionBackup, api.ActionRestore:
 		// Large volumes over a slow link can take a while.
 		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)

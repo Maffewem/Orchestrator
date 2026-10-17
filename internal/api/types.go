@@ -16,6 +16,8 @@ type HostInfo struct {
 	MemoryTotal  uint64      `json:"memory_total"`
 	AgentVersion string      `json:"agent_version"`
 	Docker       *DockerInfo `json:"docker,omitempty"`
+	// InContainer is set when the agent runs as a container, which can't replace its own binary.
+	InContainer bool `json:"in_container,omitempty"`
 }
 
 // DockerInfo summarises the container engine on a device.
@@ -96,7 +98,16 @@ const (
 	ActionBackup = "container.backup"
 	// ActionRestore writes a backup's data back into the existing container; Args["backup_id"].
 	ActionRestore = "container.restore"
+	// ActionAgentUpdate makes the agent replace its own binary with the control plane's build.
+	ActionAgentUpdate = "agent.update"
 )
+
+// AgentUpdateInfo tells an agent which build the control plane serves for its architecture.
+type AgentUpdateInfo struct {
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"`
+	URL     string `json:"url"` // path on the control plane
+}
 
 // Command is work queued by the control plane for a device's agent.
 type Command struct {

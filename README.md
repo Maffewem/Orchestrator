@@ -103,6 +103,44 @@ make all                         # dashboard, server, and agents for every archi
 ./bin/orchestrator-server -downloads bin/downloads
 ```
 
+Run like this, the server is tied to your terminal and stops when the SSH session ends. To
+keep it running, make it a service:
+
+```sh
+sudo tee /etc/systemd/system/orchestrator.service >/dev/null <<'UNIT'
+[Unit]
+Description=Orchestrator control plane
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/orchestrator
+ExecStart=/opt/orchestrator/orchestrator-server -db /opt/orchestrator/orchestrator.db -downloads /opt/orchestrator/downloads
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl enable --now orchestrator
+```
+
+## When the dashboard stops loading
+
+First check whether the server is still running. It answers `curl http://<server>:8080/api/health`
+with `{"status":"ok",...}`.
+
+| Server runs as | What happened | Check |
+| --- | --- | --- |
+| Docker (`install-server.sh`, `docker run`, compose) | The container stopped or was removed | `docker ps -a`, then `docker logs --tail 100 orchestrator` |
+| `docker compose up` without `-d` | Compose stops when the terminal closes | Use `docker compose up -d` |
+| A binary started by hand | It was killed with your SSH session | Run it as a service (above) |
+| systemd service | It crashed or isn't enabled | `systemctl status orchestrator`, `journalctl -u orchestrator -n 100` |
+
+Docker restarts the container by itself (`--restart unless-stopped`) after a crash or reboot,
+as long as the Docker service is enabled (`systemctl is-enabled docker`). Device agents run as
+the `orchestrator-agent` service, so on a device that looks offline use
+`systemctl status orchestrator-agent` and `journalctl -u orchestrator-agent -n 100`. Agents
+reconnect on their own once the server is back.
+
 ## Development
 
 ```sh

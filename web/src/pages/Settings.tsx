@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Github, KeyRound } from "lucide-react";
+import { Github, Globe, KeyRound } from "lucide-react";
 import { api } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
@@ -12,6 +12,8 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [login, setLogin] = useState<string | null>(null);
+  const [base, setBase] = useState<string | null>(null);
+  const [baseMsg, setBaseMsg] = useState<string | null>(null);
 
   const s = settings.data;
   if (!s) return <Loading />;
@@ -32,10 +34,42 @@ export default function SettingsPage() {
     }
   };
 
+  const saveBase = async () => {
+    setBaseMsg(null);
+    try {
+      const r = await api.setBaseDomain(base ?? s.base_domain);
+      setBase(r.base_domain);
+      setBaseMsg(r.base_domain ? "Saved. Workers now get name." + r.base_domain : "Saved. Built-in worker URLs are off.");
+      settings.reload();
+    } catch (e) {
+      setBaseMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   return (
     <div className="max-w-3xl">
       <PageHeader title="Settings" />
       <div className="space-y-6">
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <Globe className="size-4" /> Domains
+              </span>
+            }
+            subtitle="Every worker gets name.<base domain>. Point a wildcard DNS record at your device, or add records per worker."
+          />
+          <div className="p-5">
+            <p className="mb-1 text-sm font-medium">Base domain</p>
+            <div className="flex gap-2">
+              <input className={inputClass} placeholder="example.com" value={base ?? s.base_domain} onChange={(e) => setBase(e.target.value)} />
+              <Button variant="primary" onClick={saveBase}>
+                Save
+              </Button>
+            </div>
+            {baseMsg && <p className="mt-2 text-sm text-neutral-600">{baseMsg}</p>}
+          </div>
+        </Card>
         <Card>
           <CardHeader
             title={

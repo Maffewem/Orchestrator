@@ -21,6 +21,8 @@ export interface HostInfo {
   memory_total: number;
   agent_version: string;
   docker?: DockerInfo;
+  in_container?: boolean;
+  capabilities?: string[];
 }
 
 export interface Metrics {
@@ -186,7 +188,42 @@ export interface MetricSample {
   load1: number;
 }
 
+export interface DnsRecord {
+  type: string;
+  name: string;
+  value: string;
+}
+
+export interface DomainRow {
+  id?: string;
+  hostname: string;
+  type: "domain" | "route";
+  path?: string;
+  zone: string;
+  status: "active" | "pending" | "mismatch";
+  detail: string;
+  records: DnsRecord[];
+}
+
+export interface UrlRow {
+  hostname: string;
+  enabled: boolean;
+  status?: DomainRow["status"];
+  detail?: string;
+  records?: DnsRecord[];
+}
+
+export interface DomainsView {
+  base_domain: string;
+  production: UrlRow | null;
+  preview: UrlRow | null;
+  domains: DomainRow[];
+  addresses: string[];
+  proxy: "ok" | "agent_too_old";
+}
+
 export interface Settings {
+  base_domain: string;
   join_token: string;
   heartbeat_interval_seconds: number;
   version: string;
@@ -265,6 +302,7 @@ export interface Backup {
   device_name: string;
   container_name: string;
   image: string;
+  source: "manual" | "scheduled";
   status: "pending" | "complete" | "failed";
   size: number;
   error?: string;
@@ -302,10 +340,24 @@ export interface UpdateStatus {
   result?: { at: string; ok: boolean; message: string };
   schedule: UpdateSchedule;
   next_run?: string;
-  agents: { device_id: string; name: string; version: string; arch: string; online: boolean; in_container: boolean; outdated: boolean }[];
+  agents: { device_id: string; name: string; version: string; arch: string; online: boolean; in_container: boolean; outdated: boolean; can_update: boolean }[];
+}
+
+export interface BackupPolicy {
+  mode: "off" | "daily" | "weekly";
+  time: string;
+  weekday: number;
+  tz: string;
+  keep: number;
+  next_run?: string;
+  last_run?: string;
 }
 
 export const api = {
+  backupPolicy: (deviceId: string, name: string) =>
+    request<BackupPolicy>("GET", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/backup-policy`),
+  setBackupPolicy: (deviceId: string, name: string, p: Omit<BackupPolicy, "next_run" | "last_run">) =>
+    request<BackupPolicy>("PUT", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/backup-policy`, p),
   updateStatus: () => request<UpdateStatus>("GET", "/api/system/update"),
   checkUpdate: () => request<UpdateStatus>("POST", "/api/system/update/check"),
   applyUpdate: (agents: boolean) => request<UpdateStatus>("POST", `/api/system/update/apply${agents ? "?agents=1" : ""}`),
@@ -347,6 +399,13 @@ export const api = {
   setGitHubToken: (token: string) =>
     request<{ connected: boolean; login?: string }>("PUT", "/api/settings/github", { token }),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
+  projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
+  setProjectUrls: (id: string, u: { production: boolean; preview: boolean }) =>
+    request<DomainsView>("PUT", `/api/projects/${id}/domains/urls`, u),
+  addDomain: (id: string, d: { hostname: string; type: "domain" | "route"; path?: string }) =>
+    request<DomainsView>("POST", `/api/projects/${id}/domains`, d),
+  deleteDomain: (id: string, did: string) => request<void>("DELETE", `/api/projects/${id}/domains/${did}`),
+  setBaseDomain: (base_domain: string) => request<{ base_domain: string }>("PUT", "/api/settings/domain", { base_domain }),
   githubRepos: () => request<GitHubRepo[]>("GET", "/api/github/repos"),
 };
 

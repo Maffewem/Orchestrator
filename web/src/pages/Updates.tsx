@@ -51,7 +51,7 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
         )}
         {!st.can_update && (
           <p className="rounded-lg bg-amber-50 px-4 py-2 text-sm">
-            This server can't update itself: {st.reason}. Updating from the dashboard needs the server to run as a Docker container with the Docker socket mounted, which gives that container control of Docker on this machine. See the README ("Updating") for how to enable it.
+            This server can't update itself: {st.reason}. Updating from the dashboard needs the server to run as a Docker container with the Docker socket mounted, which gives that container control of Docker on this machine. Re-run install-server.sh without --no-web-update to enable it (see the README, "Updates").
           </p>
         )}
         {error && <ErrorNote>{error}</ErrorNote>}
@@ -159,7 +159,7 @@ function ScheduleCard({ st, reload }: { st: UpdateStatus; reload: () => void }) 
 function AgentsCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const outdated = st.agents.filter((a) => a.outdated && a.online && !a.in_container);
+  const outdated = st.agents.filter((a) => a.outdated && a.online && !a.in_container && a.can_update);
   const go = async (device?: string) => {
     setError(null);
     try {
@@ -188,11 +188,11 @@ function AgentsCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
             <Td className="font-medium">{a.name}</Td>
             <Td className="font-mono text-xs">{a.version || "unknown"}</Td>
             <Td>
-              {a.in_container ? <Badge>Container: pull a new image</Badge> : !a.online ? <Badge>Offline</Badge> : a.outdated ? <Badge tone="warn">Update available</Badge> : <Badge tone="ok">Up to date</Badge>}
+              {a.in_container ? <Badge>Container: pull a new image</Badge> : !a.can_update ? <Badge tone="warn">Too old: re-run the install command</Badge> : !a.online ? <Badge>Offline</Badge> : a.outdated ? <Badge tone="warn">Update available</Badge> : <Badge tone="ok">Up to date</Badge>}
             </Td>
             <Td>
               <div className="flex justify-end">
-                {a.outdated && a.online && !a.in_container && (
+                {a.outdated && a.online && !a.in_container && a.can_update && (
                   <Button size="sm" onClick={() => go(a.device_id)}>
                     Update
                   </Button>

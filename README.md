@@ -53,6 +53,19 @@ agent install on each new device.
   to be stopped first. Archives are stored unencrypted in `-backups` (default: beside the
   database), so protect that directory like the database itself.
 
+- **Backups from a worker's page** have a schedule (daily or weekly, with a number of
+  backups to keep) under the worker's Backups tab, as well as "Back up now". Agents that are
+  too old to back up are named in the error, with the fix (Updates page, or re-run the
+  install command).
+- **Domains** (a worker's Domains tab): set a base domain under Settings and every project
+  gets `name.<base domain>`, with an optional `*-name.<base domain>` preview URL (plain
+  HTTP). Add custom domains, or a hostname plus path route such as `example.com/api/*`. Each
+  one shows the DNS record to create (an A record to the device's IPv4 address) and whether
+  DNS already points there. The control plane renders a Caddyfile per device and the agent
+  runs a `caddy:2-alpine` container (`orchestrator-proxy`, host network, restarts with
+  Docker) with it, so there is no central proxy. Caddy gets certificates itself, which needs
+  ports 80 and 443 reachable from the internet (or use a Cloudflare Tunnel instead).
+
 - **Updates** (Updates page): check for the latest published build, update the server on
   demand, and set a schedule (daily or weekly, at a time in your time zone, or off). The
   server pulls the new image, then a short-lived helper container from that image swaps the
@@ -63,11 +76,14 @@ agent install on each new device.
   containers are updated by pulling a newer image instead.
 
   Updating the server from the dashboard needs the Docker socket inside the server
-  container, which gives that container full control of Docker on the host. It is therefore
-  off by default. To turn it on, run the server with
+  container, which gives that container full control of Docker on the host. The installer
+  and compose file turn it on by default; opt out with
+  `curl ... install-server.sh | sudo sh -s -- --no-web-update` (or `ORCH_WEB_UPDATE=0`), or
+  by removing the socket and `group_add` lines from compose. With it off, the page still
+  shows versions, and agent updates and schedules for agents work. If you started the
+  server some other way, add
   `-v /var/run/docker.sock:/var/run/docker.sock --group-add "$(stat -c %g /var/run/docker.sock)"`
-  (or the equivalent in compose). Without it, the page still shows versions, and agent
-  updates and schedules for agents work.
+  to its `docker run`.
 
 ### Supported devices
 
@@ -198,6 +214,9 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `POST /api/backups/{id}/restore` | restore a backup into its container |
 | `GET /api/system/update`, `POST /api/system/update/check`, `POST /api/system/update/apply` | update status, check, update the server |
 | `PUT /api/system/update/schedule`, `POST /api/system/update/agents` | update schedule, update agents |
+| `GET/PUT /api/devices/{id}/workers/{name}/backup-policy` | automatic backups for a worker |
+| `GET/POST /api/projects/{id}/domains`, `PUT .../domains/urls`, `DELETE .../domains/{did}` | domains and the worker URLs |
+| `PUT /api/settings/domain` | base domain |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
 

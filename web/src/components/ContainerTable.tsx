@@ -24,7 +24,7 @@ function ports(c: Container) {
   return [...seen].join(", ");
 }
 
-async function waitFor(id: string) {
+export async function waitFor(id: string) {
   for (let i = 0; i < 120; i++) {
     const c = await api.getCommand(id);
     if (c.status === "succeeded" || c.status === "failed") return c;
@@ -129,10 +129,10 @@ export default function ContainerTable({
           return (
             <tr key={dev + c.id} className="hover:bg-neutral-50">
               <Td>
-                <span className="flex items-center gap-2 font-medium">
+                <Link to={`/workers/${dev}/${encodeURIComponent(c.name)}`} className="flex items-center gap-2 font-medium text-neutral-900 hover:text-primary hover:underline">
                   <StatusDot status={c.state} />
                   {c.name}
-                </span>
+                </Link>
                 {"project_name" in c && c.project_name ? (
                   <Link to={`/projects/${c.project_id}`} className="ml-4 text-xs text-primary hover:underline">
                     project: {c.project_name}

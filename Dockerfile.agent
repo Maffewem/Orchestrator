@@ -1,0 +1,19 @@
+# Agent image for running on a device as a container.
+# Multi-arch: docker buildx build -f Dockerfile.agent --platform linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6 .
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH TARGETVARIANT VERSION=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN GOARM=${TARGETVARIANT#v} CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+      -ldflags "-s -w -X github.com/Maffewem/Orchestrator/internal/agent.Version=$VERSION" \
+      -o /out/orchestrator-agent ./cmd/orchestrator-agent
+
+FROM alpine:3.22
+# The docker CLI and buildx let the agent build GitHub projects with BuildKit.
+RUN apk add --no-cache ca-certificates git docker-cli docker-cli-buildx
+COPY --from=build /out/orchestrator-agent /usr/local/bin/
+ENV ORCH_STATE=/data/state.json ORCH_HOST_ROOT=/host
+VOLUME /data
+ENTRYPOINT ["orchestrator-agent"]

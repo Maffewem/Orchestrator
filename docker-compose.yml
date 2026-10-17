@@ -1,0 +1,16 @@
+# Runs the control plane. Open http://localhost:8080 and sign in with the admin token
+# printed in the logs on first start (docker compose logs orchestrator), or set ORCH_ADMIN_TOKEN.
+services:
+  orchestrator:
+    build: .
+    image: ghcr.io/maffewem/orchestrator:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - orchestrator-data:/data
+    # environment:
+    #   ORCH_ADMIN_TOKEN: change-me
+
+volumes:
+  orchestrator-data:

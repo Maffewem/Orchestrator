@@ -135,6 +135,8 @@ with `{"status":"ok",...}`.
 | A binary started by hand | It was killed with your SSH session | Run it as a service (above) |
 | systemd service | It crashed or isn't enabled | `systemctl status orchestrator`, `journalctl -u orchestrator -n 100` |
 
+Both installers enforce this: they enable the Docker service at boot, set `--restart unless-stopped`, repair workers that were created without a restart policy, and print a checklist at the end. Re-running `install-server.sh` (or the agent install command) repairs an existing install.
+
 Docker restarts the container by itself (`--restart unless-stopped`) after a crash or reboot,
 as long as the Docker service is enabled (`systemctl is-enabled docker`). Device agents run as
 the `orchestrator-agent` service, so on a device that looks offline use

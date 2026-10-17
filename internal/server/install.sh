@@ -85,4 +85,22 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now orchestrator-agent
 systemctl restart orchestrator-agent
+
+# Repair: workers deployed without a restart policy would not come back after a reboot.
+for id in $(docker ps -aq --filter label=orchestrator.project 2>/dev/null); do
+  docker update --restart unless-stopped "$id" >/dev/null 2>&1 || true
+done
+
+# Verify it will survive logout and reboot.
+fail=0
+check() { # description, command...
+  desc="$1"; shift
+  if "$@" >/dev/null 2>&1; then echo "  ok   $desc"; else echo "  FAIL $desc"; fail=1; fi
+}
+echo "Checking the install:"
+check "Docker starts at boot" systemctl is-enabled docker
+check "Docker is running" docker info
+check "agent starts at boot" systemctl is-enabled orchestrator-agent
+check "agent is running" systemctl is-active orchestrator-agent
+[ "$fail" -eq 0 ] || { echo "Some checks failed; see 'journalctl -u orchestrator-agent -n 50'." >&2; exit 1; }
 echo "Orchestrator agent installed. It should appear in the dashboard within a few seconds."

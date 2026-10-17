@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ChevronDown, ChevronUp, Copy, Download, Github, RotateCw, Server } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server } from "lucide-react";
 import { api, type Deployment, type Step } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, ErrorNote, Loading, StatusIcon } from "../components/ui";
+import { visitUrl } from "./Project";
 import { ago, clock, cx, duration, shortId, span, usePoll, useTick } from "../lib";
 
 type LogLine = { time: string; text: string; step: number };
@@ -37,6 +38,7 @@ export default function DeploymentPage() {
   const d = dep.data;
   const project = usePoll(() => (d ? api.project(d.project_id) : Promise.resolve(null)), 0, [d?.project_id]);
   const device = usePoll(() => (d ? api.device(d.device_id).catch(() => null) : Promise.resolve(null)), 0, [d?.device_id]);
+  const domains = usePoll(() => (d ? api.projectDomains(d.project_id).catch(() => null) : Promise.resolve(null)), 0, [d?.project_id]);
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useTick(live ? 500 : 60000);
@@ -52,6 +54,8 @@ export default function DeploymentPage() {
   if (dep.error && !d) return <ErrorNote>{dep.error}</ErrorNote>;
   if (!d) return <Loading />;
   const total = span(d.started_at ?? d.created_at, d.finished_at);
+  const prod = domains.data?.production;
+  const url = prod?.enabled ? `https://${prod.hostname}` : project.data ? visitUrl(project.data, device.data) : null;
 
   return (
     <>
@@ -93,7 +97,7 @@ export default function DeploymentPage() {
         </div>
       )}
 
-      <SourceCard d={d} deviceName={device.data?.name} />
+      <SourceCard d={d} deviceName={device.data?.name} url={url} />
 
       {d.error && (
         <div className="mt-4">
@@ -109,7 +113,7 @@ export default function DeploymentPage() {
   );
 }
 
-function SourceCard({ d, deviceName }: { d: Deployment; deviceName?: string }) {
+function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string; url?: string | null }) {
   const [open, setOpen] = useState(false);
   const c = d.commit;
   const settings: [string, string][] = [
@@ -123,6 +127,12 @@ function SourceCard({ d, deviceName }: { d: Deployment; deviceName?: string }) {
   return (
     <Card>
       <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+        {url && (
+          <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900">
+            <Globe className="size-4 text-neutral-500" />
+            {url.replace(/^https?:\/\//, "")}
+          </a>
+        )}
         {c ? (
           <>
             <span className="inline-flex items-center overflow-hidden rounded-full border border-neutral-200 text-sm">

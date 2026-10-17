@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, Route, Routes, useNavigate, useParams } from "react-router";
-import { Archive, Check, Copy, Download, GitBranch, MoreHorizontal, Play, RefreshCw, RotateCcw, RotateCw, Square, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, Route, Routes, useParams } from "react-router";
+import { Archive, Download, GitBranch, Play, RefreshCw, RotateCcw, RotateCw, Square, Trash2 } from "lucide-react";
 import { api, type Backup, type BackupPolicy, type Deployment, type FleetContainer } from "../api";
 import { useCrumbs } from "../components/Layout";
 import DomainsPanel from "../components/Domains";
-import { endpoints, waitFor } from "../components/ContainerTable";
-import { Badge, Button, Card, CardHeader, Empty, ErrorNote, Field, Loading, PageHeader, StatusDot, StatusIcon, Table, Tabs, Td, inputClass } from "../components/ui";
-import { ago, bytes, cx, duration, pct, span, usePoll, useTick } from "../lib";
-import { deploymentTitle } from "./Projects";
+import { waitFor } from "../components/ContainerTable";
+import { Badge, Button, Card, CardHeader, Empty, ErrorNote, Field, Loading, PageHeader, StatusDot, Table, Tabs, Td, inputClass } from "../components/ui";
+import { ago, bytes, pct, usePoll, useTick } from "../lib";
+import WorkerOverview from "./WorkerOverview";
+import { DeploymentLine, Sparkline, versionId } from "../components/DeploymentLine";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -51,7 +52,7 @@ export default function WorkerPage() {
         />
       </div>
       <Routes>
-        <Route index element={<Overview w={w} addresses={device.data?.host.addresses ?? w.device_addresses} />} />
+        <Route index element={<WorkerOverview w={w} addresses={device.data?.host.addresses ?? w.device_addresses} canBackup={!!device.data?.host.capabilities?.includes("backup")} />} />
         <Route path="deployments" element={<Deployments w={w} />} />
         <Route
           path="domains"
@@ -109,63 +110,7 @@ function WorkerActions({ w, onDone }: { w: FleetContainer; onDone: () => void })
   );
 }
 
-function Overview({ w, addresses }: { w: FleetContainer; addresses: string[] }) {
-  const eps = w.state === "running" ? endpoints(w, addresses) : [];
-  const ports = [...new Set((w.ports ?? []).map((p) => (p.public_port ? `${p.public_port}→${p.private_port}/${p.type}` : `${p.private_port}/${p.type}`)))];
-  const rows: [string, React.ReactNode][] = [
-    ["State", w.status],
-    ["Image", <span className="font-mono text-xs">{w.image}</span>],
-    ["Device", <Link to={`/devices/${w.device_id}`} className="text-primary hover:underline">{w.device_name}</Link>],
-    ["Addresses", <span className="font-mono text-xs">{addresses.join(", ") || "none reported"}</span>],
-    ["Ports", <span className="font-mono text-xs">{ports.join(", ") || "none"}</span>],
-    [
-      "Endpoints",
-      eps.length ? eps.map((e) => (
-        <a key={e} href={`http://${e}`} target="_blank" rel="noreferrer" className="block font-mono text-xs text-primary hover:underline">{e}</a>
-      )) : "none",
-    ],
-    [
-      "Project",
-      w.project_id ? <Link to={`/projects/${w.project_id}`} className="text-primary hover:underline">{w.project_name}</Link> : w.compose_project ? `Compose stack ${w.compose_project}` : "Standalone container",
-    ],
-  ];
-  return (
-    <Card>
-      <dl className="divide-y divide-neutral-100">
-        {rows.map(([k, v]) => (
-          <div key={k} className="grid gap-1 px-5 py-3 text-sm sm:grid-cols-[10rem_1fr]">
-            <dt className="text-neutral-500">{k}</dt>
-            <dd>{v}</dd>
-          </div>
-        ))}
-      </dl>
-    </Card>
-  );
-}
-
 // --- Deployments, laid out like Cloudflare's deployment list ---
-
-function Sparkline({ values, color = "#0051c3" }: { values: number[]; color?: string }) {
-  if (values.length < 2) return <div className="h-8 w-full rounded bg-neutral-100" />;
-  const max = Math.max(1, ...values), w = 200, h = 32;
-  const pts = values.map((v, i) => `${(i / (values.length - 1)) * w},${h - 2 - (v / max) * (h - 4)}`);
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-8 w-full">
-      <defs>
-        <linearGradient id="spark" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor={color} stopOpacity="0.3" />
-          <stop offset="1" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polygon points={`0,${h} ${pts.join(" ")} ${w},${h}`} fill="url(#spark)" />
-      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
-
-function versionId(d: Deployment) {
-  return d.commit ? d.commit.sha.slice(0, 8) : d.id.replace(/^[a-z]+_/, "").slice(0, 8);
-}
 
 function Deployments({ w }: { w: FleetContainer }) {
   const projectId = w.project_id;
@@ -210,7 +155,7 @@ function Deployments({ w }: { w: FleetContainer }) {
               <dd className="mt-1"><Sparkline values={samples.map((s) => s.cpu)} /></dd>
             </div>
             <div>
-              <dt className="text-neutral-500">Device memory{m ? ` · ${pct(m.memory_used, m.memory_total)}% of ${bytes(m.memory_total)}` : ""}</dt>
+              <dt className="text-neutral-500">Device memory{m ? ` · ${Math.round(pct(m.memory_used, m.memory_total))}% of ${bytes(m.memory_total)}` : ""}</dt>
               <dd className="mt-1"><Sparkline values={samples.map((s) => s.mem)} color="#f6821f" /></dd>
             </div>
           </dl>
@@ -237,85 +182,6 @@ function Deployments({ w }: { w: FleetContainer }) {
           </div>
         )}
       </Card>
-    </div>
-  );
-}
-
-function DeploymentLine({ d, live, onChanged }: { d: Deployment; live: boolean; onChanged: () => void }) {
-  const nav = useNavigate();
-  const [copied, setCopied] = useState(false);
-  const menu = useRef<HTMLDetailsElement>(null);
-  const took = span(d.started_at ?? d.created_at, d.finished_at);
-  const hash = d.commit?.sha;
-  useEffect(() => {
-    const close = (e: MouseEvent) => {
-      if (menu.current && !menu.current.contains(e.target as Node)) menu.current.open = false;
-    };
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
-  }, []);
-  const copy = async () => {
-    if (!hash) return;
-    try {
-      await navigator.clipboard.writeText(hash);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked */
-    }
-  };
-  const label = { queued: "Queued", running: "Building", succeeded: "Ready", failed: "Failed" }[d.status];
-  return (
-    <div className="grid grid-cols-[7rem_1fr_auto] items-center gap-x-4 gap-y-2 px-5 py-3 text-sm lg:grid-cols-[7rem_minmax(0,1fr)_9rem_6rem_7rem_9rem_5rem_2rem]">
-      <div className="flex items-center gap-2 font-mono text-neutral-500">
-        {hash ? (
-          <>
-            <span>{hash.slice(0, 8)}</span>
-            <button onClick={copy} aria-label="Copy commit hash" className="rounded p-0.5 hover:bg-neutral-100">
-              {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
-            </button>
-          </>
-        ) : (
-          "—"
-        )}
-      </div>
-      <Link to={`/deployments/${d.id}`} className="min-w-0 truncate hover:underline" title={deploymentTitle(d)}>
-        {deploymentTitle(d)}
-      </Link>
-      <div className="flex items-center gap-2 whitespace-nowrap">
-        {live ? <span className="h-4 w-1 rounded bg-primary" title="Active deployment" /> : <StatusIcon status={d.status} size="sm" />}
-        <span className={cx(d.status === "failed" && "text-bad")}>{label}</span>
-        {d.status !== "queued" && <span className="text-neutral-500">{duration(took)}</span>}
-      </div>
-      <Link to={`/deployments/${d.id}`} className="hidden w-fit rounded-full border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50 lg:block">
-        Build ↗
-      </Link>
-      <span className="hidden w-fit items-center gap-1 rounded-full border border-neutral-300 px-3 py-1 text-xs lg:inline-flex">
-        <GitBranch className="size-3" />
-        {d.commit?.branch ?? "image"}
-      </span>
-      <span className="hidden truncate text-neutral-600 lg:block">{d.commit?.author ? `by ${d.commit.author}` : d.trigger === "manual" ? "by you" : ""}</span>
-      <span className="hidden whitespace-nowrap text-neutral-500 lg:block">{ago(d.created_at)}</span>
-      <details ref={menu} className="relative">
-        <summary className="flex cursor-pointer list-none justify-end rounded p-1 hover:bg-neutral-100" aria-label="Actions">
-          <MoreHorizontal className="size-4" />
-        </summary>
-        <div className="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-neutral-200 bg-white py-1 text-sm shadow-lg">
-          <Link to={`/deployments/${d.id}`} className="block px-3 py-1.5 hover:bg-neutral-50">View build log</Link>
-          {hash && <button onClick={copy} className="block w-full px-3 py-1.5 text-left hover:bg-neutral-50">Copy commit hash</button>}
-          {d.commit?.url && <a href={d.commit.url} target="_blank" rel="noreferrer" className="block px-3 py-1.5 hover:bg-neutral-50">Open commit on GitHub</a>}
-          <button
-            className="block w-full px-3 py-1.5 text-left hover:bg-neutral-50"
-            onClick={async () => {
-              const r = await api.retryDeployment(d.id);
-              onChanged();
-              nav(`/deployments/${r.id}`);
-            }}
-          >
-            Redeploy this version
-          </button>
-        </div>
-      </details>
     </div>
   );
 }

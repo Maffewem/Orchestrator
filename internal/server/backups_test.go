@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
+	"github.com/Maffewem/Orchestrator/internal/backupcrypt"
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
@@ -185,5 +186,95 @@ func TestBackupPolicyScheduleAndRetention(t *testing.T) {
 	}
 	if scheduled != 2 || !kept {
 		t.Fatalf("retention: %d scheduled complete kept, manual kept=%v", scheduled, kept)
+	}
+}
+
+func TestBackupPassword(t *testing.T) {
+	backupcrypt.Iterations = 1000
+	h := newHarness(t)
+	h.srv.cfg.BackupDir = t.TempDir()
+	reg := h.register("pi-pw")
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{
+		Host:       api.HostInfo{Capabilities: []string{api.CapBackup}},
+		Containers: []api.Container{{ID: "abc123", Name: "web", Image: "nginx", State: "running"}},
+	}, &api.HeartbeatResponse{})
+
+	// take makes a backup the way an agent does: queue it, then upload the archive.
+	take := func(archive string) store.Backup {
+		var b store.Backup
+		if code := h.do("POST", "/api/devices/"+reg.DeviceID+"/containers/abc123/backup", adminToken, nil, &b); code != http.StatusAccepted {
+			t.Fatalf("queue: %d", code)
+		}
+		req, _ := http.NewRequest("POST", h.ts.URL+"/api/agent/backups/"+b.ID, strings.NewReader(archive))
+		req.Header.Set("Authorization", "Bearer "+reg.AgentToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil || resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("upload: %v %v", err, resp)
+		}
+		resp.Body.Close()
+		got, _ := h.st.GetBackup(context.Background(), b.ID)
+		return *got
+	}
+	download := func(b store.Backup) (int, string) {
+		req, _ := http.NewRequest("GET", h.ts.URL+"/api/backups/"+b.ID+"/download", nil)
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+
+	plain := take("plain archive bytes")
+	if plain.Encrypted {
+		t.Fatal("backup encrypted without a password")
+	}
+
+	if code := h.do("PUT", "/api/settings/backup-password", adminToken, map[string]string{"password": "short"}, nil); code != http.StatusBadRequest {
+		t.Fatalf("short password: %d", code)
+	}
+	h.do("PUT", "/api/settings/backup-password", adminToken, map[string]string{"password": "correct horse battery"}, nil)
+	var set struct {
+		Set bool `json:"backup_password_set"`
+	}
+	h.do("GET", "/api/settings", adminToken, nil, &set)
+	if !set.Set {
+		t.Fatal("settings should say a backup password is set")
+	}
+
+	secret := "super secret database contents"
+	enc := take(secret)
+	if !enc.Encrypted || enc.Size != int64(len(secret)) {
+		t.Fatalf("encrypted backup: %+v", enc)
+	}
+	onDisk, err := os.ReadFile(h.srv.backupFile(&enc))
+	if err != nil || !strings.HasSuffix(h.srv.backupFile(&enc), ".tar.gz.enc") || bytes.Contains(onDisk, []byte(secret)) {
+		t.Fatalf("file on disk: %v %v", err, strings.HasSuffix(h.srv.backupFile(&enc), ".enc"))
+	}
+	if code, body := download(enc); code != http.StatusOK || body != secret {
+		t.Fatalf("download: %d %q", code, body)
+	}
+	if code, body := download(plain); code != http.StatusOK || body != "plain archive bytes" {
+		t.Fatalf("older plain backup: %d %q", code, body)
+	}
+
+	// A different password can't open it, and says so before sending anything.
+	h.do("PUT", "/api/settings/backup-password", adminToken, map[string]string{"password": "another password"}, nil)
+	if code, body := download(enc); code != http.StatusConflict || !strings.Contains(body, "different password") {
+		t.Fatalf("wrong password: %d %q", code, body)
+	}
+	h.do("PUT", "/api/settings/backup-password", adminToken, map[string]string{"password": ""}, nil)
+	if code, body := download(enc); code != http.StatusConflict || !strings.Contains(body, "no backup password is set") {
+		t.Fatalf("no password: %d %q", code, body)
+	}
+	if after := take("now plain again"); after.Encrypted {
+		t.Fatal("removing the password should stop encrypting")
+	}
+
+	h.do("DELETE", "/api/backups/"+enc.ID, adminToken, nil, nil)
+	if _, err := os.Stat(h.srv.backupFile(&enc)); !os.IsNotExist(err) {
+		t.Fatalf("encrypted file not removed: %v", err)
 	}
 }

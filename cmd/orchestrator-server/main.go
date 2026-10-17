@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/agent"
+	"github.com/Maffewem/Orchestrator/internal/backupcrypt"
 	"github.com/Maffewem/Orchestrator/internal/selfupdate"
 	"github.com/Maffewem/Orchestrator/internal/server"
 	"github.com/Maffewem/Orchestrator/internal/store"
@@ -33,6 +35,9 @@ func env(key, def string) string {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "self-update" {
 		os.Exit(runSelfUpdate(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "decrypt-backup" {
+		os.Exit(runDecryptBackup(os.Args[2:]))
 	}
 	addr := flag.String("addr", env("ORCH_ADDR", ":8080"), "listen address")
 	dbPath := flag.String("db", env("ORCH_DB", "orchestrator.db"), "SQLite database path")
@@ -125,4 +130,45 @@ func runSelfUpdate(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// runDecryptBackup turns a password-protected backup file (.tar.gz.enc) back into a normal
+// .tar.gz without a running server, for backups copied off the machine.
+func runDecryptBackup(args []string) int {
+	fs := flag.NewFlagSet("decrypt-backup", flag.ExitOnError)
+	in := fs.String("in", "", "the .tar.gz.enc file")
+	out := fs.String("out", "", "where to write the decrypted .tar.gz")
+	fs.Parse(args)
+	pw := os.Getenv("ORCH_BACKUP_PASSWORD")
+	if *in == "" || *out == "" || pw == "" {
+		fmt.Fprintln(os.Stderr, "usage: ORCH_BACKUP_PASSWORD=... orchestrator-server decrypt-backup -in FILE.tar.gz.enc -out FILE.tar.gz")
+		return 2
+	}
+	if err := decryptBackup(*in, *out, pw); err != nil {
+		fmt.Fprintln(os.Stderr, "decrypt-backup:", err)
+		return 1
+	}
+	return 0
+}
+
+func decryptBackup(in, out, password string) error {
+	src, err := os.Open(in)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	plain, err := backupcrypt.NewReader(src, password)
+	if err != nil {
+		return err
+	}
+	dst, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(dst, plain); err != nil {
+		dst.Close()
+		os.Remove(out)
+		return err
+	}
+	return dst.Close()
 }

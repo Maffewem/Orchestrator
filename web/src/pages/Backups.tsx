@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { Archive, Download, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Download, Lock, RotateCcw, Trash2 } from "lucide-react";
 import { api, type Backup } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, Empty, ErrorNote, Loading, PageHeader, Table, Td } from "../components/ui";
@@ -38,7 +38,7 @@ export default function BackupsPage() {
     <>
       <PageHeader
         title="Backups"
-        description="Each backup holds a container's configuration and the data in its volumes and bind mounts. Start one from the Workers page. Restoring writes the data back into the running container on its original device."
+        description="Each backup holds a container's configuration and the data in its volumes and bind mounts. Start one from the Workers page. Restoring writes the data back into the running container on its original device. Set a backup password in Settings to encrypt new backups."
       />
       {error && <ErrorNote>{error}</ErrorNote>}
       {msg && (msg.ok ? <p className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
@@ -54,7 +54,10 @@ export default function BackupsPage() {
             {data.map((b) => (
               <tr key={b.id} className="hover:bg-neutral-50">
                 <Td>
-                  <span className="font-medium">{b.container_name}</span>
+                  <span className="flex items-center gap-1.5 font-medium">
+                    {b.container_name}
+                    {b.encrypted && <Lock className="size-3 text-neutral-500" aria-label="Password-protected" />}
+                  </span>
                   <span className="block font-mono text-xs text-neutral-500">{b.image}</span>
                 </Td>
                 <Td>

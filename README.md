@@ -50,8 +50,14 @@ agent install on each new device.
   staged on the device. Download them from the Backups page, or restore one: the data is
   written back into the container of the same name on the original device, which is stopped
   while files are copied and then started again. Files are copied live, so databases may want
-  to be stopped first. Archives are stored unencrypted in `-backups` (default: beside the
-  database), so protect that directory like the database itself.
+  to be stopped first. Archives are stored in `-backups` (default: beside the
+  database). They are unencrypted unless you set a **backup password** under Settings: then
+  new backups are encrypted with AES-256-GCM as they arrive (files end in `.tar.gz.enc`), and
+  the dashboard decrypts them for download and restore. The password is kept on the server so
+  scheduled backups work, so it protects the files on disk and copies of them, not a
+  compromised server. Old backups keep the password they were made with, and a lost password
+  can't be recovered. To open an encrypted copy elsewhere:
+  `ORCH_BACKUP_PASSWORD=... orchestrator-server decrypt-backup -in x.tar.gz.enc -out x.tar.gz`.
 
 - **Backups from a worker's page** have a schedule (daily or weekly, with a number of
   backups to keep) under the worker's Backups tab, as well as "Back up now". Agents that are
@@ -244,6 +250,7 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `POST /api/devices/{id}/containers/{cid}/backup` | back up a container |
 | `GET /api/backups`, `GET /api/backups/{id}/download`, `DELETE /api/backups/{id}` | backups |
 | `POST /api/backups/{id}/restore` | restore a backup into its container |
+| `PUT /api/settings/backup-password` | set or remove the backup password |
 | `GET /api/system/update`, `POST /api/system/update/check`, `POST /api/system/update/apply` | update status, check, update the server |
 | `PUT /api/system/update/schedule`, `POST /api/system/update/agents` | update schedule, update agents |
 | `GET/PUT /api/devices/{id}/workers/{name}/backup-policy` | automatic backups for a worker |

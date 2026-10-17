@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Github, Globe, KeyRound } from "lucide-react";
+import { Archive, Github, Globe, KeyRound } from "lucide-react";
 import { api } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
@@ -14,6 +14,8 @@ export default function SettingsPage() {
   const [login, setLogin] = useState<string | null>(null);
   const [base, setBase] = useState<string | null>(null);
   const [baseMsg, setBaseMsg] = useState<string | null>(null);
+  const [bkPw, setBkPw] = useState("");
+  const [bkMsg, setBkMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const s = settings.data;
   if (!s) return <Loading />;
@@ -31,6 +33,18 @@ export default function SettingsPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveBackupPassword = async (value: string) => {
+    setBkMsg(null);
+    try {
+      await api.setBackupPassword(value);
+      setBkPw("");
+      setBkMsg({ ok: true, text: value ? "Saved. New backups are encrypted with this password." : "Removed. New backups are not encrypted." });
+      settings.reload();
+    } catch (e) {
+      setBkMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -68,6 +82,48 @@ export default function SettingsPage() {
               </Button>
             </div>
             {baseMsg && <p className="mt-2 text-sm text-neutral-600">{baseMsg}</p>}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <Archive className="size-4" /> Backup password
+              </span>
+            }
+            subtitle="Optional. With a password set, new backups are encrypted (AES-256) before they are written to disk."
+            action={s.backup_password_set ? <Badge tone="ok">Encrypting</Badge> : <Badge>Off</Badge>}
+          />
+          <div className="space-y-3 p-5">
+            <div className="flex gap-2">
+              <input
+                className={inputClass}
+                type="password"
+                autoComplete="new-password"
+                placeholder={s.backup_password_set ? "Enter a new password to replace the current one" : "At least 8 characters"}
+                value={bkPw}
+                onChange={(e) => setBkPw(e.target.value)}
+              />
+              <Button variant="primary" disabled={bkPw.length === 0} onClick={() => saveBackupPassword(bkPw)}>
+                {s.backup_password_set ? "Change" : "Set"}
+              </Button>
+              {s.backup_password_set && (
+                <Button
+                  variant="danger"
+                  onClick={() => window.confirm("Stop encrypting new backups? Backups already made stay encrypted and need this password to restore.") && saveBackupPassword("")}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            {bkMsg && (bkMsg.ok ? <p className="text-sm text-neutral-600">{bkMsg.text}</p> : <ErrorNote>{bkMsg.text}</ErrorNote>)}
+            <ul className="list-disc space-y-1 pl-5 text-sm text-neutral-500">
+              <li>The password is kept on this server so scheduled backups can run and the dashboard can restore and download them. What it protects is the backup files on disk and any copy of them taken elsewhere.</li>
+              <li>Changing it does not re-encrypt old backups: restoring one needs the password it was made with, so keep the old password until those backups are gone. There is no way to recover a lost password.</li>
+              <li>
+                To open an encrypted copy without this server: <code>ORCH_BACKUP_PASSWORD=… orchestrator-server decrypt-backup -in x.tar.gz.enc -out x.tar.gz</code>
+              </li>
+            </ul>
           </div>
         </Card>
         <Card>

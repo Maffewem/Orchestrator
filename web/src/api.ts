@@ -270,6 +270,7 @@ export interface DomainsView {
 
 export interface Settings {
   base_domain: string;
+  backup_password_set: boolean;
   join_token: string;
   heartbeat_interval_seconds: number;
   version: string;
@@ -381,13 +382,22 @@ export interface Backup {
   status: "pending" | "complete" | "failed";
   size: number;
   error?: string;
+  encrypted: boolean;
   created_at: string;
 }
 
 /** Downloads a backup archive through an authenticated request and saves it. */
 async function downloadBackup(b: Backup) {
   const res = await fetch(`/api/backups/${b.id}/download`, { headers: { Authorization: `Bearer ${getToken()}` } });
-  if (!res.ok) throw new ApiError(res.status, "Could not download the backup");
+  if (!res.ok) {
+    let msg = "Could not download the backup";
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, msg);
+  }
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
   a.href = url;
@@ -508,6 +518,7 @@ export const api = {
   addDomain: (id: string, d: { hostname: string; type: "domain" | "route"; path?: string }) =>
     request<DomainsView>("POST", `/api/projects/${id}/domains`, d),
   deleteDomain: (id: string, did: string) => request<void>("DELETE", `/api/projects/${id}/domains/${did}`),
+  setBackupPassword: (password: string) => request<{ backup_password_set: boolean }>("PUT", "/api/settings/backup-password", { password }),
   setBaseDomain: (base_domain: string) => request<{ base_domain: string }>("PUT", "/api/settings/domain", { base_domain }),
   githubRepos: () => request<GitHubRepo[]>("GET", "/api/github/repos"),
 };

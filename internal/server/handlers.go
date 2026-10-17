@@ -469,6 +469,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"heartbeat_interval_seconds": int(s.cfg.HeartbeatInterval / time.Second),
 		"version":                    s.cfg.Version,
 		"base_domain":                s.baseDomain(r.Context()),
+		"backup_password_set":        s.backupPassword(r.Context()) != "",
 		"github": map[string]any{
 			"connected":      s.githubToken(r.Context()) != "",
 			"webhook_path":   "/api/github/webhook",

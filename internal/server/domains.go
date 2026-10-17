@@ -20,6 +20,7 @@ const (
 	settingBaseDomain = "base_domain"
 	settingProxyUsed  = "proxy_used:"  // + device ID
 	settingURLPrefs   = "domain_urls:" // + project ID
+	settingProtect    = "protect:"     // + project ID: "1" when visitors must log in
 )
 
 // lookupHost resolves a hostname; tests replace it.
@@ -67,6 +68,11 @@ func (s *Server) urlPrefs(ctx context.Context, projectID string) urlPrefs {
 	return p
 }
 
+func (s *Server) projectProtected(ctx context.Context, projectID string) bool {
+	v, _ := s.store.GetSetting(ctx, settingProtect+projectID)
+	return v == "1"
+}
+
 func (s *Server) baseDomain(ctx context.Context) string {
 	v, _ := s.store.GetSetting(ctx, settingBaseDomain)
 	return v
@@ -103,7 +109,8 @@ type domainsView struct {
 	Preview    *urlRow     `json:"preview"`
 	Domains    []domainRow `json:"domains"`
 	Addresses  []string    `json:"addresses"`
-	Proxy      string      `json:"proxy"` // ok | agent_too_old | device_missing
+	Proxy      string      `json:"proxy"` // ok | agent_too_old
+	Protected  bool        `json:"protected"`
 }
 
 // ipv4s returns the IPv4 addresses a device reported.
@@ -150,6 +157,7 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 	default:
 		v.Proxy = "ok"
 	}
+	v.Protected = s.projectProtected(ctx, p.ID)
 	prefs := s.urlPrefs(ctx, p.ID)
 	if base != "" {
 		host := slug(p.Name) + "." + base
@@ -298,11 +306,11 @@ func upstreamPort(p *store.Project) string {
 	return ""
 }
 
-type site struct{ path, upstream string }
+type site struct{ path, upstream, project string }
 
 // buildCaddyfile renders the proxy configuration for one device. It returns the number of
 // hostnames served.
-func buildCaddyfile(base string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs) (string, int) {
+func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool) (string, int) {
 	sites := map[string][]site{}
 	plain := map[string]bool{} // hosts served over plain HTTP (wildcards cannot get certificates without DNS access)
 	for _, p := range projects {
@@ -315,16 +323,16 @@ func buildCaddyfile(base string, projects []*store.Project, doms map[string][]*s
 			pf := prefs[p.ID]
 			if pf.Production {
 				h := slug(p.Name) + "." + base
-				sites[h] = append(sites[h], site{"", up})
+				sites[h] = append(sites[h], site{"", up, p.ID})
 			}
 			if pf.Preview {
 				h := "*-" + slug(p.Name) + "." + base
-				sites[h] = append(sites[h], site{"", up})
+				sites[h] = append(sites[h], site{"", up, p.ID})
 				plain[h] = true
 			}
 		}
 		for _, d := range doms[p.ID] {
-			sites[d.Hostname] = append(sites[d.Hostname], site{d.Path, up})
+			sites[d.Hostname] = append(sites[d.Hostname], site{d.Path, up, p.ID})
 		}
 	}
 	hosts := make([]string, 0, len(sites))
@@ -343,11 +351,20 @@ func buildCaddyfile(base string, projects []*store.Project, doms map[string][]*s
 		entries := sites[h]
 		sort.SliceStable(entries, func(i, j int) bool { return len(entries[i].path) > len(entries[j].path) })
 		for _, e := range entries {
-			if e.path == "" {
-				fmt.Fprintf(&b, "\thandle {\n\t\treverse_proxy %s\n\t}\n", e.upstream)
-			} else {
-				fmt.Fprintf(&b, "\thandle %s {\n\t\treverse_proxy %s\n\t}\n", e.path, e.upstream)
+			head := "handle"
+			if e.path != "" {
+				head = "handle " + e.path
 			}
+			fmt.Fprintf(&b, "\t%s {\n", head)
+			if protected[e.project] {
+				if serverURL == "" {
+					// Fail closed: without a way to ask the control plane, nobody gets in.
+					b.WriteString("\t\trespond \"Access control is unavailable: update the agent on this device.\" 503\n\t}\n")
+					continue
+				}
+				fmt.Fprintf(&b, "\t\tforward_auth %s {\n\t\t\turi /api/gate/verify?project=%s\n\t\t\tcopy_headers X-Orchestrator-User\n\t\t}\n", serverURL, e.project)
+			}
+			fmt.Fprintf(&b, "\t\treverse_proxy %s\n\t}\n", e.upstream)
 		}
 		b.WriteString("}\n")
 	}
@@ -368,6 +385,7 @@ func (s *Server) syncProxy(ctx context.Context, deviceID string) {
 	var projects []*store.Project
 	doms := map[string][]*store.Domain{}
 	prefs := map[string]urlPrefs{}
+	protected := map[string]bool{}
 	for _, p := range all {
 		if p.DeviceID != deviceID {
 			continue
@@ -375,8 +393,9 @@ func (s *Server) syncProxy(ctx context.Context, deviceID string) {
 		projects = append(projects, p)
 		doms[p.ID], _ = s.store.ListDomains(ctx, p.ID)
 		prefs[p.ID] = s.urlPrefs(ctx, p.ID)
+		protected[p.ID] = s.projectProtected(ctx, p.ID)
 	}
-	file, n := buildCaddyfile(s.baseDomain(ctx), projects, doms, prefs)
+	file, n := buildCaddyfile(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected)
 	used, _ := s.store.GetSetting(ctx, settingProxyUsed+deviceID)
 	if n == 0 && used == "" {
 		return // nothing to serve and no proxy to empty
@@ -390,4 +409,29 @@ func (s *Server) syncProxy(ctx context.Context, deviceID string) {
 		return
 	}
 	s.store.SetSetting(ctx, settingProxyUsed+deviceID, "1")
+}
+
+// handleSetAccess turns "visitors must sign in with an Orchestrator account" on or off.
+func (s *Server) handleSetAccess(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.lookupProject(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Protected bool `json:"protected"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	v := ""
+	if req.Protected {
+		v = "1"
+	}
+	if err := s.store.SetSetting(r.Context(), settingProtect+p.ID, v); err != nil {
+		s.internal(w, err)
+		return
+	}
+	s.event(r.Context(), p.DeviceID, "info", "domain.access", fmt.Sprintf("%s set login for %s to %v", identityFrom(r).Name, p.Name, req.Protected))
+	s.syncProxy(r.Context(), p.DeviceID)
+	s.writeDomains(w, r, http.StatusOK)
 }

@@ -66,6 +66,18 @@ agent install on each new device.
   Docker) with it, so there is no central proxy. Caddy gets certificates itself, which needs
   ports 80 and 443 reachable from the internet (or use a Cloudflare Tunnel instead).
 
+- **Accounts and roles** (Users page): sign in with a username and password instead of the
+  shared admin token. The first visit asks for the admin token once, to create the first
+  administrator. Roles: *viewer* (read-only), *operator* (deploy, restart, back up, projects,
+  domains) and *admin* (users, settings, updates, deleting). Passwords are stored as salted
+  PBKDF2-SHA256, sessions last 14 days and end when a password or role changes, and repeated
+  wrong passwords lock that user and address out for a minute. The admin token keeps working
+  as a fallback.
+- **Login for a worker** (Domains tab, Access): Caddy on the device asks the control plane
+  (`forward_auth`) to check the visitor's Orchestrator username and password, any role,
+  before the worker loads. If the device's agent doesn't know the control plane address, the
+  site refuses everyone rather than serving unprotected. Needs a recent agent.
+
 - **Updates** (Updates page): check for the latest published build, update the server on
   demand, and set a schedule (daily or weekly, at a time in your time zone, or off). The
   server pulls the new image, then a short-lived helper container from that image swaps the
@@ -217,6 +229,10 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET/PUT /api/devices/{id}/workers/{name}/backup-policy` | automatic backups for a worker |
 | `GET/POST /api/projects/{id}/domains`, `PUT .../domains/urls`, `DELETE .../domains/{did}` | domains and the worker URLs |
 | `PUT /api/settings/domain` | base domain |
+| `GET /api/auth/status`, `POST /api/auth/login`, `POST /api/auth/setup` | sign in, first-run setup (no token needed) |
+| `GET /api/auth/me`, `POST /api/auth/logout`, `POST /api/auth/password` | the signed-in user |
+| `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | accounts (admin) |
+| `PUT /api/projects/{id}/domains/access` | require login for a worker |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
 
@@ -226,6 +242,8 @@ with HMAC-SHA256.
 
 ## Security notes
 
+- Dashboard accounts have roles (viewer, operator, admin); the API enforces them per route.
+  The admin token acts as an administrator and works as a break-glass login.
 - The admin token, agent tokens and the GitHub token are random secrets. Agent and admin
   tokens are stored only as SHA-256 hashes.
 - The GitHub token is never stored with deployments. It is added to the clone URL only

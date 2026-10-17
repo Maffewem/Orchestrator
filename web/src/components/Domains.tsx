@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { Globe, Plus, Search, Trash2 } from "lucide-react";
+import { Globe, Lock, Plus, Search, Trash2 } from "lucide-react";
 import { api, type DomainRow, type DomainsView } from "../api";
 import { Badge, Button, Card, CardHeader, CopyButton, Empty, ErrorNote, Field, Loading, Modal, Table, Td, inputClass } from "./ui";
 import { cx, usePoll } from "../lib";
+import { useCan } from "./auth";
 
 function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
@@ -44,7 +45,7 @@ function Records({ rows }: { rows: { type: string; name: string; value: string }
   );
 }
 
-function UrlLine({ label, host, enabled, row, onToggle, disabled }: { label: string; host: string; enabled: boolean; row?: DomainRow["status"]; onToggle: (v: boolean) => void; disabled?: boolean }) {
+function UrlLine({ label, host, enabled, row, onToggle, disabled, locked }: { label: string; host: string; enabled: boolean; row?: DomainRow["status"]; onToggle: (v: boolean) => void; disabled?: boolean; locked?: boolean }) {
   const dot = host.lastIndexOf(".", host.lastIndexOf(".") - 1);
   return (
     <div className="flex items-start justify-between gap-4 px-5 py-4">
@@ -59,7 +60,7 @@ function UrlLine({ label, host, enabled, row, onToggle, disabled }: { label: str
         </div>
         <p className="mt-2 flex items-center gap-2 text-sm text-neutral-500">
           <Globe className="size-3.5" />
-          {enabled ? "Anyone who can reach this device can visit." : "Switched off. This URL does not serve the worker."}
+          {!enabled ? "Switched off. This URL does not serve the worker." : locked ? "Visitors must sign in with an Orchestrator account." : "Anyone who can reach this device can visit."}
         </p>
       </div>
       <Toggle on={enabled} onChange={onToggle} label={`${label} URL`} disabled={disabled} />
@@ -68,6 +69,7 @@ function UrlLine({ label, host, enabled, row, onToggle, disabled }: { label: str
 }
 
 export default function DomainsPanel({ projectId }: { projectId: string }) {
+  const can = useCan("admin");
   const q = usePoll(() => api.projectDomains(projectId), 15000, [projectId]);
   const [view, setView] = useState<DomainsView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,14 +105,14 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
         <CardHeader title="Worker URL" />
         {prod && prev ? (
           <div className="divide-y divide-neutral-100">
-            <UrlLine label="Production" host={prod.hostname} enabled={prod.enabled} row={prod.status} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: on, preview: prev.enabled }))} />
+            <UrlLine locked={v.protected} label="Production" host={prod.hostname} enabled={prod.enabled} row={prod.status} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: on, preview: prev.enabled }))} />
             {prod.enabled && prod.status !== "active" && prod.records && (
               <div className="space-y-2 bg-neutral-50/60 px-5 py-4">
                 <p className="text-sm text-neutral-600">{prod.detail}</p>
                 <Records rows={prod.records} />
               </div>
             )}
-            <UrlLine label="Preview" host={prev.hostname} enabled={prev.enabled} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: on }))} />
+            <UrlLine locked={v.protected} label="Preview" host={prev.hostname} enabled={prev.enabled} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: on }))} />
             {prev.enabled && <p className="px-5 pb-4 text-xs text-neutral-500">Needs a wildcard DNS record, *.{prod.hostname.split(".").slice(1).join(".")}, pointing at the same address. Preview URLs are served over plain HTTP.</p>}
           </div>
         ) : (
@@ -118,6 +120,24 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
             Set a base domain in <Link to="/settings" className="text-primary hover:underline">Settings</Link> and every worker gets <code>name.&lt;your-domain&gt;</code> automatically.
           </div>
         )}
+      </Card>
+
+      <Card>
+        <CardHeader title="Access" />
+        <div className="flex items-start justify-between gap-4 px-5 py-4">
+          <div className="min-w-0 text-sm">
+            <p className="flex items-center gap-2 font-medium">
+              <Lock className="size-4 text-neutral-500" /> Require login to visit
+            </p>
+            <p className="mt-1 text-neutral-500">
+              {v.protected
+                ? "Visitors are asked for the username and password of an Orchestrator account (any role) before the worker loads."
+                : "Anyone who can reach this worker can open it. Turn this on to ask for an Orchestrator account first."}
+            </p>
+            {v.protected && !v.production && v.domains.length === 0 && <p className="mt-1 text-neutral-500">Nothing is served yet, so there is nothing to protect.</p>}
+          </div>
+          <Toggle on={v.protected} onChange={(on) => act(() => api.setAccess(projectId, on))} label="Require login" disabled={!can} />
+        </div>
       </Card>
 
       <section>

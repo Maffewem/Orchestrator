@@ -45,6 +45,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 		AgentVersion: Version,
 		InContainer:  InContainer(),
 		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy},
+		Server:       strings.TrimRight(a.cfg.Server, "/"),
 	}
 	if a.cfg.HostRoot != "" {
 		h.Hostname = readTrim(a.hostPath("/etc/hostname"))

@@ -1,7 +1,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router";
-import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, LogOut, Menu, Rocket, Server, Settings, X } from "lucide-react";
+import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, Rocket, Server, Settings, Users, X } from "lucide-react";
+import { api } from "../api";
 import { cx } from "../lib";
+import { useMe } from "./auth";
+import { Button, ErrorNote, Field, Modal, inputClass } from "./ui";
 
 export type Crumb = { label: string; to?: string };
 
@@ -23,9 +26,10 @@ const nav = [
   { to: "/devices", label: "Devices", icon: Server },
   { to: "/containers", label: "Workers", icon: Boxes },
   { to: "/backups", label: "Backups", icon: Archive },
-  { to: "/updates", label: "Updates", icon: RefreshCw },
+  { to: "/updates", label: "Updates", icon: RefreshCw, admin: true },
   { to: "/activity", label: "Activity", icon: Activity },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/settings", label: "Settings", icon: Settings, admin: true },
+  { to: "/users", label: "Users", icon: Users, admin: true },
 ];
 
 export function Logo() {
@@ -46,6 +50,8 @@ export function Logo() {
 export default function Layout({ onLogout }: { onLogout: () => void }) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [open, setOpen] = useState(false);
+  const [pw, setPw] = useState(false);
+  const me = useMe();
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
 
@@ -56,7 +62,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           <Logo />
         </Link>
       </div>
-      {nav.map(({ to, label, icon: Icon, end }) => (
+      {nav.filter((n) => !n.admin || me?.role === "admin").map(({ to, label, icon: Icon, end }) => (
         <NavLink
           key={to}
           to={to}
@@ -73,6 +79,21 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         </NavLink>
       ))}
       <div className="mt-auto">
+        {me && (
+          <div className="mb-1 px-2.5 py-2 text-sm">
+            <p className="truncate font-medium">{me.username}</p>
+            <p className="text-xs capitalize text-neutral-500">{me.role}</p>
+          </div>
+        )}
+        {me && !me.token_login && (
+          <button
+            onClick={() => setPw(true)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <KeyRound className="size-4" />
+            Change password
+          </button>
+        )}
         <button
           onClick={onLogout}
           className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
@@ -107,6 +128,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           </main>
         </div>
       </div>
+      {pw && <ChangePassword onClose={() => setPw(false)} />}
     </CrumbContext.Provider>
   );
 }
@@ -139,5 +161,43 @@ export function Section({ title, children, action }: { title: string; children: 
       </div>
       {children}
     </section>
+  );
+}
+
+function ChangePassword({ onClose }: { onClose: () => void }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal title="Change password" onClose={onClose}>
+      <form
+        className="space-y-4"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          setError(null);
+          try {
+            await api.changePassword(current, next);
+            onClose();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+            setBusy(false);
+          }
+        }}
+      >
+        <Field label="Current password">
+          <input className={inputClass} type="password" autoFocus autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        </Field>
+        <Field label="New password" hint="At least 10 characters. Other devices are signed out.">
+          <input className={inputClass} type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+        </Field>
+        {error && <ErrorNote>{error}</ErrorNote>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" loading={busy} disabled={!current || !next}>Change password</Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

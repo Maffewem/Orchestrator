@@ -21,6 +21,8 @@ type HostInfo struct {
 	// Capabilities lists the commands this agent understands. Agents from before a feature
 	// shipped don't send it, which is how the control plane knows not to ask them.
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Server is the control plane URL the agent talks to; the device proxy uses it to ask whether a visitor may enter.
+	Server string `json:"server,omitempty"`
 }
 
 // Agent capabilities.

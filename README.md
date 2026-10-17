@@ -49,6 +49,18 @@ picks the right one automatically. Devices need Docker. Building from GitHub als
 
 ## Quick start
 
+Pre-built multi-arch images (amd64 and arm64) are published to GitHub Container Registry by
+CI on every push to `main`, so on a server or a Pi 4/5 you can run the control plane with one
+command:
+
+```sh
+docker run -d --name orchestrator --restart unless-stopped -p 8080:8080 \
+  -v orchestrator-data:/data ghcr.io/maffewem/orchestrator:latest
+docker logs orchestrator   # copy the admin token printed on first start
+```
+
+Or build it yourself from a clone:
+
 ```sh
 docker compose up -d
 docker compose logs orchestrator   # copy the admin token printed on first start

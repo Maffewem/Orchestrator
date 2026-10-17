@@ -24,11 +24,15 @@ RUN set -e; for t in amd64:amd64: arm64:arm64: armv7:arm:7 armv6:arm:6; do \
         -o /out/downloads/orchestrator-agent-linux-$name ./cmd/orchestrator-agent; \
     done
 
+RUN mkdir -p /out/data
+
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates && adduser -D -H -u 10001 orchestrator && mkdir /data && chown orchestrator /data
+# CA certificates come from the build stage so this image builds without network access.
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/orchestrator-server /usr/local/bin/
 COPY --from=build /out/downloads /downloads
-USER orchestrator
+COPY --from=build --chown=10001:10001 /out/data /data
+USER 10001
 ENV ORCH_DB=/data/orchestrator.db ORCH_DOWNLOADS=/downloads ORCH_ADDR=:8080
 VOLUME /data
 EXPOSE 8080

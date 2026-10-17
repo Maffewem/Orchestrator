@@ -96,7 +96,9 @@ export default function ProjectPage() {
 
 function ProjectOverview({ p, device, url }: { p: Project; device: Device | null; url: string | null }) {
   const deps = usePoll(() => api.projectDeployments(p.id), 4000, [p.id]);
-  const d = p.latest_deployment;
+  // Production is the newest deployment that went live, as on Cloudflare Pages.
+  const d = deps.data?.find((x) => x.status === "succeeded") ?? p.latest_deployment;
+  const latest = p.latest_deployment;
   const container = device?.containers.find((c) => c.name === p.name);
   return (
     <div className="space-y-6">
@@ -108,7 +110,7 @@ function ProjectOverview({ p, device, url }: { p: Project; device: Device | null
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <CardHeader title="Production" subtitle="The most recent deployment of this project." />
+          <CardHeader title="Production" subtitle="The deployment currently live on the device." />
           {d ? (
             <Link to={`/deployments/${d.id}`} className="block p-5 hover:bg-neutral-50">
               <div className="flex items-center gap-3">
@@ -124,6 +126,11 @@ function ProjectOverview({ p, device, url }: { p: Project; device: Device | null
                 </div>
               </div>
               {d.error && <p className="mt-3 text-sm text-bad">{d.error}</p>}
+              {latest && latest.id !== d.id && latest.status === "failed" && (
+                <p className="mt-3 text-sm text-neutral-500">
+                  A newer deployment failed and was rolled back: <span className="text-bad">{latest.error}</span>
+                </p>
+              )}
             </Link>
           ) : (
             <Empty icon={<Rocket className="size-8" />} title="Not deployed yet">

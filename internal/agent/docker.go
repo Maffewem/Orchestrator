@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +26,7 @@ import (
 type Docker struct {
 	client *http.Client
 	base   string
+	host   string
 }
 
 // NewDocker connects to a Docker host such as unix:///var/run/docker.sock or tcp://host:2375.
@@ -41,9 +44,9 @@ func NewDocker(host string) (*Docker, error) {
 				return d.DialContext(ctx, "unix", path)
 			},
 		}
-		return &Docker{client: &http.Client{Transport: tr}, base: "http://docker"}, nil
+		return &Docker{client: &http.Client{Transport: tr}, base: "http://docker", host: host}, nil
 	case "tcp", "http":
-		return &Docker{client: &http.Client{}, base: "http://" + u.Host}, nil
+		return &Docker{client: &http.Client{}, base: "http://" + u.Host, host: host}, nil
 	default:
 		return nil, fmt.Errorf("unsupported docker host scheme %q", u.Scheme)
 	}
@@ -348,8 +351,51 @@ func (d *Docker) Pull(ctx context.Context, ref string, logf func(string)) error 
 	})
 }
 
-// Build builds an image from a remote git context. The Docker engine does the clone.
+// Build builds an image from a remote git context; the Docker engine does the clone.
+// It prefers the docker CLI, which uses BuildKit (needed by most modern Dockerfiles),
+// and falls back to the engine's classic builder API when no CLI is installed.
 func (d *Docker) Build(ctx context.Context, remote, dockerfile, tag string, logf func(string)) error {
+	if cli, err := exec.LookPath("docker"); err == nil {
+		return d.buildCLI(ctx, cli, remote, dockerfile, tag, logf)
+	}
+	logf("docker CLI not found; using the classic builder (BuildKit-only Dockerfile features will fail)")
+	return d.buildAPI(ctx, remote, dockerfile, tag, logf)
+}
+
+func (d *Docker) buildCLI(ctx context.Context, cli, remote, dockerfile, tag string, logf func(string)) error {
+	args := []string{"build", "--progress=plain", "-t", tag}
+	if dockerfile != "" {
+		args = append(args, "-f", dockerfile)
+	}
+	cmd := exec.CommandContext(ctx, cli, append(args, remote)...)
+	cmd.Env = append(os.Environ(), "DOCKER_HOST="+d.host, "DOCKER_BUILDKIT=1")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stderr = cmd.Stdout // BuildKit progress goes to stderr
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var last string
+	sc := bufio.NewScanner(out)
+	sc.Buffer(make([]byte, 64<<10), 1<<20)
+	for sc.Scan() {
+		if line := strings.TrimRight(sc.Text(), "\r"); strings.TrimSpace(line) != "" {
+			logf(line)
+			last = line
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if last != "" {
+			return fmt.Errorf("%s", strings.TrimPrefix(last, "ERROR: "))
+		}
+		return err
+	}
+	return nil
+}
+
+func (d *Docker) buildAPI(ctx context.Context, remote, dockerfile, tag string, logf func(string)) error {
 	q := url.Values{"remote": {remote}, "t": {tag}, "rm": {"1"}, "forcerm": {"1"}}
 	if dockerfile != "" {
 		q.Set("dockerfile", dockerfile)

@@ -140,7 +140,7 @@ export interface Deployment {
   id: string;
   project_id: string;
   device_id: string;
-  trigger: "manual" | "push" | "retry";
+  trigger: "manual" | "push" | "retry" | "poll";
   commit: Commit | null;
   spec: DeploySpec;
   status: DeploymentStatus;
@@ -259,7 +259,37 @@ export async function request<T>(method: string, path: string, body?: unknown, t
   return res.json() as Promise<T>;
 }
 
+export interface Backup {
+  id: string;
+  device_id: string;
+  device_name: string;
+  container_name: string;
+  image: string;
+  status: "pending" | "complete" | "failed";
+  size: number;
+  error?: string;
+  created_at: string;
+}
+
+/** Downloads a backup archive through an authenticated request and saves it. */
+async function downloadBackup(b: Backup) {
+  const res = await fetch(`/api/backups/${b.id}/download`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (!res.ok) throw new ApiError(res.status, "Could not download the backup");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${b.container_name}-${b.created_at.slice(0, 19).replace(/[-:T]/g, "")}.tar.gz`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
+  backups: () => request<Backup[]>("GET", "/api/backups"),
+  createBackup: (deviceId: string, containerId: string) =>
+    request<Backup>("POST", `/api/devices/${deviceId}/containers/${containerId}/backup`),
+  restoreBackup: (id: string) => request<Command>("POST", `/api/backups/${id}/restore`),
+  deleteBackup: (id: string) => request<void>("DELETE", `/api/backups/${id}`),
+  downloadBackup,
   checkToken: (token: string) => request<void>("GET", "/api/auth/check", undefined, token),
   overview: () => request<Overview>("GET", "/api/overview"),
   devices: () => request<Device[]>("GET", "/api/devices"),

@@ -221,6 +221,15 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		dctx, dcancel := context.WithTimeout(ctx, 25*time.Minute)
 		err = a.deploy(dctx, c.Target, *c.Deploy)
 		dcancel()
+	case api.ActionBackup, api.ActionRestore:
+		// Large volumes over a slow link can take a while.
+		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)
+		if c.Action == api.ActionBackup {
+			err = a.backup(bctx, c.Target, c.Args["backup_id"])
+		} else {
+			err = a.restoreBackup(bctx, c.Target, c.Args["backup_id"])
+		}
+		bcancel()
 	default:
 		err = fmt.Errorf("unsupported action %q", c.Action)
 	}

@@ -40,14 +40,35 @@ agent install on each new device.
   architecture and no registry is needed. Pushes to the production branch deploy
   automatically through the webhook.
 
+- **Auto-deploy** happens two ways. A GitHub push webhook deploys immediately. As a
+  fallback for servers GitHub can't reach, the control plane also polls each auto-deploy
+  project's branch every 60 seconds (`-poll`, `0` disables) and deploys when the head moves.
+- **Environment variables** are edited as a table (secret-looking values are masked), as one
+  raw box, or imported from a `.env` file, which merges into what is already there.
+- **Backups** (Workers page, archive button) stream a container's configuration and the data
+  in its writable volumes and bind mounts to the control plane as one `.tar.gz`, with nothing
+  staged on the device. Download them from the Backups page, or restore one: the data is
+  written back into the container of the same name on the original device, which is stopped
+  while files are copied and then started again. Files are copied live, so databases may want
+  to be stopped first. Archives are stored unencrypted in `-backups` (default: beside the
+  database), so protect that directory like the database itself.
+
 ### Supported devices
 
 The agent is built for `linux/amd64`, `linux/arm64` (Pi 3/4/5 on 64-bit OS),
 `linux/armv7` (32-bit Raspberry Pi OS) and `linux/armv6` (Pi Zero / Pi 1). The installer
-picks the right one automatically. Devices need Docker. Building from GitHub also needs
-`git` on the device, because the Docker engine uses it to clone.
+picks the right one automatically. On Debian, Raspberry Pi OS and Ubuntu the installer sets
+up everything from scratch: if Docker or `git` are missing it installs them (Docker through
+get.docker.com), enables the Docker service, then installs the agent.
 
 ## Quick start
+
+On a fresh Debian, Raspberry Pi OS or Ubuntu machine, one command installs Docker if needed
+and starts the control plane:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Maffewem/Orchestrator/main/scripts/install-server.sh | sudo sh
+```
 
 Pre-built multi-arch images (amd64 and arm64) are published to GitHub Container Registry by
 CI on every push to `main`, so on a server or a Pi 4/5 you can run the control plane with one
@@ -81,6 +102,44 @@ Open http://localhost:8080 and sign in with that token. Then:
 make all                         # dashboard, server, and agents for every architecture
 ./bin/orchestrator-server -downloads bin/downloads
 ```
+
+Run like this, the server is tied to your terminal and stops when the SSH session ends. To
+keep it running, make it a service:
+
+```sh
+sudo tee /etc/systemd/system/orchestrator.service >/dev/null <<'UNIT'
+[Unit]
+Description=Orchestrator control plane
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/orchestrator
+ExecStart=/opt/orchestrator/orchestrator-server -db /opt/orchestrator/orchestrator.db -downloads /opt/orchestrator/downloads
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl enable --now orchestrator
+```
+
+## When the dashboard stops loading
+
+First check whether the server is still running. It answers `curl http://<server>:8080/api/health`
+with `{"status":"ok",...}`.
+
+| Server runs as | What happened | Check |
+| --- | --- | --- |
+| Docker (`install-server.sh`, `docker run`, compose) | The container stopped or was removed | `docker ps -a`, then `docker logs --tail 100 orchestrator` |
+| `docker compose up` without `-d` | Compose stops when the terminal closes | Use `docker compose up -d` |
+| A binary started by hand | It was killed with your SSH session | Run it as a service (above) |
+| systemd service | It crashed or isn't enabled | `systemctl status orchestrator`, `journalctl -u orchestrator -n 100` |
+
+Docker restarts the container by itself (`--restart unless-stopped`) after a crash or reboot,
+as long as the Docker service is enabled (`systemctl is-enabled docker`). Device agents run as
+the `orchestrator-agent` service, so on a device that looks offline use
+`systemctl status orchestrator-agent` and `journalctl -u orchestrator-agent -n 100`. Agents
+reconnect on their own once the server is back.
 
 ## Development
 
@@ -116,11 +175,14 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}` | projects |
 | `POST /api/projects/{id}/deployments` | deploy (GitHub projects use the branch head) |
 | `GET /api/deployments/{id}`, `POST /api/deployments/{id}/retry` | deployment with steps and logs |
+| `POST /api/devices/{id}/containers/{cid}/backup` | back up a container |
+| `GET /api/backups`, `GET /api/backups/{id}/download`, `DELETE /api/backups/{id}` | backups |
+| `POST /api/backups/{id}/restore` | restore a backup into its container |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
 
 The agent uses `POST /api/agent/register`, `/heartbeat`, `/commands/{id}/result` and
-`/deployments/{id}/steps/{n}`. GitHub calls `POST /api/github/webhook`, which is verified
+`/deployments/{id}/steps/{n}`, plus `/backups/{id}` to upload or fetch a backup archive. GitHub calls `POST /api/github/webhook`, which is verified
 with HMAC-SHA256.
 
 ## Security notes

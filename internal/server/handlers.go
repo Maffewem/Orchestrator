@@ -165,6 +165,17 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 	case api.ActionLogs:
 	case api.ActionDeploy:
 		s.finishDeployment(r.Context(), d, c, res)
+	case api.ActionBackup:
+		if !res.OK {
+			s.backupCommandFailed(r, c, res)
+			s.event(r.Context(), d.ID, "error", "backup.failed", fmt.Sprintf("Backup of %s failed: %s", containerName(d, c.Target), res.Error))
+		}
+	case api.ActionRestore:
+		lvl, msg := "info", "restored from backup"
+		if !res.OK {
+			lvl, msg = "error", "restore failed: "+res.Error
+		}
+		s.event(r.Context(), d.ID, lvl, "backup.restore", fmt.Sprintf("%s %s", containerName(d, c.Target), msg))
 	default:
 		verb := strings.TrimPrefix(c.Action, "container.")
 		if res.OK {

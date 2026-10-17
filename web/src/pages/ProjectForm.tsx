@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Github, Package } from "lucide-react";
 import { api, type Project, type ProjectInput, type Source } from "../api";
+import EnvEditor from "../components/EnvEditor";
 import { Button, ErrorNote, Field, inputClass } from "../components/ui";
 import { cx, usePoll } from "../lib";
 
@@ -147,9 +148,6 @@ export default function ProjectForm({
           <Field label="Ports" hint="One per line: host:container, e.g. 8080:80 or 53:53/udp.">
             <textarea className={cx(inputClass, "font-mono")} rows={3} value={ports} onChange={(e) => setPorts(e.target.value)} />
           </Field>
-          <Field label="Environment variables" hint="One KEY=value per line.">
-            <textarea className={cx(inputClass, "font-mono")} rows={3} value={env} onChange={(e) => setEnv(e.target.value)} />
-          </Field>
           <Field label="Restart policy">
             <select className={inputClass} value={restart} onChange={(e) => setRestart(e.target.value)}>
               <option value="unless-stopped">Unless stopped</option>
@@ -159,6 +157,9 @@ export default function ProjectForm({
             </select>
           </Field>
         </div>
+        <Field label="Environment variables" hint="Edit line by line, paste a whole .env, or import a file.">
+          <EnvEditor value={env} onChange={setEnv} />
+        </Field>
       </fieldset>
 
       {error && <ErrorNote>{error}</ErrorNote>}

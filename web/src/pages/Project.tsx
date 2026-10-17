@@ -5,6 +5,7 @@ import { api, type Device, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
+import DomainsPanel from "../components/Domains";
 import ProjectForm from "./ProjectForm";
 import { ago, usePoll } from "../lib";
 
@@ -54,6 +55,7 @@ export default function ProjectPage() {
             { to: base, label: "Overview", end: true },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/metrics`, label: "Metrics" },
+            { to: `${base}/domains`, label: "Domains" },
             { to: `${base}/settings`, label: "Settings" },
           ]}
         />
@@ -87,6 +89,7 @@ export default function ProjectPage() {
       <Routes>
         <Route index element={<ProjectOverview p={p} device={device.data} url={url} />} />
         <Route path="deployments" element={<ProjectDeployments p={p} />} />
+        <Route path="domains" element={<DomainsPanel projectId={p.id} />} />
         <Route path="metrics" element={<ProjectMetrics p={p} />} />
         <Route path="settings" element={<ProjectSettings p={p} onSaved={project.reload} />} />
       </Routes>

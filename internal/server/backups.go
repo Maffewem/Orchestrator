@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,43 @@ func findContainer(d *store.Device, id string) *api.Container {
 	return nil
 }
 
+func hasCap(d *store.Device, c string) bool {
+	for _, have := range d.Host.Capabilities {
+		if have == c {
+			return true
+		}
+	}
+	return false
+}
+
+// errAgentTooOld explains what to do when an agent predates a feature.
+func errAgentTooOld(d *store.Device, feature string) error {
+	how := "Update it from the Updates page, or re-run the install command on that device."
+	if !hasCap(d, api.CapUpdate) {
+		how = "It is too old to update from the dashboard: re-run the install command from Devices > Add device on that device."
+	}
+	return fmt.Errorf("the agent on %s is too old for %s. %s", d.Name, feature, how)
+}
+
+// createBackup records a backup and queues the agent command for it.
+func (s *Server) createBackup(ctx context.Context, d *store.Device, c *api.Container, source string) (*store.Backup, error) {
+	if !hasCap(d, api.CapBackup) {
+		return nil, errAgentTooOld(d, "backups")
+	}
+	if err := os.MkdirAll(s.cfg.BackupDir, 0o700); err != nil {
+		return nil, err
+	}
+	b := &store.Backup{DeviceID: d.ID, DeviceName: d.Name, ContainerName: c.Name, Image: c.Image, Source: source}
+	if err := s.store.CreateBackup(ctx, b); err != nil {
+		return nil, err
+	}
+	if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionBackup, c.ID, map[string]string{"backup_id": b.ID}); err != nil {
+		return nil, err
+	}
+	s.event(ctx, d.ID, "info", "backup.queued", fmt.Sprintf("Backup of %s queued (%s)", c.Name, source))
+	return b, nil
+}
+
 // handleCreateBackup queues a backup of one container: POST /api/devices/{id}/containers/{cid}/backup.
 func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 	d, ok := s.lookupDevice(w, r)
@@ -37,20 +75,15 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "container is not known on this device")
 		return
 	}
-	if err := os.MkdirAll(s.cfg.BackupDir, 0o700); err != nil {
+	b, err := s.createBackup(r.Context(), d, c, "manual")
+	if err != nil {
+		if !hasCap(d, api.CapBackup) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 		s.internal(w, err)
 		return
 	}
-	b := &store.Backup{DeviceID: d.ID, DeviceName: d.Name, ContainerName: c.Name, Image: c.Image}
-	if err := s.store.CreateBackup(r.Context(), b); err != nil {
-		s.internal(w, err)
-		return
-	}
-	if _, err := s.store.CreateCommand(r.Context(), d.ID, api.ActionBackup, c.ID, map[string]string{"backup_id": b.ID}); err != nil {
-		s.internal(w, err)
-		return
-	}
-	s.event(r.Context(), d.ID, "info", "backup.queued", fmt.Sprintf("Backup of %s queued", c.Name))
 	writeJSON(w, http.StatusAccepted, b)
 }
 
@@ -129,6 +162,10 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	if !hasCap(d, api.CapBackup) {
+		writeError(w, http.StatusConflict, errAgentTooOld(d, "restoring backups").Error())
+		return
+	}
 	var target string
 	for _, c := range d.Containers {
 		if c.Name == b.ContainerName {
@@ -200,6 +237,9 @@ func (s *Server) handleUploadBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.event(r.Context(), b.DeviceID, "info", "backup.complete", fmt.Sprintf("Backup of %s finished (%s)", b.ContainerName, humanSize(n)))
+	if b.Source == "scheduled" {
+		s.pruneBackups(r.Context(), b.DeviceID, b.ContainerName)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

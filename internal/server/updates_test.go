@@ -19,7 +19,7 @@ func TestUpdateStatusScheduleAndAgents(t *testing.T) {
 	h.srv.cfg.DockerHost = "unix:///nonexistent.sock"
 	reg := h.register("pi-6")
 	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{
-		Host: api.HostInfo{Hostname: "pi-6", AgentVersion: "v1", Arch: "arm64"},
+		Host: api.HostInfo{Hostname: "pi-6", AgentVersion: "v1", Arch: "arm64", Capabilities: []string{api.CapUpdate}},
 	}, &api.HeartbeatResponse{})
 
 	var st updateStatus
@@ -52,7 +52,7 @@ func TestUpdateStatusScheduleAndAgents(t *testing.T) {
 	}
 	var hb api.HeartbeatResponse
 	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{
-		Host: api.HostInfo{Hostname: "pi-6", AgentVersion: "v1"},
+		Host: api.HostInfo{Hostname: "pi-6", AgentVersion: "v1", Capabilities: []string{api.CapUpdate}},
 	}, &hb)
 	if len(hb.Commands) != 1 || hb.Commands[0].Action != api.ActionAgentUpdate {
 		t.Fatalf("commands = %+v", hb.Commands)
@@ -93,7 +93,7 @@ func TestScheduleTickFiresOncePerSlot(t *testing.T) {
 	h.srv.cfg.DockerHost = "unix:///nonexistent.sock"
 	ctx := context.Background()
 	reg := h.register("pi-8")
-	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{AgentVersion: "v1"}}, &api.HeartbeatResponse{})
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{AgentVersion: "v1", Capabilities: []string{api.CapUpdate}}}, &api.HeartbeatResponse{})
 
 	sch := Schedule{Mode: "daily", Time: "03:00", TZ: "UTC", Agents: true}
 	h.srv.setJSON(ctx, settingUpdateSchedule, sch)
@@ -117,7 +117,7 @@ func TestScheduleTickFiresOncePerSlot(t *testing.T) {
 
 func (h *harness) queuedAgentUpdates(reg api.RegisterResponse) int {
 	var hb api.HeartbeatResponse
-	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{AgentVersion: "v1"}}, &hb)
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{AgentVersion: "v1", Capabilities: []string{api.CapUpdate}}}, &hb)
 	n := 0
 	for _, c := range hb.Commands {
 		if c.Action == api.ActionAgentUpdate {

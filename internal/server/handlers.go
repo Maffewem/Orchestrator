@@ -176,6 +176,12 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.event(r.Context(), d.ID, "error", "agent.update", fmt.Sprintf("Agent update on %s failed: %s", d.Name, res.Error))
 		}
+	case api.ActionProxySync:
+		if res.OK {
+			s.event(r.Context(), d.ID, "info", "proxy.sync", "Domain proxy on "+d.Name+" updated")
+		} else {
+			s.event(r.Context(), d.ID, "error", "proxy.sync", fmt.Sprintf("Domain proxy on %s failed: %s", d.Name, res.Error))
+		}
 	case api.ActionRestore:
 		lvl, msg := "info", "restored from backup"
 		if !res.OK {
@@ -458,6 +464,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"join_token":                 join,
 		"heartbeat_interval_seconds": int(s.cfg.HeartbeatInterval / time.Second),
 		"version":                    s.cfg.Version,
+		"base_domain":                s.baseDomain(r.Context()),
 		"github": map[string]any{
 			"connected":      s.githubToken(r.Context()) != "",
 			"webhook_path":   "/api/github/webhook",

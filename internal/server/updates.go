@@ -147,6 +147,7 @@ type agentUpdateView struct {
 	Online      bool   `json:"online"`
 	InContainer bool   `json:"in_container"`
 	Outdated    bool   `json:"outdated"`
+	CanUpdate   bool   `json:"can_update"` // agent understands agent.update
 }
 
 type updateStatus struct {
@@ -196,7 +197,7 @@ func (s *Server) updateStatus(ctx context.Context) updateStatus {
 			v := s.view(d)
 			st.Agents = append(st.Agents, agentUpdateView{
 				DeviceID: d.ID, Name: d.Name, Version: d.Host.AgentVersion, Arch: d.Host.Arch,
-				Online: v.Status == "online", InContainer: d.Host.InContainer, Outdated: s.agentOutdated(d),
+				Online: v.Status == "online", InContainer: d.Host.InContainer, Outdated: s.agentOutdated(d), CanUpdate: hasCap(d, api.CapUpdate),
 			})
 		}
 	}
@@ -353,7 +354,7 @@ func (s *Server) updateAgents(ctx context.Context, only string, auto bool) int {
 	}
 	n := 0
 	for _, d := range devs {
-		if (only != "" && d.ID != only) || !s.agentOutdated(d) || d.Host.InContainer || s.view(d).Status != "online" {
+		if (only != "" && d.ID != only) || !s.agentOutdated(d) || d.Host.InContainer || !hasCap(d, api.CapUpdate) || s.view(d).Status != "online" {
 			continue
 		}
 		s.up.mu.Lock()

@@ -18,7 +18,17 @@ type HostInfo struct {
 	Docker       *DockerInfo `json:"docker,omitempty"`
 	// InContainer is set when the agent runs as a container, which can't replace its own binary.
 	InContainer bool `json:"in_container,omitempty"`
+	// Capabilities lists the commands this agent understands. Agents from before a feature
+	// shipped don't send it, which is how the control plane knows not to ask them.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
+
+// Agent capabilities.
+const (
+	CapBackup = "backup" // container.backup and container.restore
+	CapUpdate = "update" // agent.update
+	CapProxy  = "proxy"  // proxy.sync
+)
 
 // DockerInfo summarises the container engine on a device.
 type DockerInfo struct {
@@ -100,6 +110,8 @@ const (
 	ActionRestore = "container.restore"
 	// ActionAgentUpdate makes the agent replace its own binary with the control plane's build.
 	ActionAgentUpdate = "agent.update"
+	// ActionProxySync writes Args["caddyfile"] for the per-device Caddy proxy and (re)starts it.
+	ActionProxySync = "proxy.sync"
 )
 
 // AgentUpdateInfo tells an agent which build the control plane serves for its architecture.

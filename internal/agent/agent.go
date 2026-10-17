@@ -233,6 +233,8 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		uctx, ucancel := context.WithTimeout(ctx, 10*time.Minute)
 		output, a.restart, err = a.selfUpdate(uctx)
 		ucancel()
+	case api.ActionProxySync:
+		err = a.syncProxy(cctx, c.Args["caddyfile"])
 	case api.ActionBackup, api.ActionRestore:
 		// Large volumes over a slow link can take a while.
 		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)

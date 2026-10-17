@@ -189,6 +189,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	s.syncProxy(r.Context(), p.DeviceID)
 	v, err := s.projectView(r.Context(), p)
 	if err != nil {
 		s.internal(w, err)
@@ -206,6 +207,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	defer s.syncProxy(context.WithoutCancel(r.Context()), p.DeviceID)
 	s.event(r.Context(), p.DeviceID, "warning", "project.deleted", "Project "+p.Name+" deleted (its container was left running)")
 	w.WriteHeader(http.StatusNoContent)
 }

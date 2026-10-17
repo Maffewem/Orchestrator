@@ -25,6 +25,15 @@ CREATE TABLE IF NOT EXISTS settings (
 	key   TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS domains (
+	id          TEXT PRIMARY KEY,
+	project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	hostname    TEXT NOT NULL,
+	kind        TEXT NOT NULL,
+	path        TEXT NOT NULL DEFAULT '',
+	created_at  INTEGER NOT NULL,
+	UNIQUE(hostname, path)
+);
 CREATE TABLE IF NOT EXISTS devices (
 	id          TEXT PRIMARY KEY,
 	name        TEXT NOT NULL,
@@ -95,6 +104,14 @@ CREATE TABLE IF NOT EXISTS backups (
 	error          TEXT NOT NULL DEFAULT '',
 	created_at     INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS backup_policies (
+	device_id      TEXT NOT NULL,
+	container_name TEXT NOT NULL,
+	policy         TEXT NOT NULL,
+	set_at         INTEGER NOT NULL,
+	last_run       INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (device_id, container_name)
+);
 CREATE TABLE IF NOT EXISTS deployment_steps (
 	deployment_id TEXT NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
 	idx           INTEGER NOT NULL,
@@ -124,7 +141,34 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := addColumn(db, "backups", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// addColumn adds a column to a table created by an earlier version, if it is missing.
+func addColumn(db *sql.DB, table, column, decl string) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return err
+		}
+		found = found || n == column
+	}
+	rows.Close()
+	if found {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl)
+	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }

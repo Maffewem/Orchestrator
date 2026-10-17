@@ -342,6 +342,35 @@ export async function request<T>(method: string, path: string, body?: unknown, t
   return res.json() as Promise<T>;
 }
 
+export interface StreamChunk {
+  data: Uint8Array;
+  next: number;
+  closed: boolean;
+  error?: string;
+}
+
+async function fetchStreamOutput(id: string, from: number, signal: AbortSignal): Promise<StreamChunk> {
+  const token = getToken();
+  const res = await fetch(`/api/streams/${id}/output?from=${from}`, { signal, headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401) {
+    onUnauthorized();
+    throw new ApiError(401, "Your session has expired");
+  }
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, msg);
+  }
+  const j = (await res.json()) as { data?: string; next: number; closed?: boolean; error?: string };
+  const bin = atob(j.data ?? "");
+  const data = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return { data, next: j.next, closed: !!j.closed, error: j.error };
+}
+
 export interface Backup {
   id: string;
   device_id: string;
@@ -458,6 +487,17 @@ export const api = {
   setPreviewSettings: (id: string, s: { enabled: boolean; max: number }) =>
     request<PreviewsView>("PUT", `/api/projects/${id}/previews/settings`, s),
   deletePreview: (id: string, pid: string) => request<void>("DELETE", `/api/projects/${id}/previews/${pid}`),
+  openStream: (deviceId: string, s: { kind: "logs" | "shell"; container: string; tail?: number; cols?: number; rows?: number }) =>
+    request<{ id: string }>("POST", `/api/devices/${deviceId}/streams`, s),
+  streamOutput: (id: string, from: number, signal: AbortSignal) =>
+    fetchStreamOutput(id, from, signal),
+  streamInput: (id: string, input: { data?: string; cols?: number; rows?: number }) =>
+    request<void>("POST", `/api/streams/${id}/input`, {
+      data: input.data === undefined ? undefined : btoa(String.fromCharCode(...new TextEncoder().encode(input.data))),
+      cols: input.cols,
+      rows: input.rows,
+    }),
+  closeStream: (id: string) => request<void>("DELETE", `/api/streams/${id}`),
   settings: () => request<Settings>("GET", "/api/settings"),
   setGitHubToken: (token: string) =>
     request<{ connected: boolean; login?: string }>("PUT", "/api/settings/github", { token }),

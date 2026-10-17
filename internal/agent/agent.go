@@ -86,6 +86,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	a.log.Info("agent running", "device", a.state.DeviceID, "server", a.cfg.Server)
 	go a.worker(ctx)
+	go a.streamLoop(ctx)
 
 	backoff := time.Second
 	for {

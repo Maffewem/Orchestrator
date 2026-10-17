@@ -27,6 +27,8 @@ type Docker struct {
 	client *http.Client
 	base   string
 	host   string
+	// dial opens a raw connection to the engine, for the calls Docker upgrades (exec).
+	dial func(ctx context.Context) (net.Conn, error)
 }
 
 // NewDocker connects to a Docker host such as unix:///var/run/docker.sock or tcp://host:2375.
@@ -44,9 +46,18 @@ func NewDocker(host string) (*Docker, error) {
 				return d.DialContext(ctx, "unix", path)
 			},
 		}
-		return &Docker{client: &http.Client{Transport: tr}, base: "http://docker", host: host}, nil
+		dial := func(ctx context.Context) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", path)
+		}
+		return &Docker{client: &http.Client{Transport: tr}, base: "http://docker", host: host, dial: dial}, nil
 	case "tcp", "http":
-		return &Docker{client: &http.Client{}, base: "http://" + u.Host, host: host}, nil
+		addr := u.Host
+		dial := func(ctx context.Context) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "tcp", addr)
+		}
+		return &Docker{client: &http.Client{}, base: "http://" + u.Host, host: host, dial: dial}, nil
 	default:
 		return nil, fmt.Errorf("unsupported docker host scheme %q", u.Scheme)
 	}

@@ -30,7 +30,7 @@ agents:
 test:
 	go vet ./...
 	go test ./...
-	cd web && npm run typecheck
+	cd web && npm run typecheck && npm test
 
 # Local development: run the API on :8080 and the Vite dev server (proxying /api) on :5173.
 dev-server:

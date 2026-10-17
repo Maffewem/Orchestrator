@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS deployments (
 	finished_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS deployments_project ON deployments(project_id, created_at);
+CREATE TABLE IF NOT EXISTS backups (
+	id             TEXT PRIMARY KEY,
+	device_id      TEXT NOT NULL,
+	device_name    TEXT NOT NULL,
+	container_name TEXT NOT NULL,
+	image          TEXT NOT NULL DEFAULT '',
+	status         TEXT NOT NULL,
+	size           INTEGER NOT NULL DEFAULT 0,
+	error          TEXT NOT NULL DEFAULT '',
+	created_at     INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS deployment_steps (
 	deployment_id TEXT NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
 	idx           INTEGER NOT NULL,

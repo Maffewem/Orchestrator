@@ -40,14 +40,35 @@ agent install on each new device.
   architecture and no registry is needed. Pushes to the production branch deploy
   automatically through the webhook.
 
+- **Auto-deploy** happens two ways. A GitHub push webhook deploys immediately. As a
+  fallback for servers GitHub can't reach, the control plane also polls each auto-deploy
+  project's branch every 60 seconds (`-poll`, `0` disables) and deploys when the head moves.
+- **Environment variables** are edited as a table (secret-looking values are masked), as one
+  raw box, or imported from a `.env` file, which merges into what is already there.
+- **Backups** (Workers page, archive button) stream a container's configuration and the data
+  in its writable volumes and bind mounts to the control plane as one `.tar.gz`, with nothing
+  staged on the device. Download them from the Backups page, or restore one: the data is
+  written back into the container of the same name on the original device, which is stopped
+  while files are copied and then started again. Files are copied live, so databases may want
+  to be stopped first. Archives are stored unencrypted in `-backups` (default: beside the
+  database), so protect that directory like the database itself.
+
 ### Supported devices
 
 The agent is built for `linux/amd64`, `linux/arm64` (Pi 3/4/5 on 64-bit OS),
 `linux/armv7` (32-bit Raspberry Pi OS) and `linux/armv6` (Pi Zero / Pi 1). The installer
-picks the right one automatically. Devices need Docker. Building from GitHub also needs
-`git` on the device, because the Docker engine uses it to clone.
+picks the right one automatically. On Debian, Raspberry Pi OS and Ubuntu the installer sets
+up everything from scratch: if Docker or `git` are missing it installs them (Docker through
+get.docker.com), enables the Docker service, then installs the agent.
 
 ## Quick start
+
+On a fresh Debian, Raspberry Pi OS or Ubuntu machine, one command installs Docker if needed
+and starts the control plane:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Maffewem/Orchestrator/main/scripts/install-server.sh | sudo sh
+```
 
 Pre-built multi-arch images (amd64 and arm64) are published to GitHub Container Registry by
 CI on every push to `main`, so on a server or a Pi 4/5 you can run the control plane with one
@@ -116,11 +137,14 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}` | projects |
 | `POST /api/projects/{id}/deployments` | deploy (GitHub projects use the branch head) |
 | `GET /api/deployments/{id}`, `POST /api/deployments/{id}/retry` | deployment with steps and logs |
+| `POST /api/devices/{id}/containers/{cid}/backup` | back up a container |
+| `GET /api/backups`, `GET /api/backups/{id}/download`, `DELETE /api/backups/{id}` | backups |
+| `POST /api/backups/{id}/restore` | restore a backup into its container |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
 
 The agent uses `POST /api/agent/register`, `/heartbeat`, `/commands/{id}/result` and
-`/deployments/{id}/steps/{n}`. GitHub calls `POST /api/github/webhook`, which is verified
+`/deployments/{id}/steps/{n}`, plus `/backups/{id}` to upload or fetch a backup archive. GitHub calls `POST /api/github/webhook`, which is verified
 with HMAC-SHA256.
 
 ## Security notes

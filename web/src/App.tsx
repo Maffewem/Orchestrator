@@ -11,6 +11,7 @@ import DeploymentPage from "./pages/Deployment";
 import DevicesPage from "./pages/Devices";
 import DevicePage from "./pages/Device";
 import ContainersPage from "./pages/Containers";
+import BackupsPage from "./pages/Backups";
 import ActivityPage from "./pages/Activity";
 import SettingsPage from "./pages/Settings";
 import { Empty } from "./components/ui";
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="devices" element={<DevicesPage />} />
           <Route path="devices/:id/*" element={<DevicePage />} />
           <Route path="containers" element={<ContainersPage />} />
+          <Route path="backups" element={<BackupsPage />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Empty title="Page not found" />} />

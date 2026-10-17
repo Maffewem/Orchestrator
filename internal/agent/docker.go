@@ -66,13 +66,19 @@ func isStatus(err error, code int) bool {
 
 func (d *Docker) request(ctx context.Context, method, path string, q url.Values, body any) (*http.Response, error) {
 	var rdr io.Reader
+	ctype := ""
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		rdr = bytes.NewReader(b)
+		rdr, ctype = bytes.NewReader(b), "application/json"
 	}
+	return d.do(ctx, method, path, q, rdr, ctype)
+}
+
+// do sends a request with an already-encoded body and turns HTTP errors into dockerError.
+func (d *Docker) do(ctx context.Context, method, path string, q url.Values, rdr io.Reader, ctype string) (*http.Response, error) {
 	u := d.base + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
@@ -81,8 +87,8 @@ func (d *Docker) request(ctx context.Context, method, path string, q url.Values,
 	if err != nil {
 		return nil, err
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if ctype != "" {
+		req.Header.Set("Content-Type", ctype)
 	}
 	resp, err := d.client.Do(req)
 	if err != nil {

@@ -92,6 +92,10 @@ const (
 	ActionRestart = "container.restart"
 	ActionLogs    = "container.logs"
 	ActionDeploy  = "deploy"
+	// ActionBackup streams a container's config and data to the control plane; Args["backup_id"].
+	ActionBackup = "container.backup"
+	// ActionRestore writes a backup's data back into the existing container; Args["backup_id"].
+	ActionRestore = "container.restore"
 )
 
 // Command is work queued by the control plane for a device's agent.

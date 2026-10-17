@@ -2,7 +2,9 @@ import { useRef, useState } from "react";
 import { Eye, EyeOff, Plus, Trash2, Upload } from "lucide-react";
 import { mergeEnv, parseEnv, SECRET_RE, serializeEnv, type EnvRow } from "../env";
 import { cx } from "../lib";
-import { inputClass } from "./ui";
+import { inputClass as baseInput } from "./ui";
+
+const inputClass = baseInput.replace("w-full", "min-w-0");
 
 /**
  * Environment variables as a line-by-line table or one raw box. `value` holds

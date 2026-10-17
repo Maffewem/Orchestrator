@@ -11,6 +11,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +41,8 @@ type Config struct {
 	// PollInterval is how often GitHub projects are checked for new commits. Zero uses
 	// the default of 60s; negative disables polling.
 	PollInterval time.Duration
+	// BackupDir holds container backup archives.
+	BackupDir string
 }
 
 type Server struct {
@@ -58,6 +62,9 @@ type Server struct {
 func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, error) {
 	if cfg.HeartbeatInterval <= 0 {
 		cfg.HeartbeatInterval = 5 * time.Second
+	}
+	if cfg.BackupDir == "" {
+		cfg.BackupDir = filepath.Join(os.TempDir(), "orchestrator-backups")
 	}
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = 60 * time.Second
@@ -149,6 +156,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agent/heartbeat", s.agentAuth(s.handleHeartbeat))
 	mux.Handle("POST /api/agent/commands/{id}/result", s.agentAuth(s.handleCommandResult))
 	mux.Handle("POST /api/agent/deployments/{id}/steps/{idx}", s.agentAuth(s.handleStepUpdate))
+	mux.Handle("POST /api/agent/backups/{id}", s.agentAuth(s.handleUploadBackup))
+	mux.Handle("GET /api/agent/backups/{id}", s.agentAuth(s.handleAgentDownloadBackup))
 
 	// GitHub push webhooks, authenticated by their HMAC signature.
 	mux.HandleFunc("POST /api/github/webhook", s.handleGitHubWebhook)
@@ -164,6 +173,11 @@ func (s *Server) Handler() http.Handler {
 	admin("DELETE /api/devices/{id}", s.handleDeleteDevice)
 	admin("POST /api/devices/{id}/commands", s.handleCreateCommand)
 	admin("GET /api/containers", s.handleListContainers)
+	admin("POST /api/devices/{id}/containers/{cid}/backup", s.handleCreateBackup)
+	admin("GET /api/backups", s.handleListBackups)
+	admin("GET /api/backups/{id}/download", s.handleDownloadBackup)
+	admin("DELETE /api/backups/{id}", s.handleDeleteBackup)
+	admin("POST /api/backups/{id}/restore", s.handleRestoreBackup)
 	admin("GET /api/commands/{id}", s.handleGetCommand)
 	admin("GET /api/events", s.handleListEvents)
 	admin("GET /api/projects", s.handleListProjects)

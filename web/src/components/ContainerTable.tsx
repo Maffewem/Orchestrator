@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { FileText, Play, RotateCw, Square } from "lucide-react";
+import { Archive, FileText, Play, RotateCw, Square } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, Loading, Modal, StatusDot, Table, Td } from "./ui";
 
@@ -83,6 +83,7 @@ export default function ContainerTable({
   const [busy, setBusy] = useState<string | null>(null);
   const [logs, setLogs] = useState<{ deviceId: string; c: Container } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<ReactNode>(null);
 
   if (containers.length === 0) return <Empty title="No containers">Containers on this device will show up here.</Empty>;
 
@@ -100,8 +101,26 @@ export default function ContainerTable({
     }
   };
 
+  const backup = async (dev: string, c: Container) => {
+    setBusy(c.id + "backup");
+    setError(null);
+    try {
+      await api.createBackup(dev, c.id);
+      setNotice(
+        <>
+          Backup of {c.name} started. Follow it on the <Link to="/backups" className="font-medium underline">Backups</Link> page.
+        </>,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <>
+      {notice && <p className="border-b border-neutral-200 bg-blue-50 px-5 py-2 text-sm text-neutral-800">{notice}</p>}
       {error && <p className="border-b border-neutral-200 bg-red-50 px-5 py-2 text-sm text-bad">{error}</p>}
       <Table head={["Name", ...(showDevice ? ["Device"] : []), "Image", "Status", "Ports", "Endpoints", ""]}>
         {containers.map((c) => {
@@ -149,6 +168,7 @@ export default function ContainerTable({
                     <Button size="sm" variant="ghost" title="Start" loading={busy === c.id + "container.start"} icon={<Play className="size-3.5" />} onClick={() => run(dev, c, "container.start")} />
                   )}
                   <Button size="sm" variant="ghost" title="Restart" loading={busy === c.id + "container.restart"} icon={<RotateCw className="size-3.5" />} onClick={() => run(dev, c, "container.restart")} />
+                  <Button size="sm" variant="ghost" title="Back up" loading={busy === c.id + "backup"} icon={<Archive className="size-3.5" />} onClick={() => backup(dev, c)} />
                   <Button size="sm" variant="ghost" title="Logs" icon={<FileText className="size-3.5" />} onClick={() => setLogs({ deviceId: dev, c })} />
                 </div>
               </Td>

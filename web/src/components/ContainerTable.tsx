@@ -1,8 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Archive, FileText, Play, RotateCw, Square } from "lucide-react";
+import { Archive, FileText, Play, RotateCw, Square, SquareTerminal } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
-import { Button, Empty, Loading, Modal, StatusDot, Table, Td } from "./ui";
+import { Button, Empty, StatusDot, Table, Td } from "./ui";
+import { useCan } from "./auth";
+import { LiveLogs, Shell } from "./Streams";
 
 /** Reachable URLs for a container's published ports on its device. */
 export function endpoints(c: Container, addresses: string[]): string[] {
@@ -33,39 +35,6 @@ export async function waitFor(id: string) {
   throw new Error("The device did not answer in time");
 }
 
-function LogsModal({ deviceId, c, onClose }: { deviceId: string; c: Container; onClose: () => void }) {
-  const [output, setOutput] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .command(deviceId, "container.logs", c.id, { tail: "300" })
-      .then((cmd) => waitFor(cmd.id))
-      .then((r) => {
-        if (cancelled) return;
-        if (r.status === "succeeded") setOutput(r.output ?? "");
-        else setError(r.error ?? "Failed");
-      })
-      .catch((e) => !cancelled && setError(String(e.message ?? e)));
-    return () => {
-      cancelled = true;
-    };
-  }, [deviceId, c.id]);
-  return (
-    <Modal title={`Logs: ${c.name}`} onClose={onClose} wide>
-      {error ? (
-        <p className="text-sm text-bad">{error}</p>
-      ) : output === null ? (
-        <Loading />
-      ) : (
-        <pre className="max-h-[60vh] overflow-auto rounded-lg bg-neutral-900 p-4 font-mono text-xs leading-relaxed text-neutral-100">
-          {output || "(no output)"}
-        </pre>
-      )}
-    </Modal>
-  );
-}
-
 export default function ContainerTable({
   containers,
   deviceId,
@@ -82,6 +51,8 @@ export default function ContainerTable({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [logs, setLogs] = useState<{ deviceId: string; c: Container } | null>(null);
+  const [shell, setShell] = useState<{ deviceId: string; c: Container } | null>(null);
+  const isAdmin = useCan("admin");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ReactNode>(null);
 
@@ -170,13 +141,15 @@ export default function ContainerTable({
                   <Button size="sm" variant="ghost" title="Restart" loading={busy === c.id + "container.restart"} icon={<RotateCw className="size-3.5" />} onClick={() => run(dev, c, "container.restart")} />
                   <Button size="sm" variant="ghost" title="Back up" loading={busy === c.id + "backup"} icon={<Archive className="size-3.5" />} onClick={() => backup(dev, c)} />
                   <Button size="sm" variant="ghost" title="Logs" icon={<FileText className="size-3.5" />} onClick={() => setLogs({ deviceId: dev, c })} />
+                  {isAdmin && running && <Button size="sm" variant="ghost" title="Shell" icon={<SquareTerminal className="size-3.5" />} onClick={() => setShell({ deviceId: dev, c })} />}
                 </div>
               </Td>
             </tr>
           );
         })}
       </Table>
-      {logs && <LogsModal deviceId={logs.deviceId} c={logs.c} onClose={() => setLogs(null)} />}
+      {logs && <LiveLogs deviceId={logs.deviceId} container={logs.c.id} name={logs.c.name} onClose={() => setLogs(null)} />}
+      {shell && <Shell deviceId={shell.deviceId} container={shell.c.id} name={shell.c.name} onClose={() => setShell(null)} />}
     </>
   );
 }

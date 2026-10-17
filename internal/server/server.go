@@ -62,6 +62,7 @@ type Server struct {
 	pollMu sync.Mutex
 	// previewMu serialises preview syncs so a webhook and the poller can't race.
 	previewMu sync.Mutex
+	streams   *streamHub
 	polled    map[string]string // project ID -> last commit SHA the poller acted on
 }
 
@@ -86,7 +87,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.DockerHost == "" {
 		cfg.DockerHost = "unix:///var/run/docker.sock"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState()}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub()}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 
 	for _, key := range []string{settingJoinToken, settingWebhookSecret} {
@@ -173,6 +174,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agent/deployments/{id}/steps/{idx}", s.agentAuth(s.handleStepUpdate))
 	mux.Handle("POST /api/agent/backups/{id}", s.agentAuth(s.handleUploadBackup))
 	mux.Handle("GET /api/agent/backups/{id}", s.agentAuth(s.handleAgentDownloadBackup))
+	mux.Handle("GET /api/agent/streams", s.agentAuth(s.handleAgentStreamPoll))
+	mux.Handle("POST /api/agent/streams/{id}/output", s.agentAuth(s.handleAgentStreamOutput))
+	mux.Handle("GET /api/agent/streams/{id}/input", s.agentAuth(s.handleAgentStreamInput))
 	mux.Handle("GET /api/agent/update", s.agentAuth(s.handleAgentUpdateInfo))
 
 	// GitHub push webhooks, authenticated by their HMAC signature.
@@ -232,6 +236,10 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/projects/{id}/previews", s.handleListPreviews)
 	admin("PUT /api/projects/{id}/previews/settings", s.handleSetPreviewSettings)
 	admin("DELETE /api/projects/{id}/previews/{pid}", s.handleDeletePreview)
+	admin("POST /api/devices/{id}/streams", s.handleOpenStream)
+	admin("GET /api/streams/{id}/output", s.handleStreamOutput)
+	admin("POST /api/streams/{id}/input", s.handleStreamInput)
+	admin("DELETE /api/streams/{id}", s.handleCloseStream)
 	admin("PUT /api/settings/domain", s.handleSetBaseDomain)
 	admin("PUT /api/projects/{id}/domains/access", s.handleSetAccess)
 	admin("GET /api/settings", s.handleGetSettings)

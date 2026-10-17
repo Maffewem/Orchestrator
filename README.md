@@ -78,6 +78,14 @@ agent install on each new device.
   device still has it, otherwise rebuild that commit. Image projects redeploy the earlier
   image reference, so a moving tag such as `latest` is pulled again.
 
+- **Live logs and shell** (a worker's Logs and Shell buttons, and the container tables): Logs
+  follows a container's output as it happens, with pause, clear and a line filter (operators
+  and up). Shell opens an interactive terminal (bash, else sh) inside a running container
+  (administrators only; each one is recorded in Activity). Both run over plain HTTP
+  long-polls that the agent makes outwards, so they work through proxies and need no extra
+  ports. An idle shell closes after 15 minutes, a device keeps at most 8 streams open, and
+  a shell has the same power as `docker exec` on that device. Needs a recent agent.
+
 - **Accounts and roles** (Users page): sign in with a username and password instead of the
   shared admin token. The first visit asks for the admin token once, to create the first
   administrator. Roles: *viewer* (read-only), *operator* (deploy, restart, back up, projects,
@@ -241,6 +249,7 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET/PUT /api/devices/{id}/workers/{name}/backup-policy` | automatic backups for a worker |
 | `GET/POST /api/projects/{id}/domains`, `PUT .../domains/urls`, `DELETE .../domains/{did}` | domains and the worker URLs |
 | `PUT /api/settings/domain` | base domain |
+| `POST /api/devices/{id}/streams`, `GET /api/streams/{id}/output?from=N`, `POST /api/streams/{id}/input`, `DELETE /api/streams/{id}` | live logs and shells |
 | `POST /api/deployments/{id}/rollback` | roll back to an earlier deployment |
 | `GET /api/projects/{id}/previews`, `PUT .../previews/settings`, `DELETE .../previews/{pid}` | preview deployments |
 | `GET /api/auth/status`, `POST /api/auth/login`, `POST /api/auth/setup` | sign in, first-run setup (no token needed) |

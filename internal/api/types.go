@@ -31,6 +31,7 @@ const (
 	CapUpdate  = "update"  // agent.update
 	CapProxy   = "proxy"   // proxy.sync
 	CapPreview = "preview" // container.remove
+	CapStream  = "stream"  // live log following and container shells
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -222,4 +223,42 @@ type StepUpdate struct {
 type LogLine struct {
 	Time time.Time `json:"time"`
 	Text string    `json:"text"`
+}
+
+// Stream kinds. A stream is a live, two-way pipe between the dashboard and a container,
+// carried over plain HTTP long-polls so it works through any proxy.
+const (
+	StreamLogs  = "logs"
+	StreamShell = "shell"
+)
+
+// StreamRequest is a stream the control plane wants the agent to open.
+type StreamRequest struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Container string `json:"container"`
+	Tail      int    `json:"tail,omitempty"`
+	Cols      int    `json:"cols,omitempty"`
+	Rows      int    `json:"rows,omitempty"`
+}
+
+// StreamPoll is the answer to the agent's long-poll for new streams.
+type StreamPoll struct {
+	Streams []StreamRequest `json:"streams"`
+}
+
+// StreamOutput carries bytes from the container to the dashboard. Closed ends the stream;
+// Error says why it ended badly.
+type StreamOutput struct {
+	Data   []byte `json:"data,omitempty"`
+	Closed bool   `json:"closed,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// StreamInput carries keystrokes and window size from the dashboard to the container.
+type StreamInput struct {
+	Data   []byte `json:"data,omitempty"`
+	Cols   int    `json:"cols,omitempty"`
+	Rows   int    `json:"rows,omitempty"`
+	Closed bool   `json:"closed,omitempty"`
 }

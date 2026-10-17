@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useParams } from "react-router";
-import { Archive, Download, GitBranch, Play, RefreshCw, RotateCcw, RotateCw, Square, Trash2 } from "lucide-react";
+import { Archive, Download, FileText, GitBranch, Play, RefreshCw, RotateCcw, RotateCw, Square, SquareTerminal, Trash2 } from "lucide-react";
 import { api, type Backup, type BackupPolicy, type Deployment, type FleetContainer } from "../api";
 import { useCrumbs } from "../components/Layout";
 import DomainsPanel from "../components/Domains";
+import { LiveLogs, Shell } from "../components/Streams";
+import { useCan } from "../components/auth";
 import PreviewsPanel from "../components/Previews";
 import { waitFor } from "../components/ContainerTable";
 import { Badge, Button, Card, CardHeader, Empty, ErrorNote, Field, Loading, PageHeader, StatusDot, Table, Tabs, Td, inputClass } from "../components/ui";
@@ -94,9 +96,21 @@ function WorkerActions({ w, onDone }: { w: FleetContainer; onDone: () => void })
     }
   };
   const running = w.state === "running";
+  const isAdmin = useCan("admin");
+  const [view, setView] = useState<"logs" | "shell" | null>(null);
   return (
     <>
       {error && <span className="text-sm text-bad">{error}</span>}
+      <Button icon={<FileText className="size-4" />} onClick={() => setView("logs")}>
+        Logs
+      </Button>
+      {isAdmin && running && (
+        <Button icon={<SquareTerminal className="size-4" />} onClick={() => setView("shell")}>
+          Shell
+        </Button>
+      )}
+      {view === "logs" && <LiveLogs deviceId={w.device_id} container={w.id} name={w.name} onClose={() => setView(null)} />}
+      {view === "shell" && <Shell deviceId={w.device_id} container={w.id} name={w.name} onClose={() => setView(null)} />}
       {running ? (
         <Button loading={busy === "container.stop"} icon={<Square className="size-4" />} onClick={() => run("container.stop")}>
           Stop

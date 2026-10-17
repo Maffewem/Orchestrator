@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router";
-import { getToken, setToken, setUnauthorizedHandler } from "./api";
+import { api, getToken, setToken, setUnauthorizedHandler, type Me } from "./api";
+import { MeProvider } from "./components/auth";
+import UsersPage from "./pages/Users";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import OverviewPage from "./pages/Overview";
@@ -20,6 +22,7 @@ import { Empty } from "./components/ui";
 
 export default function App() {
   const [token, setTok] = useState(getToken());
+  const [me, setMe] = useState<Me | null>(null);
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -27,6 +30,11 @@ export default function App() {
       setTok(null);
     });
   }, []);
+
+  useEffect(() => {
+    if (!token) return setMe(null);
+    api.me().then(setMe, () => setMe(null));
+  }, [token]);
 
   if (!token) {
     return (
@@ -39,17 +47,19 @@ export default function App() {
     );
   }
 
+  const signOut = () => {
+    api.logout().catch(() => {});
+    setToken(null);
+    setTok(null);
+  };
+
   return (
+    <MeProvider value={me}>
     <BrowserRouter>
       <Routes>
         <Route
           element={
-            <Layout
-              onLogout={() => {
-                setToken(null);
-                setTok(null);
-              }}
-            />
+            <Layout onLogout={signOut} />
           }
         >
           <Route index element={<OverviewPage />} />
@@ -65,9 +75,11 @@ export default function App() {
           <Route path="updates" element={<UpdatesPage />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="users" element={<UsersPage />} />
           <Route path="*" element={<Empty title="Page not found" />} />
         </Route>
       </Routes>
     </BrowserRouter>
+    </MeProvider>
   );
 }

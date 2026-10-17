@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -55,6 +54,7 @@ type Server struct {
 	adminHash string
 	githubAPI string
 	metrics   *metricsHistory
+	logins    limiter
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState
@@ -177,8 +177,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/github/webhook", s.handleGitHubWebhook)
 
 	// Admin API used by the dashboard.
-	admin := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.adminAuth(h)) }
-	admin("GET /api/auth/check", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	admin := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.authed(pattern, h)) }
+	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /api/auth/setup", s.handleSetup)
+	mux.HandleFunc("/api/gate/verify", s.handleGateVerify)
+	admin("GET /api/auth/me", s.handleMe)
+	admin("POST /api/auth/logout", s.handleLogout)
+	admin("POST /api/auth/password", s.handleChangePassword)
+	admin("GET /api/users", s.handleListUsers)
+	admin("POST /api/users", s.handleCreateUser)
+	admin("PATCH /api/users/{id}", s.handleUpdateUser)
+	admin("DELETE /api/users/{id}", s.handleDeleteUser)
 	admin("GET /api/overview", s.handleOverview)
 	admin("GET /api/devices", s.handleListDevices)
 	admin("GET /api/devices/{id}", s.handleGetDevice)
@@ -217,6 +227,7 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/projects/{id}/domains", s.handleAddDomain)
 	admin("DELETE /api/projects/{id}/domains/{did}", s.handleDeleteDomain)
 	admin("PUT /api/settings/domain", s.handleSetBaseDomain)
+	admin("PUT /api/projects/{id}/domains/access", s.handleSetAccess)
 	admin("GET /api/settings", s.handleGetSettings)
 	admin("PUT /api/settings/github", s.handleSetGitHub)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
@@ -243,17 +254,6 @@ func bearer(r *http.Request) string {
 		return strings.TrimSpace(t)
 	}
 	return ""
-}
-
-func (s *Server) adminAuth(next http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tok := bearer(r)
-		if tok == "" || subtle.ConstantTimeCompare([]byte(store.HashToken(tok)), []byte(s.adminHash)) != 1 {
-			writeError(w, http.StatusUnauthorized, "invalid admin token")
-			return
-		}
-		next(w, r)
-	})
 }
 
 func (s *Server) agentAuth(next http.HandlerFunc) http.Handler {

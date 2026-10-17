@@ -188,6 +188,26 @@ export interface MetricSample {
   load1: number;
 }
 
+export type Role = "viewer" | "operator" | "admin";
+
+export interface Me {
+  username: string;
+  role: Role;
+  token_login: boolean;
+}
+
+export interface LoginResult extends Me {
+  token: string;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  role: Role;
+  disabled: boolean;
+  created_at: string;
+}
+
 export interface DnsRecord {
   type: string;
   name: string;
@@ -220,6 +240,7 @@ export interface DomainsView {
   domains: DomainRow[];
   addresses: string[];
   proxy: "ok" | "agent_too_old";
+  protected: boolean;
 }
 
 export interface Settings {
@@ -270,7 +291,7 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
-export async function request<T>(method: string, path: string, body?: unknown, token = getToken()): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown, token: string | null | undefined = getToken()): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: {
@@ -279,7 +300,7 @@ export async function request<T>(method: string, path: string, body?: unknown, t
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) {
+  if (res.status === 401 && token) {
     onUnauthorized();
     throw new ApiError(401, "Your session has expired");
   }
@@ -370,7 +391,19 @@ export const api = {
   restoreBackup: (id: string) => request<Command>("POST", `/api/backups/${id}/restore`),
   deleteBackup: (id: string) => request<void>("DELETE", `/api/backups/${id}`),
   downloadBackup,
-  checkToken: (token: string) => request<void>("GET", "/api/auth/check", undefined, token),
+  me: (token?: string) => request<Me>("GET", "/api/auth/me", undefined, token),
+  authStatus: () => request<{ setup_required: boolean }>("GET", "/api/auth/status", undefined, null),
+  login: (username: string, password: string) => request<LoginResult>("POST", "/api/auth/login", { username, password }, null),
+  setup: (admin_token: string, username: string, password: string) =>
+    request<LoginResult>("POST", "/api/auth/setup", { admin_token, username, password }, null),
+  changePassword: (current: string, next: string) => request<void>("POST", "/api/auth/password", { current, new: next }),
+  logout: () => request<void>("POST", "/api/auth/logout"),
+  users: () => request<User[]>("GET", "/api/users"),
+  createUser: (u: { username: string; password: string; role: Role }) => request<User>("POST", "/api/users", u),
+  updateUser: (id: string, u: { role?: Role; password?: string; disabled?: boolean }) => request<User>("PATCH", `/api/users/${id}`, u),
+  deleteUser: (id: string) => request<void>("DELETE", `/api/users/${id}`),
+  setAccess: (id: string, protectedAccess: boolean) =>
+    request<DomainsView>("PUT", `/api/projects/${id}/domains/access`, { protected: protectedAccess }),
   overview: () => request<Overview>("GET", "/api/overview"),
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),

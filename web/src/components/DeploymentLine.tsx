@@ -4,6 +4,7 @@ import { Check, Copy, GitBranch, MoreHorizontal } from "lucide-react";
 import { api, type Deployment } from "../api";
 import { StatusIcon } from "./ui";
 import { ago, cx, duration, span } from "../lib";
+import { useCan } from "./auth";
 import { deploymentTitle } from "../pages/Projects";
 
 export function Sparkline({ values, color = "#0051c3" }: { values: number[]; color?: string }) {
@@ -32,6 +33,7 @@ export function DeploymentLine({ d, live, onChanged, compact }: { d: Deployment;
   const nav = useNavigate();
   const [copied, setCopied] = useState(false);
   const menu = useRef<HTMLDetailsElement>(null);
+  const canRollback = useCan("operator") && d.status === "succeeded" && !live && !d.preview_id;
   const took = span(d.started_at ?? d.created_at, d.finished_at);
   const hash = d.commit?.sha;
   useEffect(() => {
@@ -108,6 +110,23 @@ export function DeploymentLine({ d, live, onChanged, compact }: { d: Deployment;
           >
             Redeploy this version
           </button>
+          {canRollback && (
+            <button
+              className="block w-full px-3 py-1.5 text-left hover:bg-neutral-50"
+              onClick={async () => {
+                if (!window.confirm(`Roll back to ${versionId(d)}? It becomes the live version.`)) return;
+                try {
+                  const r = await api.rollbackDeployment(d.id);
+                  onChanged();
+                  nav(`/deployments/${r.id}`);
+                } catch (e) {
+                  window.alert(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            >
+              Roll back to this version
+            </button>
+          )}
         </div>
       </details>
     </div>

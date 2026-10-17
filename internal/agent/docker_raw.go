@@ -159,3 +159,9 @@ func (d *Docker) CreateHelper(ctx context.Context, name, image string, cmd []str
 	}
 	return out.ID, nil
 }
+
+// hasImage reports whether an image reference exists locally.
+func (d *Docker) hasImage(ctx context.Context, ref string) bool {
+	_, err := d.ImageInspect(ctx, ref)
+	return err == nil
+}

@@ -111,7 +111,9 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	st.logf("Docker engine %s ready", info.Version)
 
 	st.begin(ctx, api.StepSource)
-	if spec.Build != nil {
+	if spec.Build != nil && spec.Reuse && a.docker.hasImage(ctx, spec.Image) {
+		st.logf("%s is already on this device; skipping the build", spec.Image)
+	} else if spec.Build != nil {
 		st.logf("Cloning repository and building %s on this device...", spec.Image)
 		if err := a.docker.Build(ctx, spec.Build.Remote, spec.Build.Dockerfile, spec.Image, func(l string) { st.logf("%s", l) }); err != nil {
 			if strings.Contains(err.Error(), "git") {

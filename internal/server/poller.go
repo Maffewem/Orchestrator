@@ -23,7 +23,13 @@ func (s *Server) pollRepos(ctx context.Context) {
 	heads := map[key]*store.Commit{}
 	for _, p := range projects {
 		src := p.Source
-		if src.Type != store.SourceGitHub || !src.AutoDeploy {
+		if src.Type != store.SourceGitHub {
+			continue
+		}
+		if s.previewSettings(ctx, p.ID).Enabled {
+			s.syncPreviews(ctx, p)
+		}
+		if !src.AutoDeploy {
 			continue
 		}
 		k := key{src.Repo, src.Branch}
@@ -55,7 +61,7 @@ func (s *Server) pollProject(ctx context.Context, p *store.Project, head *store.
 			return
 		}
 		for _, d := range ds {
-			if d.Trigger != store.TriggerRetry && d.Commit != nil {
+			if d.Trigger != store.TriggerRetry && d.Trigger != store.TriggerRollback && d.Commit != nil {
 				seen = d.Commit.SHA
 				break
 			}

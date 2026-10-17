@@ -222,7 +222,7 @@ func TestProtectedWorker(t *testing.T) {
 
 	// Without a known control plane address the site must fail closed.
 	got, _ := buildCaddyfile("", "", []*store.Project{{ID: "p1", Name: "x", Runtime: store.Runtime{Ports: []string{"9000:80"}}}},
-		map[string][]*store.Domain{"p1": {{Hostname: "x.example.com"}}}, nil, map[string]bool{"p1": true})
+		map[string][]*store.Domain{"p1": {{Hostname: "x.example.com"}}}, nil, map[string]bool{"p1": true}, nil)
 	if strings.Contains(got, "reverse_proxy") || !strings.Contains(got, "503") {
 		t.Fatalf("expected a fail-closed site:\n%s", got)
 	}

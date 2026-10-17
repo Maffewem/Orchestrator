@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -166,7 +167,7 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 			row.Status, row.Detail, row.Records = dnsStatus(ctx, host, want)
 		}
 		v.Production = row
-		v.Preview = &urlRow{Hostname: "*-" + slug(p.Name) + "." + base, Enabled: prefs.Preview}
+		v.Preview = &urlRow{Hostname: "<branch>-" + slug(p.Name) + "." + base, Enabled: prefs.Preview}
 	}
 	list, err := s.store.ListDomains(ctx, p.ID)
 	if err != nil {
@@ -310,9 +311,8 @@ type site struct{ path, upstream, project string }
 
 // buildCaddyfile renders the proxy configuration for one device. It returns the number of
 // hostnames served.
-func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool) (string, int) {
+func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool, previews map[string][]*store.Preview) (string, int) {
 	sites := map[string][]site{}
-	plain := map[string]bool{} // hosts served over plain HTTP (wildcards cannot get certificates without DNS access)
 	for _, p := range projects {
 		port := upstreamPort(p)
 		if port == "" {
@@ -326,9 +326,10 @@ func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[
 				sites[h] = append(sites[h], site{"", up, p.ID})
 			}
 			if pf.Preview {
-				h := "*-" + slug(p.Name) + "." + base
-				sites[h] = append(sites[h], site{"", up, p.ID})
-				plain[h] = true
+				for _, pv := range previews[p.ID] {
+					h := pv.Slug + "-" + slug(p.Name) + "." + base
+					sites[h] = append(sites[h], site{"", "127.0.0.1:" + strconv.Itoa(pv.HostPort), p.ID})
+				}
 			}
 		}
 		for _, d := range doms[p.ID] {
@@ -343,11 +344,7 @@ func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[
 	var b strings.Builder
 	b.WriteString("# Managed by Orchestrator. Changes are overwritten.\n{\n\tadmin off\n}\n")
 	for _, h := range hosts {
-		label := h
-		if plain[h] {
-			label = "http://" + h
-		}
-		fmt.Fprintf(&b, "\n%s {\n", label)
+		fmt.Fprintf(&b, "\n%s {\n", h)
 		entries := sites[h]
 		sort.SliceStable(entries, func(i, j int) bool { return len(entries[i].path) > len(entries[j].path) })
 		for _, e := range entries {
@@ -386,6 +383,7 @@ func (s *Server) syncProxy(ctx context.Context, deviceID string) {
 	doms := map[string][]*store.Domain{}
 	prefs := map[string]urlPrefs{}
 	protected := map[string]bool{}
+	previews := map[string][]*store.Preview{}
 	for _, p := range all {
 		if p.DeviceID != deviceID {
 			continue
@@ -394,8 +392,9 @@ func (s *Server) syncProxy(ctx context.Context, deviceID string) {
 		doms[p.ID], _ = s.store.ListDomains(ctx, p.ID)
 		prefs[p.ID] = s.urlPrefs(ctx, p.ID)
 		protected[p.ID] = s.projectProtected(ctx, p.ID)
+		previews[p.ID], _ = s.store.ListPreviews(ctx, p.ID)
 	}
-	file, n := buildCaddyfile(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected)
+	file, n := buildCaddyfile(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews)
 	used, _ := s.store.GetSetting(ctx, settingProxyUsed+deviceID)
 	if n == 0 && used == "" {
 		return // nothing to serve and no proxy to empty

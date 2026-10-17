@@ -142,7 +142,8 @@ export interface Deployment {
   id: string;
   project_id: string;
   device_id: string;
-  trigger: "manual" | "push" | "retry" | "poll";
+  trigger: "manual" | "push" | "retry" | "poll" | "rollback";
+  preview_id?: string;
   commit: Commit | null;
   spec: DeploySpec;
   status: DeploymentStatus;
@@ -151,6 +152,30 @@ export interface Deployment {
   started_at: string | null;
   finished_at: string | null;
   steps?: Step[];
+}
+
+export interface Preview {
+  id: string;
+  project_id: string;
+  branch: string;
+  slug: string;
+  pr: number;
+  title: string;
+  author: string;
+  sha: string;
+  host_port: number;
+  deployment_id: string;
+  created_at: string;
+  updated_at: string;
+  url: string;
+  status: DeploymentStatus;
+  error?: string;
+}
+
+export interface PreviewsView {
+  settings: { enabled: boolean; max: number };
+  previews: Preview[];
+  supported: boolean;
 }
 
 export interface Project {
@@ -428,6 +453,11 @@ export const api = {
     request<Deployment[]>("GET", `/api/deployments?limit=${q.limit ?? 50}${q.device ? `&device=${q.device}` : ""}`),
   deployment: (id: string) => request<Deployment>("GET", `/api/deployments/${id}`),
   retryDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/retry`),
+  rollbackDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/rollback`),
+  projectPreviews: (id: string) => request<PreviewsView>("GET", `/api/projects/${id}/previews`),
+  setPreviewSettings: (id: string, s: { enabled: boolean; max: number }) =>
+    request<PreviewsView>("PUT", `/api/projects/${id}/previews/settings`, s),
+  deletePreview: (id: string, pid: string) => request<void>("DELETE", `/api/projects/${id}/previews/${pid}`),
   settings: () => request<Settings>("GET", "/api/settings"),
   setGitHubToken: (token: string) =>
     request<{ connected: boolean; login?: string }>("PUT", "/api/settings/github", { token }),

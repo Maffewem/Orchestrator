@@ -119,6 +119,9 @@ func routeRole(pattern string) string {
 		"POST /api/deployments/{id}/retry":                   true,
 		"PUT /api/projects/{id}/domains/urls":                true,
 		"POST /api/projects/{id}/domains":                    true,
+		"POST /api/deployments/{id}/rollback":                true,
+		"PUT /api/projects/{id}/previews/settings":           true,
+		"DELETE /api/projects/{id}/previews/{pid}":           true,
 		"DELETE /api/projects/{id}/domains/{did}":            true,
 	}
 	adminGets := map[string]bool{

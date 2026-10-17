@@ -60,7 +60,9 @@ type Server struct {
 	up     *updateState
 
 	pollMu sync.Mutex
-	polled map[string]string // project ID -> last commit SHA the poller acted on
+	// previewMu serialises preview syncs so a webhook and the poller can't race.
+	previewMu sync.Mutex
+	polled    map[string]string // project ID -> last commit SHA the poller acted on
 }
 
 // New prepares the server. It returns a freshly generated admin token when one had to be
@@ -226,6 +228,10 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/projects/{id}/domains/urls", s.handleSetURLs)
 	admin("POST /api/projects/{id}/domains", s.handleAddDomain)
 	admin("DELETE /api/projects/{id}/domains/{did}", s.handleDeleteDomain)
+	admin("POST /api/deployments/{id}/rollback", s.handleRollback)
+	admin("GET /api/projects/{id}/previews", s.handleListPreviews)
+	admin("PUT /api/projects/{id}/previews/settings", s.handleSetPreviewSettings)
+	admin("DELETE /api/projects/{id}/previews/{pid}", s.handleDeletePreview)
 	admin("PUT /api/settings/domain", s.handleSetBaseDomain)
 	admin("PUT /api/projects/{id}/domains/access", s.handleSetAccess)
 	admin("GET /api/settings", s.handleGetSettings)

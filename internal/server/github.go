@@ -53,6 +53,25 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "pong"})
 		return
 	case "push":
+	case "pull_request":
+		var pr struct {
+			Action     string `json:"action"`
+			Repository struct {
+				FullName string `json:"full_name"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(body, &pr); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid pull request payload")
+			return
+		}
+		switch pr.Action {
+		case "opened", "reopened", "synchronize", "closed", "ready_for_review", "edited":
+			n := s.handlePullRequestEvent(r.Context(), pr.Repository.FullName)
+			writeJSON(w, http.StatusAccepted, map[string]int{"projects": n})
+		default:
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored"})
+		}
+		return
 	default:
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored"})
 		return

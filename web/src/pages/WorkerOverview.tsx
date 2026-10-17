@@ -5,6 +5,7 @@ import { api, type DomainsView, type Deployment, type FleetContainer, type Proje
 import { endpoints } from "../components/ContainerTable";
 import { DeploymentLine, Sparkline } from "../components/DeploymentLine";
 import { Card, Empty } from "../components/ui";
+import { PreviewStatus } from "../components/Previews";
 import { ago, bytes, cx, pct, usePoll, useTick } from "../lib";
 
 /** One node of the diagram: a titled, collapsible list. */
@@ -61,6 +62,7 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
   const project = usePoll(() => (projectId ? api.project(projectId) : Promise.resolve(null as Project | null)), 10000, [projectId]);
   const deps = usePoll(() => (projectId ? api.projectDeployments(projectId) : Promise.resolve([] as Deployment[])), 4000, [projectId]);
   const domains = usePoll(() => (projectId ? api.projectDomains(projectId) : Promise.resolve(null as DomainsView | null)), 30000, [projectId]);
+  const previews = usePoll(() => (projectId ? api.projectPreviews(projectId).catch(() => null) : Promise.resolve(null)), 15000, [projectId]);
   const policy = usePoll(() => api.backupPolicy(w.device_id, w.name), 0, [w.device_id, w.name]);
   const metrics = usePoll(() => api.deviceMetrics(w.device_id), 15000, [w.device_id]);
   const device = usePoll(() => api.device(w.device_id), 10000, [w.device_id]);
@@ -219,8 +221,24 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
           </Card>
 
           <Card>
-            <CardTitle title="Recent previews" />
-            <p className="px-5 py-6 text-sm text-neutral-500">No previews yet. Branch and pull request previews will be listed here.</p>
+            <CardTitle title="Recent previews" to={projectId && p?.source.type === "github" ? `${base}/previews` : undefined} />
+            {previews.data?.previews.length ? (
+              <div className="divide-y divide-neutral-100">
+                {previews.data.previews.slice(0, 5).map((pv) => (
+                  <div key={pv.id} className="flex items-center gap-4 px-5 py-3 text-sm">
+                    <GitBranch className="size-4 shrink-0 text-neutral-500" />
+                    <span className="min-w-0 flex-1 truncate"><span className="font-medium">#{pv.pr}</span> {pv.title}</span>
+                    <PreviewStatus s={pv.status} />
+                    {pv.url && <a href={pv.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">Visit</a>}
+                    <span className="hidden whitespace-nowrap text-neutral-500 sm:block">{ago(pv.updated_at)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="px-5 py-6 text-sm text-neutral-500">
+                {p?.source.type === "github" ? "No previews yet. Turn on previews to build every open pull request." : "Previews are available for workers deployed from GitHub."}
+              </p>
+            )}
           </Card>
 
           <Card>

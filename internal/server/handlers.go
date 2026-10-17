@@ -182,6 +182,10 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.event(r.Context(), d.ID, "error", "proxy.sync", fmt.Sprintf("Domain proxy on %s failed: %s", d.Name, res.Error))
 		}
+	case api.ActionRemove:
+		if !res.OK {
+			s.event(r.Context(), d.ID, "error", "container.remove", fmt.Sprintf("Removing %s failed: %s", c.Target, res.Error))
+		}
 	case api.ActionRestore:
 		lvl, msg := "info", "restored from backup"
 		if !res.OK {

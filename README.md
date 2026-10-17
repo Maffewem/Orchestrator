@@ -58,13 +58,25 @@ agent install on each new device.
   too old to back up are named in the error, with the fix (Updates page, or re-run the
   install command).
 - **Domains** (a worker's Domains tab): set a base domain under Settings and every project
-  gets `name.<base domain>`, with an optional `*-name.<base domain>` preview URL (plain
-  HTTP). Add custom domains, or a hostname plus path route such as `example.com/api/*`. Each
+  gets `name.<base domain>`, with an optional `<branch>-name.<base domain>` URL for each
+  preview (see below; create a wildcard `*.<base domain>` DNS record so they resolve). Add custom domains, or a hostname plus path route such as `example.com/api/*`. Each
   one shows the DNS record to create (an A record to the device's IPv4 address) and whether
   DNS already points there. The control plane renders a Caddyfile per device and the agent
   runs a `caddy:2-alpine` container (`orchestrator-proxy`, host network, restarts with
   Docker) with it, so there is no central proxy. Caddy gets certificates itself, which needs
   ports 80 and 443 reachable from the internet (or use a Cloudflare Tunnel instead).
+
+- **Previews and rollback** (a worker's Previews tab and the deployment menu): turn previews
+  on for a GitHub project and every open pull request from the same repository, into the
+  tracked branch, is built as its own container (`name--branch`) on a free host port in
+  20000-29999, rebuilt on each push and removed when the pull request closes or when more than
+  the chosen maximum are open. Pull requests from forks are never built, and branches without a
+  pull request are not previewed. With a base domain and the Preview URL switch on, each is
+  served at `https://branch-name.<base domain>` (and inherits the worker's login setting);
+  otherwise at `http://<device ip>:<port>`. Needs a recent agent. Any succeeded production
+  deployment can be rolled back to from its "..." menu: GitHub builds reuse the image if the
+  device still has it, otherwise rebuild that commit. Image projects redeploy the earlier
+  image reference, so a moving tag such as `latest` is pulled again.
 
 - **Accounts and roles** (Users page): sign in with a username and password instead of the
   shared admin token. The first visit asks for the admin token once, to create the first
@@ -229,6 +241,8 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET/PUT /api/devices/{id}/workers/{name}/backup-policy` | automatic backups for a worker |
 | `GET/POST /api/projects/{id}/domains`, `PUT .../domains/urls`, `DELETE .../domains/{did}` | domains and the worker URLs |
 | `PUT /api/settings/domain` | base domain |
+| `POST /api/deployments/{id}/rollback` | roll back to an earlier deployment |
+| `GET /api/projects/{id}/previews`, `PUT .../previews/settings`, `DELETE .../previews/{pid}` | preview deployments |
 | `GET /api/auth/status`, `POST /api/auth/login`, `POST /api/auth/setup` | sign in, first-run setup (no token needed) |
 | `GET /api/auth/me`, `POST /api/auth/logout`, `POST /api/auth/password` | the signed-in user |
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | accounts (admin) |

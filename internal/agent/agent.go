@@ -233,6 +233,11 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		uctx, ucancel := context.WithTimeout(ctx, 10*time.Minute)
 		output, a.restart, err = a.selfUpdate(uctx)
 		ucancel()
+	case api.ActionRemove:
+		var id string
+		if id, err = a.docker.ContainerByName(cctx, c.Target); err == nil && id != "" {
+			err = a.docker.Remove(cctx, id)
+		}
 	case api.ActionProxySync:
 		err = a.syncProxy(cctx, c.Args["caddyfile"])
 	case api.ActionBackup, api.ActionRestore:

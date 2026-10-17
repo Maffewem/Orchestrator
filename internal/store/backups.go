@@ -17,27 +17,31 @@ const (
 // Backup is a snapshot of one container's configuration and data. The archive itself
 // lives on the control plane's disk, named after the backup ID.
 type Backup struct {
-	ID            string    `json:"id"`
-	DeviceID      string    `json:"device_id"`
-	DeviceName    string    `json:"device_name"`
-	ContainerName string    `json:"container_name"`
-	Image         string    `json:"image"`
-	Source        string    `json:"source"` // manual | scheduled
-	Status        string    `json:"status"`
-	Size          int64     `json:"size"`
-	Error         string    `json:"error,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string `json:"id"`
+	DeviceID      string `json:"device_id"`
+	DeviceName    string `json:"device_name"`
+	ContainerName string `json:"container_name"`
+	Image         string `json:"image"`
+	Source        string `json:"source"` // manual | scheduled
+	Status        string `json:"status"`
+	Size          int64  `json:"size"`
+	Error         string `json:"error,omitempty"`
+	// Encrypted means the file on disk is password-protected (see package backupcrypt).
+	Encrypted bool      `json:"encrypted"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
-const backupCols = `id, device_id, device_name, container_name, image, status, size, error, created_at, source`
+const backupCols = `id, device_id, device_name, container_name, image, status, size, error, created_at, source, encrypted`
 
 func scanBackup(r interface{ Scan(...any) error }) (*Backup, error) {
 	var b Backup
 	var created int64
-	if err := r.Scan(&b.ID, &b.DeviceID, &b.DeviceName, &b.ContainerName, &b.Image, &b.Status, &b.Size, &b.Error, &created, &b.Source); err != nil {
+	var enc int
+	if err := r.Scan(&b.ID, &b.DeviceID, &b.DeviceName, &b.ContainerName, &b.Image, &b.Status, &b.Size, &b.Error, &created, &b.Source, &enc); err != nil {
 		return nil, err
 	}
 	b.CreatedAt = time.Unix(created, 0).UTC()
+	b.Encrypted = enc != 0
 	return &b, nil
 }
 
@@ -47,7 +51,7 @@ func (s *Store) CreateBackup(ctx context.Context, b *Backup) error {
 		b.Source = "manual"
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO backups(`+backupCols+`) VALUES(?, ?, ?, ?, ?, ?, 0, '', ?, ?)`,
+		`INSERT INTO backups(`+backupCols+`) VALUES(?, ?, ?, ?, ?, ?, 0, '', ?, ?, 0)`,
 		b.ID, b.DeviceID, b.DeviceName, b.ContainerName, b.Image, b.Status, b.CreatedAt.Unix(), b.Source)
 	return err
 }
@@ -85,13 +89,23 @@ func (s *Store) ListBackups(ctx context.Context, deviceID string) ([]*Backup, er
 
 // FinishBackup records the outcome of a backup. A completed backup is never downgraded.
 func (s *Store) FinishBackup(ctx context.Context, id string, size int64, errMsg string) error {
+	return s.FinishBackupAs(ctx, id, size, errMsg, false)
+}
+
+// FinishBackupAs is FinishBackup that also records whether the stored file is encrypted.
+// size is always the size of the archive itself, not of the encrypted file.
+func (s *Store) FinishBackupAs(ctx context.Context, id string, size int64, errMsg string, encrypted bool) error {
 	status := BackupComplete
 	if errMsg != "" {
 		status = BackupFailed
 	}
+	enc := 0
+	if encrypted {
+		enc = 1
+	}
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE backups SET status = ?, size = ?, error = ? WHERE id = ? AND status != 'complete'`,
-		status, size, errMsg, id)
+		`UPDATE backups SET status = ?, size = ?, error = ?, encrypted = ? WHERE id = ? AND status != 'complete'`,
+		status, size, errMsg, enc, id)
 	return err
 }
 

@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
+	"github.com/Maffewem/Orchestrator/internal/backupcrypt"
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
@@ -17,6 +19,27 @@ import (
 const maxBackupBytes = 50 << 30
 
 func (s *Server) backupPath(id string) string { return filepath.Join(s.cfg.BackupDir, id+".tar.gz") }
+
+// backupFile is where a backup lives: password-protected ones get their own extension so a
+// copy taken off the server is recognisable for what it is.
+func (s *Server) backupFile(b *store.Backup) string {
+	if b.Encrypted {
+		return s.backupPath(b.ID) + ".enc"
+	}
+	return s.backupPath(b.ID)
+}
+
+func (s *Server) removeBackupFiles(id string) {
+	os.Remove(s.backupPath(id))
+	os.Remove(s.backupPath(id) + ".enc")
+}
+
+const settingBackupPassword = "backup_password"
+
+func (s *Server) backupPassword(ctx context.Context) string {
+	v, _ := s.store.GetSetting(ctx, settingBackupPassword)
+	return v
+}
 
 func findContainer(d *store.Device, id string) *api.Container {
 	for i := range d.Containers {
@@ -113,7 +136,7 @@ func (s *Server) serveBackup(w http.ResponseWriter, r *http.Request, b *store.Ba
 		writeError(w, http.StatusConflict, "backup is not complete")
 		return
 	}
-	f, err := os.Open(s.backupPath(b.ID))
+	f, err := os.Open(s.backupFile(b))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "backup file is missing")
 		return
@@ -121,7 +144,24 @@ func (s *Server) serveBackup(w http.ResponseWriter, r *http.Request, b *store.Ba
 	defer f.Close()
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.tar.gz"`, b.ContainerName, b.CreatedAt.Format("20060102-150405")))
-	http.ServeContent(w, r, "", b.CreatedAt, f)
+	if !b.Encrypted {
+		http.ServeContent(w, r, "", b.CreatedAt, f)
+		return
+	}
+	// Protected backups are decrypted on the way out with the password in Settings. The
+	// first chunk is checked before any bytes are sent, so a wrong password is a clean error.
+	pw := s.backupPassword(r.Context())
+	if pw == "" {
+		writeError(w, http.StatusConflict, "this backup is password-protected and no backup password is set. Set the password it was made with in Settings")
+		return
+	}
+	plain, err := backupcrypt.NewReader(f, pw)
+	if err != nil {
+		writeError(w, http.StatusConflict, "could not open this backup: "+err.Error()+". It was made with a different password: set that one in Settings to restore it")
+		return
+	}
+	w.Header().Set("Content-Length", strconv.FormatInt(b.Size, 10))
+	io.Copy(w, plain)
 }
 
 func (s *Server) handleDownloadBackup(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +179,7 @@ func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	os.Remove(s.backupPath(b.ID))
+	s.removeBackupFiles(b.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -219,7 +259,21 @@ func (s *Server) handleUploadBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer os.Remove(tmp.Name())
-	n, err := io.Copy(tmp, http.MaxBytesReader(w, r.Body, maxBackupBytes))
+	// With a backup password set, the archive is encrypted as it arrives: it never touches
+	// the disk in the clear.
+	pw := s.backupPassword(r.Context())
+	var n int64
+	if pw != "" {
+		var enc io.WriteCloser
+		if enc, err = backupcrypt.NewWriter(tmp, pw); err == nil {
+			n, err = io.Copy(enc, http.MaxBytesReader(w, r.Body, maxBackupBytes))
+			if cerr := enc.Close(); err == nil {
+				err = cerr
+			}
+		}
+	} else {
+		n, err = io.Copy(tmp, http.MaxBytesReader(w, r.Body, maxBackupBytes))
+	}
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
@@ -228,11 +282,12 @@ func (s *Server) handleUploadBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "upload failed")
 		return
 	}
-	if err := os.Rename(tmp.Name(), s.backupPath(b.ID)); err != nil {
+	b.Encrypted = pw != ""
+	if err := os.Rename(tmp.Name(), s.backupFile(b)); err != nil {
 		s.internal(w, err)
 		return
 	}
-	if err := s.store.FinishBackup(r.Context(), b.ID, n, ""); err != nil {
+	if err := s.store.FinishBackupAs(r.Context(), b.ID, n, "", b.Encrypted); err != nil {
 		s.internal(w, err)
 		return
 	}
@@ -267,4 +322,31 @@ func humanSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+const minBackupPassword = 8
+
+// handleSetBackupPassword sets (or, with an empty password, removes) the password new backups
+// are encrypted with. Existing backups keep the password they were made with.
+func (s *Server) handleSetBackupPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Password != "" && len(req.Password) < minBackupPassword {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("the backup password must be at least %d characters", minBackupPassword))
+		return
+	}
+	if err := s.store.SetSetting(r.Context(), settingBackupPassword, req.Password); err != nil {
+		s.internal(w, err)
+		return
+	}
+	msg := "Backup password removed: new backups are not encrypted"
+	if req.Password != "" {
+		msg = "Backup password set: new backups are encrypted"
+	}
+	s.event(r.Context(), "", "info", "backup.password", fmt.Sprintf("%s (%s)", msg, identityFrom(r).Name))
+	writeJSON(w, http.StatusOK, map[string]bool{"backup_password_set": req.Password != ""})
 }

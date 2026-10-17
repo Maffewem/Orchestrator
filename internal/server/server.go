@@ -244,6 +244,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/projects/{id}/domains/access", s.handleSetAccess)
 	admin("GET /api/settings", s.handleGetSettings)
 	admin("PUT /api/settings/github", s.handleSetGitHub)
+	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)

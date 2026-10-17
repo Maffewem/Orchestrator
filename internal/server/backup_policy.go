@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
@@ -122,7 +121,7 @@ func (s *Server) pruneBackups(ctx context.Context, deviceID, name string) {
 		s.log.Error("prune backups", "err", err)
 	}
 	for _, id := range ids {
-		os.Remove(s.backupPath(id))
+		s.removeBackupFiles(id)
 	}
 }
 

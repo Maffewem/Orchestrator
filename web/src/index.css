@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-brand: #f6821f;
+  --color-primary: #0051c3;
+  --color-primary-hover: #003d94;
+  --color-ok: #16794c;
+  --color-warn: #b45309;
+  --color-bad: #c42b1c;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-neutral-50 text-neutral-900 antialiased;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgb(0 81 195 / 0.35); }
+  100% { box-shadow: 0 0 0 6px rgb(0 81 195 / 0); }
+}
+.pulse-ring {
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+
+@keyframes stripes {
+  from { background-position: 0 0; }
+  to { background-position: 28px 0; }
+}
+.progress-stripes {
+  background-image: repeating-linear-gradient(-45deg, rgb(0 81 195 / 0.12) 0 7px, transparent 7px 14px);
+  background-size: 28px 100%;
+  animation: stripes 1s linear infinite;
+}

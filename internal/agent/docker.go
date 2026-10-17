@@ -336,7 +336,8 @@ func (d *Docker) Pull(ctx context.Context, ref string, logf func(string)) error 
 	defer resp.Body.Close()
 	return jsonStream(resp.Body, func(m streamMsg) {
 		if m.Status == "" || m.Progress != "" || strings.HasPrefix(m.Status, "Waiting") ||
-			strings.HasPrefix(m.Status, "Downloading") || strings.HasPrefix(m.Status, "Extracting") {
+			strings.HasPrefix(m.Status, "Downloading") || strings.HasPrefix(m.Status, "Extracting") ||
+			m.Status == "Pulling fs layer" || m.Status == "Verifying Checksum" || m.Status == "Download complete" {
 			return
 		}
 		if m.ID != "" {

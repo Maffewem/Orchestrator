@@ -30,6 +30,7 @@ func env(key, def string) string {
 func main() {
 	addr := flag.String("addr", env("ORCH_ADDR", ":8080"), "listen address")
 	dbPath := flag.String("db", env("ORCH_DB", "orchestrator.db"), "SQLite database path")
+	downloads := flag.String("downloads", env("ORCH_DOWNLOADS", ""), "directory of agent binaries served to /install.sh")
 	interval := flag.Duration("heartbeat", 5*time.Second, "agent heartbeat interval")
 	flag.Parse()
 
@@ -50,6 +51,7 @@ func main() {
 		UI:                web.Dist(),
 		Version:           version,
 		Logger:            log,
+		DownloadsDir:      *downloads,
 	})
 	if err != nil {
 		log.Error("start server", "err", err)

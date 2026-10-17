@@ -4,8 +4,10 @@ package server
 import (
 	"context"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -31,6 +33,8 @@ type Config struct {
 	Logger  *slog.Logger
 	// GitHubAPI is the GitHub REST base URL; tests point it at a fake.
 	GitHubAPI string
+	// DownloadsDir holds agent binaries (orchestrator-agent-linux-<arch>) for /install.sh.
+	DownloadsDir string
 }
 
 type Server struct {
@@ -166,6 +170,11 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/github", s.handleSetGitHub)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 
+	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
+	if s.cfg.DownloadsDir != "" {
+		mux.Handle("GET /downloads/", http.StripPrefix("/downloads/", http.FileServer(http.Dir(s.cfg.DownloadsDir))))
+	}
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
@@ -243,6 +252,19 @@ func (s *Server) uiHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(index)
 	})
+}
+
+//go:embed install.sh
+var installScript string
+
+// handleInstallScript serves the agent installer with this server's URL filled in.
+func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	io.WriteString(w, strings.ReplaceAll(installScript, "{{SERVER}}", scheme+"://"+r.Host))
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

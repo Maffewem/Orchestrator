@@ -11,6 +11,7 @@ type HostInfo struct {
 	Arch         string      `json:"arch"`
 	Kernel       string      `json:"kernel"`
 	Model        string      `json:"model,omitempty"`
+	Addresses    []string    `json:"addresses,omitempty"`
 	CPUs         int         `json:"cpus"`
 	MemoryTotal  uint64      `json:"memory_total"`
 	AgentVersion string      `json:"agent_version"`

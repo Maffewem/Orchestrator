@@ -4,6 +4,7 @@ import { Archive, Download, GitBranch, Play, RefreshCw, RotateCcw, RotateCw, Squ
 import { api, type Backup, type BackupPolicy, type Deployment, type FleetContainer } from "../api";
 import { useCrumbs } from "../components/Layout";
 import DomainsPanel from "../components/Domains";
+import PreviewsPanel from "../components/Previews";
 import { waitFor } from "../components/ContainerTable";
 import { Badge, Button, Card, CardHeader, Empty, ErrorNote, Field, Loading, PageHeader, StatusDot, Table, Tabs, Td, inputClass } from "../components/ui";
 import { ago, bytes, pct, usePoll, useTick } from "../lib";
@@ -47,6 +48,7 @@ export default function WorkerPage() {
             { to: base, label: "Overview", end: true },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/domains`, label: "Domains" },
+            ...(w.project_id ? [{ to: `${base}/previews`, label: "Previews" }] : []),
             { to: `${base}/backups`, label: "Backups" },
           ]}
         />
@@ -68,6 +70,7 @@ export default function WorkerPage() {
             )
           }
         />
+        <Route path="previews" element={w.project_id ? <PreviewsPanel projectId={w.project_id} /> : null} />
         <Route path="backups" element={<Backups w={w} canBackup={!!device.data?.host.capabilities?.includes("backup")} deviceLoaded={!!device.data} />} />
       </Routes>
     </>

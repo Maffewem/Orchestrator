@@ -34,6 +34,22 @@ CREATE TABLE IF NOT EXISTS domains (
 	created_at  INTEGER NOT NULL,
 	UNIQUE(hostname, path)
 );
+CREATE TABLE IF NOT EXISTS previews (
+	id            TEXT PRIMARY KEY,
+	project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	branch        TEXT NOT NULL,
+	slug          TEXT NOT NULL,
+	pr            INTEGER NOT NULL DEFAULT 0,
+	title         TEXT NOT NULL DEFAULT '',
+	author        TEXT NOT NULL DEFAULT '',
+	sha           TEXT NOT NULL DEFAULT '',
+	host_port     INTEGER NOT NULL,
+	deployment_id TEXT NOT NULL DEFAULT '',
+	created_at    INTEGER NOT NULL,
+	updated_at    INTEGER NOT NULL,
+	UNIQUE(project_id, branch),
+	UNIQUE(project_id, slug)
+);
 CREATE TABLE IF NOT EXISTS users (
 	id            TEXT PRIMARY KEY,
 	username      TEXT NOT NULL UNIQUE,
@@ -152,6 +168,10 @@ func Open(path string) (*Store, error) {
 	// SQLite allows one writer; a single connection keeps ":memory:" databases shared too.
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := addColumn(db, "deployments", "preview_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

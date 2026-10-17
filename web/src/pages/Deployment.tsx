@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server, Undo2 } from "lucide-react";
 import { api, type Deployment, type Step } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, ErrorNote, Loading, StatusIcon } from "../components/ui";
 import { visitUrl } from "./Project";
+import { useCan } from "../components/auth";
 import { ago, clock, cx, duration, shortId, span, usePoll, useTick } from "../lib";
 
 type LogLine = { time: string; text: string; step: number };
@@ -39,6 +40,7 @@ export default function DeploymentPage() {
   const project = usePoll(() => (d ? api.project(d.project_id) : Promise.resolve(null)), 0, [d?.project_id]);
   const device = usePoll(() => (d ? api.device(d.device_id).catch(() => null) : Promise.resolve(null)), 0, [d?.device_id]);
   const domains = usePoll(() => (d ? api.projectDomains(d.project_id).catch(() => null) : Promise.resolve(null)), 0, [d?.project_id]);
+  const can = useCan("operator");
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useTick(live ? 500 : 60000);
@@ -89,6 +91,23 @@ export default function DeploymentPage() {
           >
             Retry deployment
           </Button>
+          {can && d.status === "succeeded" && !d.preview_id && (
+            <Button
+              icon={<Undo2 className="size-4" />}
+              onClick={async () => {
+                if (!window.confirm("Roll back to this version? It becomes the live version.")) return;
+                try {
+                  const n = await api.rollbackDeployment(d.id);
+                  nav(`/deployments/${n.id}`);
+                  setLive(true);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            >
+              Roll back to this
+            </Button>
+          )}
         </div>
       </div>
       {error && (

@@ -6,7 +6,7 @@ import { Badge, Button, Card, CardHeader, CopyButton, Empty, ErrorNote, Field, L
 import { cx, usePoll } from "../lib";
 import { useCan } from "./auth";
 
-function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
     <button
       role="switch"

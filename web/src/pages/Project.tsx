@@ -6,6 +6,7 @@ import { useCrumbs } from "../components/Layout";
 import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
 import DomainsPanel from "../components/Domains";
+import PreviewsPanel from "../components/Previews";
 import ProjectForm from "./ProjectForm";
 import { ago, usePoll } from "../lib";
 
@@ -56,6 +57,7 @@ export default function ProjectPage() {
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/metrics`, label: "Metrics" },
             { to: `${base}/domains`, label: "Domains" },
+            ...(p.source.type === "github" ? [{ to: `${base}/previews`, label: "Previews" }] : []),
             { to: `${base}/settings`, label: "Settings" },
           ]}
         />
@@ -90,6 +92,7 @@ export default function ProjectPage() {
         <Route index element={<ProjectOverview p={p} device={device.data} url={url} />} />
         <Route path="deployments" element={<ProjectDeployments p={p} />} />
         <Route path="domains" element={<DomainsPanel projectId={p.id} />} />
+        <Route path="previews" element={<PreviewsPanel projectId={p.id} />} />
         <Route path="metrics" element={<ProjectMetrics p={p} />} />
         <Route path="settings" element={<ProjectSettings p={p} onSaved={project.reload} />} />
       </Routes>

@@ -50,7 +50,7 @@ func TestDomains(t *testing.T) {
 	if v.Production == nil || v.Production.Hostname != "blog.example.com" || !v.Production.Enabled || v.Production.Status != "pending" {
 		t.Fatalf("production: %+v", v.Production)
 	}
-	if v.Preview == nil || v.Preview.Hostname != "*-blog.example.com" || v.Preview.Enabled {
+	if v.Preview == nil || v.Preview.Hostname != "<branch>-blog.example.com" || v.Preview.Enabled {
 		t.Fatalf("preview: %+v", v.Preview)
 	}
 	if len(v.Production.Records) != 1 || v.Production.Records[0].Value != "192.168.1.20" {
@@ -102,7 +102,7 @@ func TestDomains(t *testing.T) {
 	for _, c := range resp.Commands {
 		file = c.Args["caddyfile"]
 	}
-	if !strings.Contains(file, "http://*-blog.example.com {") || strings.Contains(file, "\nblog.example.com {") {
+	if strings.Contains(file, "http://") || strings.Contains(file, "\nblog.example.com {") {
 		t.Fatalf("toggled caddyfile:\n%s", file)
 	}
 

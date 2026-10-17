@@ -203,6 +203,13 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if pvs, _ := s.store.ListPreviews(r.Context(), p.ID); len(pvs) > 0 {
+		s.previewMu.Lock()
+		for _, pv := range pvs {
+			s.removePreview(r.Context(), p, pv, "its project was deleted")
+		}
+		s.previewMu.Unlock()
+	}
 	if err := s.store.DeleteProject(r.Context(), p.ID); err != nil {
 		s.internal(w, err)
 		return
@@ -214,6 +221,11 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 // deploy queues a deployment of p. GitHub projects build commit; image projects ignore it.
 func (s *Server) deploy(ctx context.Context, p *store.Project, commit *store.Commit, trigger string) (*store.Deployment, error) {
+	return s.deployWith(ctx, p, commit, trigger, nil)
+}
+
+// deployWith is deploy with a chance to adjust the spec before it is queued.
+func (s *Server) deployWith(ctx context.Context, p *store.Project, commit *store.Commit, trigger string, tweak func(*api.DeploySpec)) (*store.Deployment, error) {
 	if _, err := s.store.GetDevice(ctx, p.DeviceID); err != nil {
 		return nil, errors.New("the project's device no longer exists")
 	}
@@ -223,6 +235,9 @@ func (s *Server) deploy(ctx context.Context, p *store.Project, commit *store.Com
 	spec, err := specFor(p, commit)
 	if err != nil {
 		return nil, err
+	}
+	if tweak != nil {
+		tweak(&spec)
 	}
 	d, err := s.store.CreateDeployment(ctx, store.NewDeployment{
 		ProjectID: p.ID, DeviceID: p.DeviceID, Trigger: trigger, Commit: commit, Spec: spec,
@@ -306,7 +321,17 @@ func (s *Server) handleRetryDeployment(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	d, err := s.deploy(r.Context(), p, old.Commit, store.TriggerRetry)
+	var d *store.Deployment
+	if old.PreviewID != "" {
+		pv, perr := s.store.GetPreview(r.Context(), old.PreviewID)
+		if perr != nil || old.Commit == nil {
+			writeError(w, http.StatusGone, "the preview was removed")
+			return
+		}
+		d, err = s.deployPreview(r.Context(), p, pv, old.Commit, store.TriggerRetry)
+	} else {
+		d, err = s.deploy(r.Context(), p, old.Commit, store.TriggerRetry)
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

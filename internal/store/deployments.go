@@ -25,6 +25,8 @@ const (
 	TriggerPush   = "push"
 	TriggerRetry  = "retry"
 	TriggerPoll   = "poll"
+	// TriggerRollback redeploys an earlier version, reusing its image when the device still has it.
+	TriggerRollback = "rollback"
 )
 
 // Commit is the git revision a deployment was built from.
@@ -39,19 +41,21 @@ type Commit struct {
 
 // Deployment is one attempt to roll a project out to a device.
 type Deployment struct {
-	ID         string         `json:"id"`
-	ProjectID  string         `json:"project_id"`
-	DeviceID   string         `json:"device_id"`
-	Trigger    string         `json:"trigger"`
-	Commit     *Commit        `json:"commit"`
-	Spec       api.DeploySpec `json:"spec"`
-	Status     string         `json:"status"`
-	Error      string         `json:"error,omitempty"`
-	CommandID  string         `json:"command_id"`
-	CreatedAt  time.Time      `json:"created_at"`
-	StartedAt  *time.Time     `json:"started_at"`
-	FinishedAt *time.Time     `json:"finished_at"`
-	Steps      []Step         `json:"steps,omitempty"`
+	ID        string         `json:"id"`
+	ProjectID string         `json:"project_id"`
+	DeviceID  string         `json:"device_id"`
+	Trigger   string         `json:"trigger"`
+	Commit    *Commit        `json:"commit"`
+	Spec      api.DeploySpec `json:"spec"`
+	Status    string         `json:"status"`
+	Error     string         `json:"error,omitempty"`
+	CommandID string         `json:"command_id"`
+	// PreviewID is set for deployments of a preview environment rather than production.
+	PreviewID  string     `json:"preview_id,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	StartedAt  *time.Time `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	Steps      []Step     `json:"steps,omitempty"`
 }
 
 // Step is one stage of a deployment, with its log.
@@ -91,13 +95,13 @@ func formatLines(lines []api.LogLine) string {
 	return b.String()
 }
 
-const deploymentCols = `id, project_id, device_id, trigger, git_commit, spec, status, error, command_id, created_at, started_at, finished_at`
+const deploymentCols = `id, project_id, device_id, trigger, git_commit, spec, status, error, command_id, created_at, started_at, finished_at, preview_id`
 
 func scanDeployment(sc interface{ Scan(...any) error }) (*Deployment, error) {
 	var d Deployment
 	var commit, spec string
 	var created, started, finished int64
-	if err := sc.Scan(&d.ID, &d.ProjectID, &d.DeviceID, &d.Trigger, &commit, &spec, &d.Status, &d.Error, &d.CommandID, &created, &started, &finished); err != nil {
+	if err := sc.Scan(&d.ID, &d.ProjectID, &d.DeviceID, &d.Trigger, &commit, &spec, &d.Status, &d.Error, &d.CommandID, &created, &started, &finished, &d.PreviewID); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(spec), &d.Spec); err != nil {
@@ -119,6 +123,7 @@ type NewDeployment struct {
 	Trigger   string
 	Commit    *Commit
 	Spec      api.DeploySpec
+	PreviewID string
 }
 
 // CreateDeployment records a deployment with all its steps pending and queues the deploy
@@ -138,9 +143,9 @@ func (s *Store) CreateDeployment(ctx context.Context, in NewDeployment) (*Deploy
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO deployments(id, project_id, device_id, trigger, git_commit, spec, status, command_id, created_at)
-		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, in.ProjectID, in.DeviceID, in.Trigger, mustJSON(in.Commit), mustJSON(spec), DeploymentQueued, cmd.ID, now.UnixMilli()); err != nil {
+		`INSERT INTO deployments(id, project_id, device_id, trigger, git_commit, spec, status, command_id, created_at, preview_id)
+		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, in.ProjectID, in.DeviceID, in.Trigger, mustJSON(in.Commit), mustJSON(spec), DeploymentQueued, cmd.ID, now.UnixMilli(), in.PreviewID); err != nil {
 		return nil, err
 	}
 	names := api.StepsFor(spec)
@@ -157,7 +162,7 @@ func (s *Store) CreateDeployment(ctx context.Context, in NewDeployment) (*Deploy
 		return nil, err
 	}
 	return &Deployment{ID: id, ProjectID: in.ProjectID, DeviceID: in.DeviceID, Trigger: in.Trigger, Commit: in.Commit,
-		Spec: spec, Status: DeploymentQueued, CommandID: cmd.ID, CreatedAt: now, Steps: steps}, nil
+		Spec: spec, Status: DeploymentQueued, CommandID: cmd.ID, PreviewID: in.PreviewID, CreatedAt: now, Steps: steps}, nil
 }
 
 // GetDeployment returns a deployment with its steps.
@@ -193,6 +198,9 @@ type DeploymentFilter struct {
 	DeviceID  string
 	ProjectID string
 	Limit     int
+	// Preview narrows to one preview environment's deployments; "*" includes every preview
+	// as well as production. The default is production only.
+	Preview string
 }
 
 // ListDeployments returns deployments newest first, without steps.
@@ -209,6 +217,14 @@ func (s *Store) ListDeployments(ctx context.Context, f DeploymentFilter) ([]*Dep
 	if f.ProjectID != "" {
 		q += ` AND project_id = ?`
 		args = append(args, f.ProjectID)
+	}
+	switch f.Preview {
+	case "*":
+	case "":
+		q += ` AND preview_id = ''`
+	default:
+		q += ` AND preview_id = ?`
+		args = append(args, f.Preview)
 	}
 	q += ` ORDER BY created_at DESC, rowid DESC LIMIT ?`
 	args = append(args, f.Limit)

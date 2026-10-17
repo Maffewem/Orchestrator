@@ -27,9 +27,10 @@ type HostInfo struct {
 
 // Agent capabilities.
 const (
-	CapBackup = "backup" // container.backup and container.restore
-	CapUpdate = "update" // agent.update
-	CapProxy  = "proxy"  // proxy.sync
+	CapBackup  = "backup"  // container.backup and container.restore
+	CapUpdate  = "update"  // agent.update
+	CapProxy   = "proxy"   // proxy.sync
+	CapPreview = "preview" // container.remove
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -114,6 +115,8 @@ const (
 	ActionAgentUpdate = "agent.update"
 	// ActionProxySync writes Args["caddyfile"] for the per-device Caddy proxy and (re)starts it.
 	ActionProxySync = "proxy.sync"
+	// ActionRemove force-removes the container named Target (a preview that is no longer wanted).
+	ActionRemove = "container.remove"
 )
 
 // AgentUpdateInfo tells an agent which build the control plane serves for its architecture.
@@ -168,6 +171,8 @@ type DeploySpec struct {
 	Build *BuildSpec `json:"build,omitempty"`
 	// Labels are added to the container.
 	Labels map[string]string `json:"labels,omitempty"`
+	// Reuse lets the agent skip the build when Image already exists on the device (rollbacks).
+	Reuse bool `json:"reuse,omitempty"`
 }
 
 // BuildSpec asks the agent to build the image on the device from a git context

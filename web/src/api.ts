@@ -283,7 +283,35 @@ async function downloadBackup(b: Backup) {
   URL.revokeObjectURL(url);
 }
 
+export interface UpdateSchedule {
+  mode: "off" | "daily" | "weekly";
+  time: string;
+  weekday: number;
+  tz: string;
+  agents: boolean;
+}
+
+export interface UpdateStatus {
+  version: string;
+  image?: string;
+  can_update: boolean;
+  reason?: string;
+  busy?: "checking" | "updating";
+  updating: boolean;
+  check?: { checked_at: string; version?: string; newer: boolean; error?: string };
+  result?: { at: string; ok: boolean; message: string };
+  schedule: UpdateSchedule;
+  next_run?: string;
+  agents: { device_id: string; name: string; version: string; arch: string; online: boolean; in_container: boolean; outdated: boolean }[];
+}
+
 export const api = {
+  updateStatus: () => request<UpdateStatus>("GET", "/api/system/update"),
+  checkUpdate: () => request<UpdateStatus>("POST", "/api/system/update/check"),
+  applyUpdate: (agents: boolean) => request<UpdateStatus>("POST", `/api/system/update/apply${agents ? "?agents=1" : ""}`),
+  updateAgents: (device?: string) =>
+    request<{ queued: number }>("POST", `/api/system/update/agents${device ? `?device=${device}` : ""}`),
+  setUpdateSchedule: (s: UpdateSchedule) => request<UpdateStatus>("PUT", "/api/system/update/schedule", s),
   backups: () => request<Backup[]>("GET", "/api/backups"),
   createBackup: (deviceId: string, containerId: string) =>
     request<Backup>("POST", `/api/devices/${deviceId}/containers/${containerId}/backup`),

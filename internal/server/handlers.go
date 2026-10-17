@@ -170,6 +170,12 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 			s.backupCommandFailed(r, c, res)
 			s.event(r.Context(), d.ID, "error", "backup.failed", fmt.Sprintf("Backup of %s failed: %s", containerName(d, c.Target), res.Error))
 		}
+	case api.ActionAgentUpdate:
+		if res.OK {
+			s.event(r.Context(), d.ID, "info", "agent.update", fmt.Sprintf("Agent on %s: %s", d.Name, res.Output))
+		} else {
+			s.event(r.Context(), d.ID, "error", "agent.update", fmt.Sprintf("Agent update on %s failed: %s", d.Name, res.Error))
+		}
 	case api.ActionRestore:
 		lvl, msg := "info", "restored from backup"
 		if !res.OK {

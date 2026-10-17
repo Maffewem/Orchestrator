@@ -27,6 +27,8 @@ RUN set -e; for t in amd64:amd64: arm64:arm64: armv7:arm:7 armv6:arm:6; do \
 RUN mkdir -p /out/data
 
 FROM alpine:3.22
+ARG VERSION=dev
+LABEL org.opencontainers.image.version=$VERSION
 # CA certificates come from the build stage so this image builds without network access.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/orchestrator-server /usr/local/bin/
@@ -36,4 +38,7 @@ USER 10001
 ENV ORCH_DB=/data/orchestrator.db ORCH_DOWNLOADS=/downloads ORCH_ADDR=:8080
 VOLUME /data
 EXPOSE 8080
+# The updater swaps containers only once the new one reports healthy.
+HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/api/health || exit 1
 ENTRYPOINT ["orchestrator-server"]

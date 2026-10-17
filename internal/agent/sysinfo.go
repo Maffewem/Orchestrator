@@ -43,6 +43,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 		Arch:         runtime.GOARCH,
 		CPUs:         runtime.NumCPU(),
 		AgentVersion: Version,
+		InContainer:  InContainer(),
 	}
 	if a.cfg.HostRoot != "" {
 		h.Hostname = readTrim(a.hostPath("/etc/hostname"))

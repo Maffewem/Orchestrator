@@ -53,6 +53,22 @@ agent install on each new device.
   to be stopped first. Archives are stored unencrypted in `-backups` (default: beside the
   database), so protect that directory like the database itself.
 
+- **Updates** (Updates page): check for the latest published build, update the server on
+  demand, and set a schedule (daily or weekly, at a time in your time zone, or off). The
+  server pulls the new image, then a short-lived helper container from that image swaps the
+  server's container and keeps the old one as `orchestrator-previous`. If the new container
+  doesn't report healthy within 90 seconds, the helper puts the old one back. Agents
+  download the build the server carries, check its SHA-256 and that it runs, keep their old
+  binary, and fall back to it if the new one never manages a heartbeat. Agents running as
+  containers are updated by pulling a newer image instead.
+
+  Updating the server from the dashboard needs the Docker socket inside the server
+  container, which gives that container full control of Docker on the host. It is therefore
+  off by default. To turn it on, run the server with
+  `-v /var/run/docker.sock:/var/run/docker.sock --group-add "$(stat -c %g /var/run/docker.sock)"`
+  (or the equivalent in compose). Without it, the page still shows versions, and agent
+  updates and schedules for agents work.
+
 ### Supported devices
 
 The agent is built for `linux/amd64`, `linux/arm64` (Pi 3/4/5 on 64-bit OS),
@@ -180,6 +196,8 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `POST /api/devices/{id}/containers/{cid}/backup` | back up a container |
 | `GET /api/backups`, `GET /api/backups/{id}/download`, `DELETE /api/backups/{id}` | backups |
 | `POST /api/backups/{id}/restore` | restore a backup into its container |
+| `GET /api/system/update`, `POST /api/system/update/check`, `POST /api/system/update/apply` | update status, check, update the server |
+| `PUT /api/system/update/schedule`, `POST /api/system/update/agents` | update schedule, update agents |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
 

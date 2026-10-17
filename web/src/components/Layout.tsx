@@ -21,7 +21,7 @@ const nav = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/projects", label: "Projects", icon: Rocket },
   { to: "/devices", label: "Devices", icon: Server },
-  { to: "/containers", label: "Containers", icon: Boxes },
+  { to: "/containers", label: "Workers", icon: Boxes },
   { to: "/activity", label: "Activity", icon: Activity },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

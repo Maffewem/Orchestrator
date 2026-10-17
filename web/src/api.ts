@@ -74,6 +74,9 @@ export interface FleetContainer extends Container {
   device_id: string;
   device_name: string;
   device_status: string;
+  device_addresses: string[];
+  project_id?: string;
+  project_name?: string;
 }
 
 export interface Command {

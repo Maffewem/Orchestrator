@@ -374,9 +374,13 @@ func (s *Server) handleGetCommand(w http.ResponseWriter, r *http.Request) {
 
 type fleetContainer struct {
 	api.Container
-	DeviceID     string `json:"device_id"`
-	DeviceName   string `json:"device_name"`
-	DeviceStatus string `json:"device_status"`
+	DeviceID        string   `json:"device_id"`
+	DeviceName      string   `json:"device_name"`
+	DeviceStatus    string   `json:"device_status"`
+	DeviceAddresses []string `json:"device_addresses"`
+	// ProjectID/ProjectName are set for containers deployed by Orchestrator.
+	ProjectID   string `json:"project_id,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
 }
 
 func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
@@ -385,11 +389,28 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	projects, err := s.store.ListProjects(r.Context())
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	names := map[string]string{}
+	for _, p := range projects {
+		names[p.ID] = p.Name
+	}
 	out := []fleetContainer{}
 	for _, d := range devices {
 		status := s.view(d).Status
+		addrs := d.Host.Addresses
+		if addrs == nil {
+			addrs = []string{}
+		}
 		for _, c := range d.Containers {
-			out = append(out, fleetContainer{Container: c, DeviceID: d.ID, DeviceName: d.Name, DeviceStatus: status})
+			fc := fleetContainer{Container: c, DeviceID: d.ID, DeviceName: d.Name, DeviceStatus: status, DeviceAddresses: addrs}
+			if id := c.Labels["orchestrator.project"]; names[id] != "" {
+				fc.ProjectID, fc.ProjectName = id, names[id]
+			}
+			out = append(out, fc)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

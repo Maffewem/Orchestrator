@@ -49,7 +49,7 @@ export default function DevicePage() {
           path="containers"
           element={
             <Card>
-              <ContainerTable containers={d.containers} deviceId={d.id} onChanged={dev.reload} />
+              <ContainerTable containers={d.containers} deviceId={d.id} addresses={d.host.addresses ?? []} onChanged={dev.reload} />
             </Card>
           }
         />

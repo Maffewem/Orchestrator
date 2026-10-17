@@ -4,6 +4,18 @@ import { FileText, Play, RotateCw, Square } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, Loading, Modal, StatusDot, Table, Td } from "./ui";
 
+/** Reachable URLs for a container's published ports on its device. */
+export function endpoints(c: Container, addresses: string[]): string[] {
+  const host = addresses[0];
+  const out = new Set<string>();
+  for (const p of c.ports ?? []) {
+    if (!p.public_port || p.type !== "tcp") continue;
+    const ip = p.ip && p.ip !== "0.0.0.0" && p.ip !== "::" ? p.ip : host;
+    if (ip) out.add(`${ip.includes(":") ? `[${ip}]` : ip}:${p.public_port}`);
+  }
+  return [...out];
+}
+
 function ports(c: Container) {
   const seen = new Set<string>();
   for (const p of c.ports ?? []) {
@@ -59,9 +71,12 @@ export default function ContainerTable({
   deviceId,
   showDevice,
   onChanged,
+  addresses,
 }: {
   containers: (Container | FleetContainer)[];
   deviceId?: string;
+  /** Device addresses, for per-device tables. */
+  addresses?: string[];
   showDevice?: boolean;
   onChanged?: () => void;
 }) {
@@ -88,7 +103,7 @@ export default function ContainerTable({
   return (
     <>
       {error && <p className="border-b border-neutral-200 bg-red-50 px-5 py-2 text-sm text-bad">{error}</p>}
-      <Table head={["Name", ...(showDevice ? ["Device"] : []), "Image", "Status", "Ports", ""]}>
+      <Table head={["Name", ...(showDevice ? ["Device"] : []), "Image", "Status", "Ports", "Endpoints", ""]}>
         {containers.map((c) => {
           const dev = "device_id" in c ? c.device_id : deviceId!;
           const running = c.state === "running";
@@ -99,18 +114,33 @@ export default function ContainerTable({
                   <StatusDot status={c.state} />
                   {c.name}
                 </span>
-                {c.compose_project && <span className="ml-4 text-xs text-neutral-500">compose: {c.compose_project}</span>}
+                {"project_name" in c && c.project_name ? (
+                  <Link to={`/projects/${c.project_id}`} className="ml-4 text-xs text-primary hover:underline">
+                    project: {c.project_name}
+                  </Link>
+                ) : (
+                  c.compose_project && <span className="ml-4 text-xs text-neutral-500">stack: {c.compose_project}</span>
+                )}
               </Td>
               {showDevice && "device_name" in c && (
                 <Td>
-                  <Link to={`/devices/${c.device_id}`} className="text-primary hover:underline">
+                  <Link to={`/devices/${c.device_id}`} className="flex items-center gap-1.5 text-primary hover:underline">
+                    <StatusDot status={c.device_status} />
                     {c.device_name}
                   </Link>
+                  <span className="mt-0.5 block font-mono text-xs text-neutral-500">{c.device_addresses.join(", ") || "no address reported"}</span>
                 </Td>
               )}
               <Td className="max-w-64 truncate font-mono text-xs">{c.image}</Td>
               <Td className="whitespace-nowrap text-neutral-600">{c.status}</Td>
               <Td className="font-mono text-xs whitespace-nowrap text-neutral-600">{ports(c) || "—"}</Td>
+              <Td className="text-xs whitespace-nowrap">
+                {running && endpoints(c, addresses ?? ("device_addresses" in c ? c.device_addresses : [])).map((e) => (
+                  <a key={e} href={`http://${e}`} target="_blank" rel="noreferrer" className="block font-mono text-primary hover:underline">
+                    {e}
+                  </a>
+                ))}
+              </Td>
               <Td>
                 <div className="flex justify-end gap-1">
                   {running ? (

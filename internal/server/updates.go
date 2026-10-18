@@ -223,12 +223,12 @@ func orDefault(v, def string) string {
 }
 
 type updateStatus struct {
-	Version    string            `json:"version"`
-	Image      string            `json:"image,omitempty"`
-	CanUpdate  bool              `json:"can_update"`
-	Reason     string            `json:"reason,omitempty"`
-	Busy       string            `json:"busy,omitempty"`
-	Updating   bool              `json:"updating"`
+	Version   string `json:"version"`
+	Image     string `json:"image,omitempty"`
+	CanUpdate bool   `json:"can_update"`
+	Reason    string `json:"reason,omitempty"`
+	Busy      string `json:"busy,omitempty"`
+	Updating  bool   `json:"updating"`
 	// Stage is where a server update is: pulling | handover | restarting.
 	Stage      string            `json:"stage,omitempty"`
 	Check      *updateCheck      `json:"check,omitempty"`

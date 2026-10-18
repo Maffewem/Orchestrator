@@ -248,13 +248,15 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
   );
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+/** `as="div"` for fields holding buttons: inside a <label>, a click ending on the label (e.g. after resizing a textarea) would press the first button. */
+export function Field({ label, hint, children, as = "label" }: { label: string; hint?: ReactNode; children: ReactNode; as?: "label" | "div" }) {
+  const Tag = as;
   return (
-    <label className="block">
+    <Tag className="block">
       <span className="mb-1.5 block text-sm font-medium">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-xs text-neutral-500">{hint}</span>}
-    </label>
+    </Tag>
   );
 }
 

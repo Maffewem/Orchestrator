@@ -196,7 +196,7 @@ export default function ProjectForm({
             </select>
           </Field>
         </div>
-        <Field label="Environment variables" hint={node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
+        <Field as="div" label="Environment variables" hint={node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
           <EnvEditor value={env} onChange={setEnv} />
         </Field>
       </fieldset>

@@ -424,6 +424,13 @@ export interface UpdateSchedule {
   agents: boolean;
 }
 
+export interface AgentProgress {
+  state: "queued" | "downloading" | "restarting" | "done" | "failed";
+  message: string;
+  to: string;
+  at: string;
+}
+
 export interface UpdateStatus {
   version: string;
   image?: string;
@@ -431,11 +438,12 @@ export interface UpdateStatus {
   reason?: string;
   busy?: "checking" | "updating";
   updating: boolean;
+  stage?: "pulling" | "handover" | "restarting";
   check?: { checked_at: string; version?: string; newer: boolean; error?: string };
   result?: { at: string; ok: boolean; message: string };
   schedule: UpdateSchedule;
   next_run?: string;
-  agents: { device_id: string; name: string; version: string; arch: string; online: boolean; in_container: boolean; outdated: boolean; can_update: boolean }[];
+  agents: { device_id: string; name: string; version: string; arch: string; online: boolean; in_container: boolean; outdated: boolean; can_update: boolean; progress?: AgentProgress }[];
 }
 
 export interface BackupPolicy {

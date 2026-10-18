@@ -76,7 +76,8 @@ func Check(ctx context.Context, d *agent.Docker, s *Self) (*Latest, error) {
 		return nil, err
 	}
 	v := img.Labels["org.opencontainers.image.version"]
-	if v == "" {
+	// Images published before the workflow fix carry the tag name as their version.
+	if v == "" || v == "latest" {
 		if r := img.Labels["org.opencontainers.image.revision"]; len(r) >= 7 {
 			v = r[:7]
 		}

@@ -103,6 +103,7 @@ export default function ContainerTable({
                 <Link to={`/workers/${dev}/${encodeURIComponent(c.name)}`} className="flex items-center gap-2 font-medium text-neutral-900 hover:text-primary hover:underline">
                   <StatusDot status={c.state} />
                   {c.name}
+                  {c.name === "orchestrator-previous" && <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-normal text-neutral-600" title="Kept by the last server update so it can be rolled back">rollback copy</span>}
                 </Link>
                 {"project_name" in c && c.project_name ? (
                   <Link to={`/projects/${c.project_id}`} className="ml-4 text-xs text-primary hover:underline">

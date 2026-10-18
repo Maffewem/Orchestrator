@@ -178,14 +178,18 @@ func (s *Server) syncPreviews(ctx context.Context, p *store.Project) {
 		commit := &store.Commit{Repo: p.Source.Repo, Branch: pr.Head.Ref, SHA: pr.Head.SHA,
 			Message: pr.Title, Author: pr.User.Login, URL: pr.HTMLURL}
 		pv := byBranch[pr.Head.Ref]
+		if pv != nil && pv.SHA == pr.Head.SHA {
+			continue
+		}
+		if w := previewWatch(p.Source); (len(w.Include) > 0 || len(w.Exclude) > 0) && !wants(w, s.pullFiles(ctx, p.Source.Repo, pr.Number)) {
+			continue // nothing the Previews tab watches changed
+		}
 		if pv == nil {
 			pv = &store.Preview{ProjectID: p.ID, Branch: pr.Head.Ref, PR: pr.Number, Title: pr.Title, Author: pr.User.Login}
 			if err := s.newPreview(ctx, p, pv); err != nil {
 				s.log.Warn("previews: create", "project", p.Name, "branch", pr.Head.Ref, "err", err)
 				continue
 			}
-		} else if pv.SHA == pr.Head.SHA {
-			continue
 		}
 		pv.PR, pv.Title, pv.Author = pr.Number, pr.Title, pr.User.Login
 		if _, err := s.deployPreview(ctx, p, pv, commit, store.TriggerPush); err != nil {
@@ -229,10 +233,42 @@ func (s *Server) newPreview(ctx context.Context, p *store.Project, pv *store.Pre
 	return err
 }
 
+// previewWatch is the watch paths for previews: their own when set, else the production ones.
+func previewWatch(src store.Source) store.Watch {
+	if o := src.Preview; o != nil && (len(o.Include) > 0 || len(o.Exclude) > 0) {
+		return o.Watch
+	}
+	return src.Watch
+}
+
+// previewSource is the project's source with the Previews tab's overrides applied; whatever
+// is left empty there keeps its production value.
+func previewSource(src store.Source) store.Source {
+	o := src.Preview
+	if o == nil {
+		return src
+	}
+	if o.Context != "" {
+		src.Context = o.Context
+	}
+	if src.Node != nil {
+		n := *src.Node
+		if o.Build != "" {
+			n.Build = o.Build
+		}
+		if o.Start != "" && !n.Static {
+			n.Start = o.Start
+		}
+		src.Node = &n
+	}
+	return src
+}
+
 // deployPreview builds one revision of a preview on the project's device.
 func (s *Server) deployPreview(ctx context.Context, p *store.Project, pv *store.Preview, commit *store.Commit, trigger string) (*store.Deployment, error) {
 	cp := *p
 	cp.Name = p.Name + "--" + pv.Slug
+	cp.Source = previewSource(p.Source)
 	spec, err := specFor(&cp, commit)
 	if err != nil {
 		return nil, err

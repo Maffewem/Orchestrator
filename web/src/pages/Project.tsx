@@ -264,8 +264,9 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
         <ProjectForm
           initial={p}
           submitLabel={saved ? "Saved" : "Save changes"}
-          onSubmit={async (input) => {
+          onSubmit={async (input, previews) => {
             await api.updateProject(p.id, input);
+            if (previews) await api.setPreviewSettings(p.id, previews);
             setSaved(true);
             setTimeout(() => setSaved(false), 1500);
             onSaved();

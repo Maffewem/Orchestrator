@@ -13,8 +13,9 @@ export default function NewProjectPage() {
       <Card className="p-6">
         <ProjectForm
           submitLabel="Save and deploy"
-          onSubmit={async (input) => {
+          onSubmit={async (input, previews) => {
             const p = await api.createProject(input);
+            if (previews?.enabled) await api.setPreviewSettings(p.id, previews).catch(() => {});
             try {
               const d = await api.deployProject(p.id);
               nav(`/deployments/${d.id}`);

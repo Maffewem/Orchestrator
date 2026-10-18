@@ -1,11 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { api, type UpdateSchedule, type UpdateStatus } from "../api";
+import { api, type AgentProgress, type UpdateSchedule, type UpdateStatus } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, PageHeader, Table, Td, inputClass } from "../components/ui";
 import { ago, usePoll } from "../lib";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+const serverSteps: [string, string][] = [
+  ["pulling", "Pulling the newest image"],
+  ["handover", "Starting the updater"],
+  ["restarting", "Restarting the server (the dashboard goes offline for a few seconds)"],
+];
+
+function ServerSteps({ stage }: { stage?: string }) {
+  const cur = Math.max(0, serverSteps.findIndex(([k]) => k === stage));
+  return (
+    <ol className="space-y-1 rounded-lg bg-blue-50 px-4 py-3 text-sm">
+      {serverSteps.map(([k, label], i) => (
+        <li key={k} className={i > cur ? "text-neutral-400" : ""}>
+          {i < cur ? "✓" : i === cur ? "…" : "○"} {label}
+        </li>
+      ))}
+      <li className="text-neutral-400">○ Reconnects by itself, then the result shows here</li>
+    </ol>
+  );
+}
 
 function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +61,7 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
           </div>
         </dl>
         {st.check?.error && <p className="text-sm text-bad">{st.check.error}</p>}
-        {st.updating && (
-          <p className="rounded-lg bg-blue-50 px-4 py-2 text-sm">Updating. The dashboard goes offline for a few seconds while the server restarts, then reconnects by itself.</p>
-        )}
+        {(st.updating || st.busy === "updating") && <ServerSteps stage={st.stage} />}
         {st.result && !st.updating && (
           <p className={`rounded-lg px-4 py-2 text-sm ${st.result.ok ? "bg-green-50" : "bg-red-50 text-bad"}`}>
             {st.result.message} <span className="text-neutral-500">({ago(st.result.at)})</span>
@@ -156,6 +174,32 @@ function ScheduleCard({ st, reload }: { st: UpdateStatus; reload: () => void }) 
   );
 }
 
+const working = ["queued", "downloading", "restarting"];
+const steps = ["queued", "downloading", "restarting", "done"];
+
+function progressBadge(p: AgentProgress) {
+  if (p.state === "failed") {
+    return (
+      <div>
+        <Badge tone="bad">Update failed</Badge>
+        <p className="mt-1 text-xs text-bad">{p.message}</p>
+      </div>
+    );
+  }
+  const i = steps.indexOf(p.state);
+  return (
+    <div>
+      <Badge tone="warn">
+        <span className="mr-1 inline-block size-2 animate-pulse rounded-full bg-current" />
+        {p.state === "queued" ? "Queued" : p.state === "downloading" ? "Downloading" : "Restarting"}
+      </Badge>
+      <p className="mt-1 text-xs text-neutral-500">
+        Step {i + 1} of 4: {p.message}
+      </p>
+    </div>
+  );
+}
+
 function AgentsCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -164,7 +208,7 @@ function AgentsCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
     setError(null);
     try {
       const r = await api.updateAgents(device);
-      setMsg(r.queued ? `Update queued for ${r.queued} device(s). They restart their agent when done.` : "Nothing to update right now.");
+      setMsg(r.queued ? `Update queued for ${r.queued} device(s). Progress shows below for each device.` : "Nothing to update right now.");
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -188,11 +232,11 @@ function AgentsCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
             <Td className="font-medium">{a.name}</Td>
             <Td className="font-mono text-xs">{a.version || "unknown"}</Td>
             <Td>
-              {a.in_container ? <Badge>Container: pull a new image</Badge> : !a.can_update ? <Badge tone="warn">Too old: re-run the install command</Badge> : !a.online ? <Badge>Offline</Badge> : a.outdated ? <Badge tone="warn">Update available</Badge> : <Badge tone="ok">Up to date</Badge>}
+              {a.progress && a.progress.state !== "done" ? progressBadge(a.progress) : a.progress ? <Badge tone="ok">Updated to {a.progress.to}</Badge> : a.in_container ? <Badge>Container: pull a new image</Badge> : !a.can_update ? <Badge tone="warn">Too old: re-run the install command</Badge> : !a.online ? <Badge>Offline</Badge> : a.outdated ? <Badge tone="warn">Update available</Badge> : <Badge tone="ok">Up to date</Badge>}
             </Td>
             <Td>
               <div className="flex justify-end">
-                {a.outdated && a.online && !a.in_container && a.can_update && (
+                {a.outdated && a.online && !(a.progress && ["queued", "downloading", "restarting"].includes(a.progress.state)) && !a.in_container && a.can_update && (
                   <Button size="sm" onClick={() => go(a.device_id)}>
                     Update
                   </Button>
@@ -213,7 +257,8 @@ export default function UpdatesPage() {
   const wasUpdating = useRef(false);
   useEffect(() => {
     if (data) wasUpdating.current = data.updating || !!data.busy;
-    setInterval_(data && (data.updating || data.busy) ? 2000 : 5000);
+    const agentsBusy = !!data?.agents.some((a) => a.progress && working.includes(a.progress.state));
+    setInterval_(data && (data.updating || data.busy || agentsBusy) ? 2000 : 5000);
   }, [data]);
 
   return (

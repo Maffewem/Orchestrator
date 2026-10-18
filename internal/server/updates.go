@@ -27,6 +27,12 @@ const (
 	settingUpdateAgents   = "update_agents_pending"
 	settingUpdateCheck    = "update_check"
 	settingUpdateResult   = "update_result"
+	settingAgentUpdate    = "agent_update_" // + device id: progress of the last agent update
+
+	// An agent update that has not finished after this long is reported as failed.
+	agentUpdateTimeout = 12 * time.Minute
+	// How long a finished agent update stays visible.
+	agentUpdateKeep = 10 * time.Minute
 
 	// Automatic agent updates retry a device at most this often.
 	agentRetryAfter = 6 * time.Hour
@@ -35,6 +41,7 @@ const (
 type updateState struct {
 	mu         sync.Mutex
 	busy       string // "checking" | "updating"
+	stage      string // while busy == "updating": "pulling" | "handover"
 	self       *selfupdate.Self
 	selfReason string
 	selfAt     time.Time
@@ -148,6 +155,71 @@ type agentUpdateView struct {
 	InContainer bool   `json:"in_container"`
 	Outdated    bool   `json:"outdated"`
 	CanUpdate   bool   `json:"can_update"` // agent understands agent.update
+	// Progress of an update started from the dashboard, kept on the server because the
+	// agent disconnects while it restarts.
+	Progress *agentProgress `json:"progress,omitempty"`
+}
+
+// agentUpdateRec is what the server remembers about an agent update it queued.
+type agentUpdateRec struct {
+	CommandID string    `json:"command_id"`
+	From      string    `json:"from"`
+	To        string    `json:"to"`
+	At        time.Time `json:"at"`
+}
+
+// agentProgress is the derived state: queued | downloading | restarting | done | failed.
+type agentProgress struct {
+	State   string    `json:"state"`
+	Message string    `json:"message"`
+	To      string    `json:"to"`
+	At      time.Time `json:"at"`
+}
+
+// agentProgress works the state out from the stored command and the version the device
+// reports, so it survives the agent (and the server) restarting mid-update.
+func (s *Server) agentProgress(ctx context.Context, d *store.Device) *agentProgress {
+	var rec agentUpdateRec
+	if !s.getJSON(ctx, settingAgentUpdate+d.ID, &rec) {
+		return nil
+	}
+	p := &agentProgress{To: rec.To, At: rec.At}
+	if d.Host.AgentVersion != "" && d.Host.AgentVersion == rec.To {
+		p.State, p.Message = "done", "Reconnected on "+rec.To
+		if time.Since(rec.At) > agentUpdateKeep {
+			return nil
+		}
+		return p
+	}
+	age := time.Since(rec.At)
+	cmd, err := s.store.GetCommand(ctx, rec.CommandID)
+	switch {
+	case err != nil:
+		p.State, p.Message = "failed", "The update command was lost"
+	case cmd.Status == api.CommandFailed:
+		p.State, p.Message = "failed", orDefault(cmd.Error, "The agent reported a failure")
+	case age > agentUpdateTimeout:
+		p.State = "failed"
+		if cmd.Status == api.CommandSucceeded {
+			p.Message = "The agent restarted but did not come back on " + rec.To + "; it may have rolled back"
+		} else {
+			p.Message = "The agent did not respond to the update"
+		}
+	case cmd.Status == api.CommandSucceeded:
+		p.State, p.Message = "restarting", "Restarting; waiting for it to reconnect"
+	case cmd.Status == api.CommandDispatched:
+		p.State, p.Message = "downloading", "Downloading and checking the new build"
+	default:
+		p.State, p.Message = "queued", "Queued; starts at the agent's next check-in"
+	}
+	return p
+}
+
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
 
 type updateStatus struct {
@@ -157,6 +229,8 @@ type updateStatus struct {
 	Reason     string            `json:"reason,omitempty"`
 	Busy       string            `json:"busy,omitempty"`
 	Updating   bool              `json:"updating"`
+	// Stage is where a server update is: pulling | handover | restarting.
+	Stage      string            `json:"stage,omitempty"`
 	Check      *updateCheck      `json:"check,omitempty"`
 	Result     *updateResult     `json:"result,omitempty"`
 	Schedule   Schedule          `json:"schedule"`
@@ -175,6 +249,9 @@ func (s *Server) updateStatus(ctx context.Context) updateStatus {
 	}
 	s.up.mu.Lock()
 	st.Busy = s.up.busy
+	if st.Busy == "updating" {
+		st.Stage = s.up.stage
+	}
 	s.up.mu.Unlock()
 	var chk updateCheck
 	if s.getJSON(ctx, settingUpdateCheck, &chk) {
@@ -186,7 +263,7 @@ func (s *Server) updateStatus(ctx context.Context) updateStatus {
 	}
 	var p updatePending
 	if s.getJSON(ctx, settingUpdatePending, &p) && time.Since(p.At) < 10*time.Minute {
-		st.Updating = true
+		st.Updating, st.Stage = true, "restarting"
 	}
 	if next, ok := st.Schedule.nextSlot(time.Now()); ok {
 		next = next.UTC()
@@ -284,6 +361,7 @@ func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool) bool {
 		s.setResult(ctx, false, "Update not started: "+reason)
 		return false
 	}
+	s.setStage("pulling")
 	latest, err := s.runCheck(ctx)
 	if err != nil {
 		s.setResult(ctx, false, "Update not started: "+err.Error())
@@ -297,6 +375,7 @@ func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool) bool {
 	if withAgents {
 		s.store.SetSetting(ctx, settingUpdateAgents, "1")
 	}
+	s.setStage("handover")
 	s.event(ctx, "", "info", "update.started", fmt.Sprintf("Updating the server to %s; the dashboard restarts shortly", orUnknown(latest.Version)))
 	if err := selfupdate.StartHelper(ctx, s.docker, self, latest.ImageID); err != nil {
 		s.store.SetSetting(ctx, settingUpdatePending, "")
@@ -305,6 +384,12 @@ func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Server) setStage(v string) {
+	s.up.mu.Lock()
+	s.up.stage = v
+	s.up.mu.Unlock()
 }
 
 func orUnknown(v string) string {
@@ -370,10 +455,12 @@ func (s *Server) updateAgents(ctx context.Context, only string, auto bool) int {
 		if recent {
 			continue
 		}
-		if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionAgentUpdate, "", nil); err != nil {
+		cmd, err := s.store.CreateCommand(ctx, d.ID, api.ActionAgentUpdate, "", nil)
+		if err != nil {
 			s.log.Error("queue agent update", "device", d.Name, "err", err)
 			continue
 		}
+		s.setJSON(ctx, settingAgentUpdate+d.ID, agentUpdateRec{CommandID: cmd.ID, From: d.Host.AgentVersion, To: s.cfg.Version, At: time.Now().UTC()})
 		s.event(ctx, d.ID, "info", "agent.update", fmt.Sprintf("Updating the agent on %s to %s", d.Name, s.cfg.Version))
 		n++
 	}

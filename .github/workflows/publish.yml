@@ -41,6 +41,9 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag
+          # metadata-action would otherwise label the image with its tag ("latest").
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
       - uses: docker/build-push-action@v6
         with:
           context: .

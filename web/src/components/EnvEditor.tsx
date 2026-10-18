@@ -34,14 +34,37 @@ export default function EnvEditor({ value, onChange }: { value: string; onChange
       return n;
     });
 
+  const [drag, setDrag] = useState(false);
+  const [note, setNote] = useState("");
+
   async function importFile(f: File | undefined) {
     if (!f) return;
-    setRows(mergeEnv(rows, parseEnv(await f.text())));
+    const cur = parseEnv(value);
+    const inc = parseEnv(await f.text());
+    const old = new Map(cur.map((r) => [r.key, r.value]));
+    const added = inc.filter((r) => !old.has(r.key)).length;
+    const changed = inc.filter((r) => old.has(r.key) && old.get(r.key) !== r.value).length;
+    setRows(mergeEnv(cur, inc));
+    setNote(`${f.name}: ${added} added, ${changed} changed, ${inc.length - added - changed} unchanged. Review, then save.`);
     if (file.current) file.current.value = "";
   }
 
   return (
-    <div className="space-y-2">
+    <div
+      className={cx("space-y-2 rounded-lg", drag && "outline-dashed outline-2 outline-primary")}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDrag(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDrag(false);
+        importFile(e.dataTransfer.files?.[0]);
+      }}
+    >
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <div className="inline-flex rounded-lg border border-neutral-300 p-0.5">
           {[false, true].map((r) => (
@@ -62,11 +85,13 @@ export default function EnvEditor({ value, onChange }: { value: string; onChange
         <span className="text-xs text-neutral-500">{serializeEnv(rows).length} variable{serializeEnv(rows).length === 1 ? "" : "s"}</span>
       </div>
 
+      {note && <p className="text-xs text-neutral-600">{note}</p>}
+
       {raw ? (
         <textarea
-          className={cx(inputClass, "font-mono")}
-          rows={8}
-          placeholder={"KEY=value\n# paste a whole .env file here"}
+          className={cx(inputClass, "min-h-48 resize-y font-mono")}
+          rows={12}
+          placeholder={"KEY=value\n# paste a whole .env file here, or drop one on this box"}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />

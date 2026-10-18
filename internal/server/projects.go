@@ -112,6 +112,24 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			return errors.New("paths must stay inside the repository")
 		}
 		src.Image = ""
+		if err := cleanWatch(&src.Watch); err != nil {
+			return err
+		}
+		if pv := src.Preview; pv != nil {
+			pv.Context, pv.Build, pv.Start = strings.TrimSpace(pv.Context), strings.TrimSpace(pv.Build), strings.TrimSpace(pv.Start)
+			if strings.Contains(pv.Context, "..") {
+				return errors.New("paths must stay inside the repository")
+			}
+			if err := cleanWatch(&pv.Watch); err != nil {
+				return err
+			}
+			if src.Node == nil {
+				pv.Build, pv.Start = "", "" // only Node builds have these commands
+			}
+			if pv.Context == "" && pv.Build == "" && pv.Start == "" && len(pv.Include) == 0 && len(pv.Exclude) == 0 {
+				src.Preview = nil
+			}
+		}
 		if n := src.Node; n != nil {
 			if err := cleanNode(n); err != nil {
 				return err
@@ -130,6 +148,7 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			return errors.New("image is required")
 		}
 		src.Repo, src.Branch, src.Context, src.Dockerfile, src.AutoDeploy, src.Node = "", "", "", "", false, nil
+		src.Watch, src.Preview = store.Watch{}, nil
 	default:
 		return errors.New("source type must be github or image")
 	}

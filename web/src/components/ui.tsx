@@ -366,3 +366,60 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
 export function Td({ children, className }: { children?: ReactNode; className?: string }) {
   return <td className={cx("px-5 py-3 align-middle", className)}>{children}</td>;
 }
+
+/** Cloudflare-style on/off switch. */
+export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={cx("relative h-6 w-11 shrink-0 rounded-full transition-colors", checked ? "bg-primary" : "bg-neutral-300")}
+    >
+      <span className={cx("absolute top-0.5 size-5 rounded-full bg-white shadow transition-all", checked ? "left-[22px]" : "left-0.5")} />
+    </button>
+  );
+}
+
+/** Glob list: type a path and press Enter or comma; click a chip to remove it. */
+export function ChipInput({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
+  const [text, setText] = useState("");
+  const add = () => {
+    const t = text.trim();
+    if (t && !value.includes(t)) onChange([...value, t]);
+    setText("");
+  };
+  return (
+    <div className={cx(inputClass, "flex flex-wrap items-center gap-1.5 !py-1.5")}>
+      {value.map((v) => (
+        <button
+          type="button"
+          key={v}
+          title="Remove"
+          onClick={() => onChange(value.filter((x) => x !== v))}
+          className="flex items-center gap-1.5 rounded bg-neutral-100 px-2 py-0.5 font-mono text-xs hover:bg-neutral-200"
+        >
+          {v}
+          <span aria-hidden>×</span>
+        </button>
+      ))}
+      <input
+        className="min-w-24 flex-1 bg-transparent py-0.5 text-sm outline-none"
+        placeholder={value.length ? "" : placeholder}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={add}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            add();
+          } else if (e.key === "Backspace" && !text && value.length) {
+            onChange(value.slice(0, -1));
+          }
+        }}
+      />
+    </div>
+  );
+}

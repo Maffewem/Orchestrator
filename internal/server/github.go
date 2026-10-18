@@ -84,6 +84,11 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		Repository struct {
 			FullName string `json:"full_name"`
 		} `json:"repository"`
+		Commits []struct {
+			Added    []string `json:"added"`
+			Modified []string `json:"modified"`
+			Removed  []string `json:"removed"`
+		} `json:"commits"`
 		HeadCommit *struct {
 			ID      string `json:"id"`
 			Message string `json:"message"`
@@ -121,8 +126,20 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	// GitHub lists at most 20 commits per push; beyond that the file list is unknown.
+	var files []string
+	if n := len(ev.Commits); n > 0 && n < 20 {
+		files = []string{}
+		for _, c := range ev.Commits {
+			files = append(append(append(files, c.Added...), c.Modified...), c.Removed...)
+		}
+	}
 	ids := []string{}
 	for _, p := range projects {
+		if !wants(p.Source.Watch, files) {
+			s.log.Info("push: no watched paths changed", "project", p.Name)
+			continue
+		}
 		d, err := s.deploy(r.Context(), p, commit, store.TriggerPush)
 		if err != nil {
 			s.log.Warn("push deploy", "project", p.Name, "err", err)

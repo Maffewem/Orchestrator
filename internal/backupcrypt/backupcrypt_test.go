@@ -36,7 +36,8 @@ func TestRoundTrip(t *testing.T) {
 		data := make([]byte, size)
 		rand.Read(data)
 		enc := seal(t, data, "hunter2hunter2")
-		if size > 0 && bytes.Contains(enc, data[:min(size, 32)]) {
+		// short plaintexts (1 byte) can appear in the ciphertext by chance
+		if size >= 16 && bytes.Contains(enc, data[:min(size, 32)]) {
 			t.Fatalf("size %d: plaintext visible", size)
 		}
 		r, err := NewReader(bytes.NewReader(enc), "hunter2hunter2")

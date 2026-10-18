@@ -1,11 +1,39 @@
-import { useState, type FormEvent } from "react";
-import { Github, Package } from "lucide-react";
-import { api, type NodeBuild, type Project, type ProjectInput, type Source } from "../api";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Box, Github, Globe, Package, Server } from "lucide-react";
+import { api, type NodeBuild, type PreviewBuild, type Project, type ProjectInput, type Source } from "../api";
 import EnvEditor from "../components/EnvEditor";
-import { Button, ErrorNote, Field, inputClass } from "../components/ui";
+import { Button, ChipInput, ErrorNote, Field, Toggle, inputClass } from "../components/ui";
 import { cx, usePoll } from "../lib";
 
 const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
+
+const BUILD_KINDS = [
+  { kind: "docker", icon: Box, title: "Dockerfile", sub: "Build the Dockerfile in your repository" },
+  { kind: "node", icon: Server, title: "Node.js server", sub: "npm, pnpm or yarn. No Dockerfile needed" },
+  { kind: "static", icon: Globe, title: "Static site", sub: "Vite, React, Astro… built, then served by nginx" },
+] as const;
+
+function Panel({ title, sub, children }: { title?: string; sub?: string; children: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-white p-5">
+      {title && <h4 className="text-sm font-semibold">{title}</h4>}
+      {sub && <p className="mt-0.5 text-xs text-neutral-500">{sub}</p>}
+      <div className={title ? "mt-4" : ""}>{children}</div>
+    </div>
+  );
+}
+
+function ToggleRow({ title, sub, checked, onChange }: { title: string; sub: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-6">
+      <div>
+        <p className="text-sm font-semibold">{title}</p>
+        <p className="mt-0.5 text-xs text-neutral-500">{sub}</p>
+      </div>
+      <Toggle checked={checked} onChange={onChange} label={title} />
+    </div>
+  );
+}
 
 export default function ProjectForm({
   initial,
@@ -14,7 +42,8 @@ export default function ProjectForm({
 }: {
   initial?: Project;
   submitLabel: string;
-  onSubmit: (p: ProjectInput) => Promise<void>;
+  /** previews is set only when the Previews switch differs from what the project has now. */
+  onSubmit: (p: ProjectInput, previews?: { enabled: boolean; max: number }) => Promise<void>;
 }) {
   const devices = usePoll(api.devices, 0);
   const settings = usePoll(api.settings, 0);
@@ -32,6 +61,16 @@ export default function ProjectForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [tab, setTab] = useState<"production" | "preview">("production");
+  const saved = usePoll(() => (initial ? api.projectPreviews(initial.id) : Promise.resolve(null)), 0, [initial?.id]);
+  const [previewsPick, setPreviewsPick] = useState<boolean | null>(null);
+  const previewsNow = saved.data?.settings.enabled ?? false;
+  const previewsOn = previewsPick ?? previewsNow;
+  const setPreviewsOn = setPreviewsPick;
+  const pv: PreviewBuild = source.preview ?? {};
+  const setPv = (patch: Partial<PreviewBuild>) => setSource((s) => ({ ...s, preview: { ...s.preview, ...patch } }));
+  const kind = source.node ? (source.node.static ? "static" : "node") : "docker";
+
   const device = deviceId || devices.data?.[0]?.id || "";
   const set = (patch: Partial<Source>) => setSource((s) => ({ ...s, ...patch }));
   const node = source.node;
@@ -42,7 +81,10 @@ export default function ProjectForm({
     setBusy(true);
     setError(null);
     try {
-      await onSubmit({ name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), env: lines(env), restart } });
+      await onSubmit(
+        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), env: lines(env), restart } },
+        previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -76,83 +118,183 @@ export default function ProjectForm({
         </div>
 
         {source.type === "github" ? (
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Repository"
-              hint={connected ? "Repositories your GitHub token can see." : "Public repos work as-is. Connect GitHub in Settings for private repos."}
-            >
-              {connected && repos.data?.length ? (
-                <select
-                  className={inputClass}
-                  value={source.repo}
-                  onChange={(e) => {
-                    const r = repos.data!.find((x) => x.full_name === e.target.value);
-                    set({ repo: e.target.value, branch: r?.default_branch ?? source.branch });
-                    if (!name && r) setName(r.full_name.split("/")[1].toLowerCase().replace(/[^a-z0-9-]/g, "-"));
-                  }}
-                >
-                  <option value="">Choose a repository…</option>
-                  {repos.data.map((r) => (
-                    <option key={r.full_name} value={r.full_name}>
-                      {r.full_name}
-                      {r.private ? " (private)" : ""}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input className={inputClass} placeholder="owner/repository" value={source.repo} onChange={(e) => set({ repo: e.target.value })} />
-              )}
-            </Field>
-            <Field label="Production branch">
-              <input className={inputClass} value={source.branch} onChange={(e) => set({ branch: e.target.value })} />
-            </Field>
-            <Field label="Build with" hint="Node.js projects need no Dockerfile: install, build and run are generated.">
-              <select
-                className={inputClass}
-                value={source.node ? (source.node.static ? "static" : "node") : "docker"}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  set({ node: v === "docker" ? undefined : { ...source.node, static: v === "static" } });
-                }}
+          <div className="space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                label="Repository"
+                hint={connected ? "Repositories your GitHub token can see." : "Public repos work as-is. Connect GitHub in Settings for private repos."}
               >
-                <option value="docker">Dockerfile</option>
-                <option value="node">Node.js server (npm, pnpm or yarn)</option>
-                <option value="static">Node.js static site (Vite, React, Astro…)</option>
-              </select>
-            </Field>
-            <Field label="Root directory" hint={node ? "Folder that holds package.json. Leave empty for the repo root." : "Folder that holds the Dockerfile. Leave empty for the repo root."}>
-              <input className={inputClass} placeholder="/" value={source.context} onChange={(e) => set({ context: e.target.value })} />
-            </Field>
-            {node ? (
-              <>
-                <Field label="Install command" hint="Empty: npm ci, pnpm or yarn, chosen from your lock file.">
-                  <input className={inputClass} placeholder="npm ci" value={node.install ?? ""} onChange={(e) => setNode({ install: e.target.value })} />
-                </Field>
-                <Field label="Build command" hint="Empty: npm run build, if package.json has a build script.">
-                  <input className={inputClass} placeholder="npm run build" value={node.build ?? ""} onChange={(e) => setNode({ build: e.target.value })} />
-                </Field>
-                {node.static ? (
-                  <Field label="Build output directory" hint="Empty: the first of dist, build, out or public.">
-                    <input className={inputClass} placeholder="dist" value={node.output ?? ""} onChange={(e) => setNode({ output: e.target.value })} />
-                  </Field>
+                {connected && repos.data?.length ? (
+                  <select
+                    className={inputClass}
+                    value={source.repo}
+                    onChange={(e) => {
+                      const r = repos.data!.find((x) => x.full_name === e.target.value);
+                      set({ repo: e.target.value, branch: r?.default_branch ?? source.branch });
+                      if (!name && r) setName(r.full_name.split("/")[1].toLowerCase().replace(/[^a-z0-9-]/g, "-"));
+                    }}
+                  >
+                    <option value="">Choose a repository…</option>
+                    {repos.data.map((r) => (
+                      <option key={r.full_name} value={r.full_name}>
+                        {r.full_name}
+                        {r.private ? " (private)" : ""}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
-                  <Field label="Start command" hint="Empty: npm start. Your app must listen on $PORT (the container port below).">
-                    <input className={inputClass} placeholder="npm start" value={node.start ?? ""} onChange={(e) => setNode({ start: e.target.value })} />
-                  </Field>
+                  <input className={inputClass} placeholder="owner/repository" value={source.repo} onChange={(e) => set({ repo: e.target.value })} />
                 )}
-                <Field label="Node version" hint="Empty: from .nvmrc or engines.node, else 22.">
-                  <input className={inputClass} placeholder="22" value={node.version ?? ""} onChange={(e) => setNode({ version: e.target.value })} />
-                </Field>
-              </>
-            ) : (
-              <Field label="Dockerfile" hint="Relative to the root directory.">
-                <input className={inputClass} placeholder="Dockerfile" value={source.dockerfile} onChange={(e) => set({ dockerfile: e.target.value })} />
               </Field>
-            )}
-            <label className="flex items-center gap-2 text-sm sm:col-span-2">
-              <input type="checkbox" className="size-4 accent-primary" checked={source.auto_deploy} onChange={(e) => set({ auto_deploy: e.target.checked })} />
-              Deploy automatically when commits are pushed to the production branch
-            </label>
+              <Field label="Production branch">
+                <input className={inputClass} value={source.branch} onChange={(e) => set({ branch: e.target.value })} />
+              </Field>
+            </div>
+
+            <div>
+              <p className="mb-1.5 text-sm font-medium">What are you building?</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {BUILD_KINDS.map((k) => (
+                  <button
+                    type="button"
+                    key={k.kind}
+                    onClick={() => set({ node: k.kind === "docker" ? undefined : { ...source.node, static: k.kind === "static" } })}
+                    className={cx(
+                      "rounded-xl border p-3.5 text-left transition-colors",
+                      kind === k.kind ? "border-primary bg-blue-50/50 ring-1 ring-primary" : "border-neutral-200 bg-white hover:bg-neutral-50",
+                    )}
+                  >
+                    <k.icon className="mb-2 size-5" />
+                    <p className="text-sm font-medium">{k.title}</p>
+                    <p className="mt-0.5 text-xs text-neutral-500">{k.sub}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold">Builds</h3>
+                <div className="inline-flex rounded-lg bg-neutral-100 p-0.5 text-sm" role="tablist">
+                  {(["production", "preview"] as const).map((t) => (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === t}
+                      key={t}
+                      onClick={() => setTab(t)}
+                      className={cx("rounded-md px-3 py-1 font-medium transition-colors", tab === t ? "bg-white shadow-sm" : "text-neutral-500 hover:text-neutral-800")}
+                    >
+                      {t === "production" ? "Production" : "Previews"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {tab === "production" ? (
+                <>
+                  <Panel>
+                    <ToggleRow
+                      title="Disable builds"
+                      sub="Stop deploying automatically when commits are pushed to the production branch. You can still deploy by hand."
+                      checked={!source.auto_deploy}
+                      onChange={(off) => set({ auto_deploy: !off })}
+                    />
+                  </Panel>
+                  <Panel title="Build configuration">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {node && (
+                        <Field label="Build command" hint="Empty: npm run build, if package.json has a build script.">
+                          <input className={inputClass} placeholder="npm run build" value={node.build ?? ""} onChange={(e) => setNode({ build: e.target.value })} />
+                        </Field>
+                      )}
+                      {node && !node.static && (
+                        <Field label="Deploy command" hint="Runs in the container. Your app must listen on $PORT. Empty: npm start.">
+                          <input className={inputClass} placeholder="npm start" value={node.start ?? ""} onChange={(e) => setNode({ start: e.target.value })} />
+                        </Field>
+                      )}
+                      {!node && (
+                        <Field label="Dockerfile" hint="Relative to the root directory.">
+                          <input className={inputClass} placeholder="Dockerfile" value={source.dockerfile} onChange={(e) => set({ dockerfile: e.target.value })} />
+                        </Field>
+                      )}
+                      <Field label="Root directory" hint={node ? "Folder that holds package.json. Empty: the repo root." : "Folder that holds the Dockerfile. Empty: the repo root."}>
+                        <input className={inputClass} placeholder="/" value={source.context} onChange={(e) => set({ context: e.target.value })} />
+                      </Field>
+                    </div>
+                  </Panel>
+                  <Panel title="Build watch paths" sub="Only commits that change a matching file trigger a build.">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field as="div" label="Include paths">
+                        <ChipInput value={source.include ?? []} onChange={(v) => set({ include: v })} placeholder="* (all files)" />
+                      </Field>
+                      <Field as="div" label="Exclude paths">
+                        <ChipInput value={source.exclude ?? []} onChange={(v) => set({ exclude: v })} placeholder="node_modules/**, .git/" />
+                      </Field>
+                    </div>
+                  </Panel>
+                  {node && (
+                    <details className="rounded-xl border border-neutral-200 bg-white">
+                      <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium">Advanced</summary>
+                      <div className="grid gap-4 border-t border-neutral-200 p-5 sm:grid-cols-2">
+                        <Field label="Install command" hint="Empty: npm ci, pnpm or yarn, chosen from your lock file.">
+                          <input className={inputClass} placeholder="npm ci" value={node.install ?? ""} onChange={(e) => setNode({ install: e.target.value })} />
+                        </Field>
+                        <Field label="Node version" hint="Empty: from .nvmrc or engines.node, else 22.">
+                          <input className={inputClass} placeholder="22" value={node.version ?? ""} onChange={(e) => setNode({ version: e.target.value })} />
+                        </Field>
+                        {node.static && (
+                          <Field label="Build output directory" hint="Empty: the first of dist, build, out or public.">
+                            <input className={inputClass} placeholder="dist" value={node.output ?? ""} onChange={(e) => setNode({ output: e.target.value })} />
+                          </Field>
+                        )}
+                      </div>
+                    </details>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Panel>
+                    <ToggleRow
+                      title="Builds for Preview branches"
+                      sub="Build and serve every open pull request from this repository into the production branch on its own port."
+                      checked={previewsOn}
+                      onChange={setPreviewsOn}
+                    />
+                  </Panel>
+                  <div className={cx("space-y-4", !previewsOn && "opacity-50")}>
+                    <p className="text-xs text-neutral-500">Anything left empty uses the Production setting shown as its placeholder.</p>
+                    <Panel title="Build configuration">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {node && (
+                          <Field label="Build command">
+                            <input className={inputClass} placeholder={node.build || "npm run build"} value={pv.build ?? ""} onChange={(e) => setPv({ build: e.target.value })} />
+                          </Field>
+                        )}
+                        {node && !node.static && (
+                          <Field label="Preview command">
+                            <input className={inputClass} placeholder={node.start || "npm start"} value={pv.start ?? ""} onChange={(e) => setPv({ start: e.target.value })} />
+                          </Field>
+                        )}
+                        <Field label="Root directory">
+                          <input className={inputClass} placeholder={source.context || "/"} value={pv.context ?? ""} onChange={(e) => setPv({ context: e.target.value })} />
+                        </Field>
+                      </div>
+                    </Panel>
+                    <Panel title="Build watch paths">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field as="div" label="Include paths">
+                          <ChipInput value={pv.include ?? []} onChange={(v) => setPv({ include: v })} placeholder={source.include?.join(", ") || "* (all files)"} />
+                        </Field>
+                        <Field as="div" label="Exclude paths">
+                          <ChipInput value={pv.exclude ?? []} onChange={(v) => setPv({ exclude: v })} placeholder={source.exclude?.join(", ") || "node_modules/**, .git/"} />
+                        </Field>
+                      </div>
+                    </Panel>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         ) : (
           <Field label="Image" hint="For example nginx:1.27, ghcr.io/owner/app:latest or pihole/pihole.">

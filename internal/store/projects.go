@@ -30,10 +30,30 @@ type Source struct {
 	// Node, when set, builds a Node.js project with a generated Dockerfile instead of the
 	// repository's own (Dockerfile is then ignored). Context is its root directory.
 	Node *api.NodeSpec `json:"node,omitempty"`
-	// AutoDeploy deploys every push to Branch.
+	// AutoDeploy deploys every push to Branch. Off is "Disable builds" in the dashboard.
 	AutoDeploy bool `json:"auto_deploy"`
+	// Watch limits which changed files trigger a production build (everything when empty).
+	Watch
+	// Preview overrides the production build settings for preview deployments; empty
+	// fields fall back to the production ones.
+	Preview *PreviewBuild `json:"preview,omitempty"`
 	// Image source: a registry reference such as nginx:1.27.
 	Image string `json:"image,omitempty"`
+}
+
+// Watch is a pair of path globs, relative to the repository root. A build is wanted when a
+// changed file matches Include (empty means any file) and does not match Exclude.
+type Watch struct {
+	Include []string `json:"include,omitempty"`
+	Exclude []string `json:"exclude,omitempty"`
+}
+
+// PreviewBuild is the build configuration used for preview deployments.
+type PreviewBuild struct {
+	Context string `json:"context,omitempty"` // root directory
+	Build   string `json:"build,omitempty"`   // Node build command
+	Start   string `json:"start,omitempty"`   // Node preview (start) command
+	Watch
 }
 
 // Runtime is how the project's container runs on its device.

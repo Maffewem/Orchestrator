@@ -100,6 +100,14 @@ export interface NodeBuild {
   output?: string;
 }
 
+export interface PreviewBuild {
+  context?: string;
+  build?: string;
+  start?: string;
+  include?: string[];
+  exclude?: string[];
+}
+
 export interface Source {
   type: "github" | "image";
   repo?: string;
@@ -108,6 +116,9 @@ export interface Source {
   dockerfile?: string;
   node?: NodeBuild;
   auto_deploy: boolean;
+  include?: string[];
+  exclude?: string[];
+  preview?: PreviewBuild;
   image?: string;
 }
 

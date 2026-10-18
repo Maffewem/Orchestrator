@@ -73,6 +73,13 @@ func (s *Server) pollProject(ctx context.Context, p *store.Project, head *store.
 		s.pollMu.Unlock()
 		return
 	}
+	if seen != "" && (len(p.Source.Include) > 0 || len(p.Source.Exclude) > 0) &&
+		!wants(p.Source.Watch, s.compareFiles(ctx, p.Source.Repo, seen, head.SHA)) {
+		s.pollMu.Lock()
+		s.polled[p.ID] = head.SHA
+		s.pollMu.Unlock()
+		return // no watched path changed
+	}
 	d, err := s.deploy(ctx, p, head, store.TriggerPoll)
 	s.pollMu.Lock()
 	s.polled[p.ID] = head.SHA // don't hammer a failing deploy; the next new commit tries again

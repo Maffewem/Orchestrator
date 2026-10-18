@@ -69,6 +69,27 @@ type projectInput struct {
 	Runtime  store.Runtime `json:"runtime"`
 }
 
+var nodeVersionRe = regexp.MustCompile(`^(lts|[0-9]+(\.[0-9]+){0,2})$`)
+
+// cleanNode trims the Node build settings and rejects the ones the agent could not use.
+func cleanNode(n *api.NodeSpec) error {
+	for _, f := range []*string{&n.Install, &n.Build, &n.Start, &n.Version, &n.Output} {
+		*f = strings.TrimSpace(*f)
+	}
+	if n.Version != "" && !nodeVersionRe.MatchString(n.Version) {
+		return errors.New("node version should look like 22, 20.11 or lts")
+	}
+	if strings.Contains(n.Output, "..") || strings.HasPrefix(n.Output, "/") {
+		return errors.New("output directory must stay inside the project")
+	}
+	if n.Static {
+		n.Start = ""
+	} else {
+		n.Output = ""
+	}
+	return nil
+}
+
 func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if !projectNameRe.MatchString(in.Name) {
@@ -91,11 +112,24 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			return errors.New("paths must stay inside the repository")
 		}
 		src.Image = ""
+		if n := src.Node; n != nil {
+			if err := cleanNode(n); err != nil {
+				return err
+			}
+			src.Dockerfile = ""
+			if len(in.Runtime.Ports) == 0 {
+				if n.Static {
+					in.Runtime.Ports = []string{"8080:80"}
+				} else {
+					in.Runtime.Ports = []string{"3000:3000"}
+				}
+			}
+		}
 	case store.SourceImage:
 		if src.Image = strings.TrimSpace(src.Image); src.Image == "" {
 			return errors.New("image is required")
 		}
-		src.Repo, src.Branch, src.Context, src.Dockerfile, src.AutoDeploy = "", "", "", "", false
+		src.Repo, src.Branch, src.Context, src.Dockerfile, src.AutoDeploy, src.Node = "", "", "", "", false, nil
 	default:
 		return errors.New("source type must be github or image")
 	}

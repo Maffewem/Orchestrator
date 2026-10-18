@@ -91,12 +91,22 @@ export interface Command {
   error?: string;
 }
 
+export interface NodeBuild {
+  install?: string;
+  build?: string;
+  start?: string;
+  version?: string;
+  static?: boolean;
+  output?: string;
+}
+
 export interface Source {
   type: "github" | "image";
   repo?: string;
   branch?: string;
   context?: string;
   dockerfile?: string;
+  node?: NodeBuild;
   auto_deploy: boolean;
   image?: string;
 }

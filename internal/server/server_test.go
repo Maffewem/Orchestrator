@@ -344,3 +344,27 @@ func TestOfflineSweep(t *testing.T) {
 		t.Fatalf("device did not come back: %+v", d)
 	}
 }
+
+func TestCleanNodeAndSpec(t *testing.T) {
+	n := &api.NodeSpec{Static: true, Start: "x", Version: " 20 ", Output: "dist"}
+	if err := cleanNode(n); err != nil || n.Start != "" || n.Version != "20" {
+		t.Fatalf("static: %v %+v", err, n)
+	}
+	n = &api.NodeSpec{Output: "dist", Start: "node a.js"}
+	if err := cleanNode(n); err != nil || n.Output != "" || n.Start != "node a.js" {
+		t.Fatalf("server: %v %+v", err, n)
+	}
+	for _, bad := range []api.NodeSpec{{Version: "20; rm"}, {Static: true, Output: "../x"}, {Static: true, Output: "/etc"}} {
+		if cleanNode(&bad) == nil {
+			t.Errorf("%+v should be rejected", bad)
+		}
+	}
+	p := &store.Project{Name: "web", Source: store.Source{Type: store.SourceGitHub, Repo: "o/r", Context: "app", Node: &api.NodeSpec{Static: true}}}
+	spec, err := specFor(p, &store.Commit{SHA: "0123456789abcdef"})
+	if err != nil || !api.IsNode(spec) || !strings.HasSuffix(spec.Build.Remote, "#0123456789abcdef:app") {
+		t.Fatalf("spec %+v err %v", spec.Build, err)
+	}
+	if got := api.StepsFor(spec); len(got) != 6 || got[2] != api.StepInstalling {
+		t.Fatalf("steps %v", got)
+	}
+}

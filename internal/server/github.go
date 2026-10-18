@@ -256,7 +256,7 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 			short = short[:7]
 		}
 		spec.Image = "orchestrator/" + spec.Service + ":" + short
-		spec.Build = &api.BuildSpec{Remote: remote, Dockerfile: p.Source.Dockerfile}
+		spec.Build = &api.BuildSpec{Remote: remote, Dockerfile: p.Source.Dockerfile, Node: p.Source.Node}
 	default:
 		return spec, fmt.Errorf("unknown source type %q", p.Source.Type)
 	}

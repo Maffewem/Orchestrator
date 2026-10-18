@@ -386,6 +386,12 @@ func (d *Docker) buildCLI(ctx context.Context, cli, remote, dockerfile, tag stri
 	}
 	cmd := exec.CommandContext(ctx, cli, append(args, remote)...)
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+d.host, "DOCKER_BUILDKIT=1")
+	return runStream(cmd, logf)
+}
+
+// runStream runs cmd, sending each line of its combined output to logf. On failure the
+// last line (BuildKit's error) becomes the error.
+func runStream(cmd *exec.Cmd, logf func(string)) error {
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -497,4 +503,31 @@ func (d *Docker) waitRunning(ctx context.Context, id string, settle time.Duratio
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// BuildLocal builds an image from a directory with a Dockerfile given on stdin. target
+// selects a stage and tag names the result (both optional); env KEY=value pairs become
+// build args. It needs the docker CLI, which BuildKit stage targeting depends on.
+func (d *Docker) BuildLocal(ctx context.Context, dir, dockerfile, target, tag string, env []string, logf func(string)) error {
+	cli, err := exec.LookPath("docker")
+	if err != nil {
+		return fmt.Errorf("the docker CLI is required on this device to build Node projects")
+	}
+	args := []string{"build", "--progress=plain", "-f", "-"}
+	if target != "" {
+		args = append(args, "--target", target)
+	}
+	if tag != "" {
+		args = append(args, "-t", tag)
+	}
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && envNameRe.MatchString(k) {
+			args = append(args, "--build-arg", e)
+		}
+	}
+	cmd := exec.CommandContext(ctx, cli, append(args, ".")...)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(dockerfile)
+	cmd.Env = append(os.Environ(), "DOCKER_HOST="+d.host, "DOCKER_BUILDKIT=1")
+	return runStream(cmd, logf)
 }

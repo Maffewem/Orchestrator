@@ -39,6 +39,16 @@ agent install on each new device.
   the exact commit and builds the Dockerfile, so images are native to the Pi's
   architecture and no registry is needed. Pushes to the production branch deploy
   automatically through the webhook.
+- **Node.js projects** need no Dockerfile. Choose "Node.js server" or "Node.js static site"
+  on the project form and set the root directory (where `package.json` is) plus optional
+  install, build and start commands, output directory and Node version. Anything left empty
+  is detected: npm/pnpm/yarn from the lock file, `npm run build` and `npm start` from
+  `scripts`, the version from `.nvmrc` or `engines.node` (else 22). The agent clones the
+  commit (the device needs `git` and the `docker` CLI), generates a multi-stage Dockerfile and
+  shows **Cloning → Installing → Building → Deploying → Verifying**. A server gets `PORT` set
+  to its container port (default `3000:3000`); a static site is served by nginx on `8080:80`.
+  Environment variables are available at run time, and for static sites also at build time
+  (so `VITE_*` values are baked in). Static sites use the domains and proxy like any worker.
 
 - **Auto-deploy** happens two ways. A GitHub push webhook deploys immediately. As a
   fallback for servers GitHub can't reach, the control plane also polls each auto-deploy

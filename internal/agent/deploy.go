@@ -96,7 +96,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	st := a.newSteps(ctx, deploymentID)
 	defer func() { st.finish(context.WithoutCancel(ctx), err) }()
 
-	st.begin(ctx, api.StepInit)
+	st.begin(ctx, api.StepIndex(spec, api.StepInit))
 	st.logf("Initializing deployment %s on %s", deploymentID, a.hostInfo().Hostname)
 	st.logf("Service: %s", spec.Service)
 	st.logf("Image: %s", spec.Image)
@@ -110,10 +110,20 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	}
 	st.logf("Docker engine %s ready", info.Version)
 
-	st.begin(ctx, api.StepSource)
-	if spec.Build != nil && spec.Reuse && a.docker.hasImage(ctx, spec.Image) {
+	reuse := spec.Build != nil && spec.Reuse && a.docker.hasImage(ctx, spec.Image)
+	switch {
+	case api.IsNode(spec) && reuse:
+		st.begin(ctx, api.StepIndex(spec, api.StepCloning))
+		st.logf("%s is already on this device; skipping the clone and build", spec.Image)
+	case api.IsNode(spec):
+		if err := a.buildNode(ctx, st, spec); err != nil {
+			return fmt.Errorf("build failed: %w", err)
+		}
+	case reuse:
+		st.begin(ctx, api.StepIndex(spec, api.StepBuilding))
 		st.logf("%s is already on this device; skipping the build", spec.Image)
-	} else if spec.Build != nil {
+	case spec.Build != nil:
+		st.begin(ctx, api.StepIndex(spec, api.StepBuilding))
 		st.logf("Cloning repository and building %s on this device...", spec.Image)
 		if err := a.docker.Build(ctx, spec.Build.Remote, spec.Build.Dockerfile, spec.Image, func(l string) { st.logf("%s", l) }); err != nil {
 			if strings.Contains(err.Error(), "git") {
@@ -122,7 +132,8 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 			return fmt.Errorf("build failed: %w", err)
 		}
 		st.logf("Success: built %s", spec.Image)
-	} else {
+	default:
+		st.begin(ctx, api.StepIndex(spec, api.StepPulling))
 		st.logf("Pulling %s...", spec.Image)
 		if err := a.docker.Pull(ctx, spec.Image, func(l string) { st.logf("%s", l) }); err != nil {
 			return fmt.Errorf("pull failed: %w", err)
@@ -130,7 +141,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		st.logf("Success: image is up to date")
 	}
 
-	st.begin(ctx, api.StepDeploy)
+	st.begin(ctx, api.StepIndex(spec, api.StepDeploy))
 	previous, err := a.docker.ContainerByName(ctx, spec.Service)
 	if err != nil {
 		return err
@@ -160,7 +171,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	}
 	st.logf("Started container %.12s", id)
 
-	st.begin(ctx, api.StepVerify)
+	st.begin(ctx, api.StepIndex(spec, api.StepVerify))
 	st.logf("Waiting for the container to stay up...")
 	state, err := a.docker.waitRunning(ctx, id, 8*time.Second)
 	if err == nil && (!state.Running || state.Restarting) {

@@ -183,24 +183,58 @@ type BuildSpec struct {
 	// It may embed credentials, so agents must never log it.
 	Remote     string `json:"remote"`
 	Dockerfile string `json:"dockerfile,omitempty"`
+	// Node, when set, makes the agent clone the repository itself and build a Node.js
+	// project with a Dockerfile it generates, instead of using the repo's own Dockerfile.
+	Node *NodeSpec `json:"node,omitempty"`
+}
+
+// NodeSpec describes how to build a Node.js project. Every field is optional: an empty one
+// is detected from the repository (lock file, package.json scripts, .nvmrc, engines).
+type NodeSpec struct {
+	Install string `json:"install,omitempty"` // e.g. npm ci
+	Build   string `json:"build,omitempty"`   // e.g. npm run build
+	Start   string `json:"start,omitempty"`   // e.g. npm start
+	Version string `json:"version,omitempty"` // Node major or version, e.g. 22, or lts
+	// Static makes the project a static site: it is built, then the Output directory
+	// (detected from dist, build, out, public when empty) is served by a small web server image on port 80.
+	Static bool   `json:"static,omitempty"`
+	Output string `json:"output,omitempty"`
 }
 
 // StepsFor returns the stages a deployment of spec goes through, in order. Agent and
 // control plane both derive step indexes from this list.
 func StepsFor(spec DeploySpec) []string {
-	source := "Pulling image"
-	if spec.Build != nil {
-		source = "Building"
+	switch {
+	case IsNode(spec):
+		return []string{StepInit, StepCloning, StepInstalling, StepBuilding, StepDeploy, StepVerify}
+	case spec.Build != nil:
+		return []string{StepInit, StepBuilding, StepDeploy, StepVerify}
 	}
-	return []string{"Initializing", source, "Deploying", "Verifying"}
+	return []string{StepInit, StepPulling, StepDeploy, StepVerify}
 }
 
-// Step indexes into StepsFor.
+// IsNode reports whether spec is a Node.js project the agent builds itself.
+func IsNode(spec DeploySpec) bool { return spec.Build != nil && spec.Build.Node != nil }
+
+// StepIndex finds a stage of spec's deployment by name, or -1.
+func StepIndex(spec DeploySpec, name string) int {
+	for i, n := range StepsFor(spec) {
+		if n == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// Deployment stage names, as shown on the deployment page.
 const (
-	StepInit   = 0
-	StepSource = 1
-	StepDeploy = 2
-	StepVerify = 3
+	StepInit       = "Initializing"
+	StepPulling    = "Pulling image"
+	StepCloning    = "Cloning"
+	StepInstalling = "Installing"
+	StepBuilding   = "Building"
+	StepDeploy     = "Deploying"
+	StepVerify     = "Verifying"
 )
 
 // Step statuses (deployments reuse the queued/running/succeeded/failed vocabulary).

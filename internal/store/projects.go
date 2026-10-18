@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/Maffewem/Orchestrator/internal/api"
 )
 
 var ErrConflict = errors.New("conflict")
@@ -25,6 +27,9 @@ type Source struct {
 	Branch     string `json:"branch,omitempty"`
 	Context    string `json:"context,omitempty"`
 	Dockerfile string `json:"dockerfile,omitempty"`
+	// Node, when set, builds a Node.js project with a generated Dockerfile instead of the
+	// repository's own (Dockerfile is then ignored). Context is its root directory.
+	Node *api.NodeSpec `json:"node,omitempty"`
 	// AutoDeploy deploys every push to Branch.
 	AutoDeploy bool `json:"auto_deploy"`
 	// Image source: a registry reference such as nginx:1.27.

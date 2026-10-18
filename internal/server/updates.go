@@ -403,12 +403,19 @@ func orUnknown(v string) string {
 func (s *Server) afterBoot(ctx context.Context) {
 	var p updatePending
 	if s.getJSON(ctx, settingUpdatePending, &p) {
-		if time.Since(p.At) < 15*time.Second {
-			return // restarted for another reason mid-update; the helper is still working
-		}
 		ok := s.cfg.Version != p.FromVersion
 		if self, _ := s.selfInfo(ctx); self != nil {
 			ok = self.ImageID != p.FromImage
+		}
+		// A server still on the old image this soon may just be restarting before the
+		// helper swaps it; give the helper a moment. One already on a new image is done
+		// (the swap finishes within seconds, so this must not wait for the settle time).
+		if wait := 15*time.Second - time.Since(p.At); !ok && wait > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
 		}
 		s.store.SetSetting(ctx, settingUpdatePending, "")
 		if ok {

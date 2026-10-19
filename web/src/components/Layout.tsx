@@ -20,32 +20,16 @@ export function useCrumbs(crumbs: Crumb[]) {
   }, [key, set]);
 }
 
-type NavItem = { to: string; label: string; icon: typeof Rocket; end?: boolean; admin?: boolean };
-const nav: { group: string; items: NavItem[] }[] = [
-  { group: "", items: [{ to: "/", label: "Overview", icon: LayoutDashboard, end: true }] },
-  {
-    group: "Deploy",
-    items: [
-      { to: "/projects", label: "Projects", icon: Rocket },
-      { to: "/containers", label: "Workers", icon: Boxes },
-      { to: "/devices", label: "Devices", icon: Server },
-    ],
-  },
-  {
-    group: "Monitor",
-    items: [
-      { to: "/activity", label: "Activity", icon: Activity },
-      { to: "/backups", label: "Backups", icon: Archive },
-    ],
-  },
-  {
-    group: "Admin",
-    items: [
-      { to: "/updates", label: "Updates", icon: RefreshCw, admin: true },
-      { to: "/users", label: "Users", icon: Users, admin: true },
-      { to: "/settings", label: "Settings", icon: Settings, admin: true },
-    ],
-  },
+const nav = [
+  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
+  { to: "/projects", label: "Projects", icon: Rocket },
+  { to: "/devices", label: "Devices", icon: Server },
+  { to: "/containers", label: "Workers", icon: Boxes },
+  { to: "/backups", label: "Backups", icon: Archive },
+  { to: "/updates", label: "Updates", icon: RefreshCw, admin: true },
+  { to: "/activity", label: "Activity", icon: Activity },
+  { to: "/settings", label: "Settings", icon: Settings, admin: true },
+  { to: "/users", label: "Users", icon: Users, admin: true },
 ];
 
 export function Logo() {
@@ -78,31 +62,22 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           <Logo />
         </Link>
       </div>
-      {nav.map(({ group, items }) => {
-        const shown = items.filter((n) => !n.admin || me?.role === "admin");
-        if (shown.length === 0) return null;
-        return (
-          <div key={group || "top"} className={group ? "mt-4" : ""}>
-            {group && <p className="mb-1 px-2.5 text-xs font-medium uppercase tracking-wide text-neutral-400">{group}</p>}
-            {shown.map(({ to, label, icon: Icon, end }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) =>
-                  cx(
-                    "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-                    isActive ? "bg-neutral-200/70 font-medium text-neutral-900" : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900",
-                  )
-                }
-              >
-                <Icon className="size-4" />
-                {label}
-              </NavLink>
-            ))}
-          </div>
-        );
-      })}
+      {nav.filter((n) => !n.admin || me?.role === "admin").map(({ to, label, icon: Icon, end }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={end}
+          className={({ isActive }) =>
+            cx(
+              "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+              isActive ? "bg-neutral-200/70 font-medium text-neutral-900" : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900",
+            )
+          }
+        >
+          <Icon className="size-4" />
+          {label}
+        </NavLink>
+      ))}
       <div className="mt-auto">
         {me && (
           <div className="mb-1 px-2.5 py-2 text-sm">

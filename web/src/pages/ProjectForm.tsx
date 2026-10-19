@@ -215,7 +215,7 @@ export default function ProjectForm({
                         </Field>
                       )}
                       {!node && (
-                        <Field label="Dockerfile" hint="Relative to the root directory.">
+                        <Field label="Dockerfile" hint="Relative to the root directory. Must be a Dockerfile, not docker-compose.yml. Empty: Dockerfile.">
                           <input className={inputClass} placeholder="Dockerfile" value={source.dockerfile} onChange={(e) => set({ dockerfile: e.target.value })} />
                         </Field>
                       )}

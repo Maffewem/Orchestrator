@@ -381,6 +381,10 @@ func (d *Docker) Build(ctx context.Context, remote, dockerfile, tag string, logf
 
 func (d *Docker) buildCLI(ctx context.Context, cli, remote, dockerfile, tag string, logf func(string)) error {
 	args := []string{"build", "--progress=plain", "-t", tag}
+	if api.LooksLikeComposeFile(dockerfile) {
+		logf("Ignoring " + dockerfile + ": it is a Compose file, not a Dockerfile. Building ./Dockerfile instead.")
+		dockerfile = ""
+	}
 	if dockerfile != "" {
 		args = append(args, "-f", dockerfile)
 	}

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { copyText } from "../clipboard";
 import { Link, NavLink } from "react-router";
 import { AlertTriangle, Check, CircleDashed, Loader2, Minus, X } from "lucide-react";
 import type { DeploymentStatus, Health, StepStatus } from "../api";
@@ -269,12 +270,9 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
     <Button
       size="sm"
       onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
+        if (await copyText(text)) {
           setDone(true);
           setTimeout(() => setDone(false), 1500);
-        } catch {
-          /* clipboard blocked */
         }
       }}
       icon={done ? <Check className="size-3.5" /> : undefined}

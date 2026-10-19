@@ -1,7 +1,11 @@
 // Package api holds the wire types shared by the control plane and the agent.
 package api
 
-import "time"
+import (
+	"path"
+	"strings"
+	"time"
+)
 
 // HostInfo describes a device. Agents send it on registration and with every heartbeat.
 type HostInfo struct {
@@ -319,4 +323,14 @@ type StreamInput struct {
 	Cols   int    `json:"cols,omitempty"`
 	Rows   int    `json:"rows,omitempty"`
 	Closed bool   `json:"closed,omitempty"`
+}
+
+// LooksLikeComposeFile reports whether a build "Dockerfile" path is really a Docker
+// Compose or stack file, which BuildKit would fail to parse as a Dockerfile.
+func LooksLikeComposeFile(p string) bool {
+	b := strings.ToLower(path.Base(strings.TrimSpace(p)))
+	if !strings.HasSuffix(b, ".yml") && !strings.HasSuffix(b, ".yaml") {
+		return false
+	}
+	return strings.Contains(b, "compose") || strings.Contains(b, "stack")
 }

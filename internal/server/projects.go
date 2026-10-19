@@ -112,6 +112,9 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 		if strings.Contains(src.Context, "..") || strings.Contains(src.Dockerfile, "..") {
 			return errors.New("paths must stay inside the repository")
 		}
+		if src.Dockerfile = strings.TrimSpace(src.Dockerfile); api.LooksLikeComposeFile(src.Dockerfile) {
+			return errors.New("the Dockerfile setting points at a Docker Compose file; use the path of a Dockerfile (empty means \"Dockerfile\")")
+		}
 		src.Image = ""
 		if err := cleanWatch(&src.Watch); err != nil {
 			return err

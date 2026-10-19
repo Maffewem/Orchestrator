@@ -246,13 +246,19 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 		restart = "unless-stopped"
 	}
 	spec := api.DeploySpec{
-		Service: serviceName(p.Name),
+		Service: serviceOf(p),
 		Ports:   p.Runtime.Ports,
 		Env:     p.Runtime.Env,
 		Command: p.Runtime.Command,
 		Restart: restart,
-		Labels:  map[string]string{"orchestrator.project": p.ID},
+		Volumes: p.Runtime.Volumes,
+		Network: p.Runtime.Network,
+		Labels:  map[string]string{},
 	}
+	for k, v := range p.Runtime.Labels {
+		spec.Labels[k] = v
+	}
+	spec.Labels["orchestrator.project"] = p.ID
 	switch p.Source.Type {
 	case store.SourceImage:
 		if p.Source.Image == "" {
@@ -297,6 +303,15 @@ func withCredentials(cmds []api.Command, token string) {
 		spec.Build = &build
 		c.Deploy = &spec
 	}
+}
+
+// serviceOf is the name of the container a project runs as: the project name, unless the
+// project adopted a container that already had a different one.
+func serviceOf(p *store.Project) string {
+	if p.Runtime.Container != "" {
+		return p.Runtime.Container
+	}
+	return serviceName(p.Name)
 }
 
 // serviceName makes a Docker-safe container name from a project name.

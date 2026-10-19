@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Archive, FileText, Play, RotateCw, Square, SquareTerminal } from "lucide-react";
+import { Archive, FileText, PackagePlus, Play, RotateCw, Square, SquareTerminal } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, StatusDot, Table, Td } from "./ui";
 import { useCan } from "./auth";
 import { LiveLogs, Shell } from "./Streams";
+import { AdoptDialog, adoptable } from "./Adopt";
 
 /** Reachable URLs for a container's published ports on its device. */
 export function endpoints(c: Container, addresses: string[]): string[] {
@@ -53,6 +54,7 @@ export default function ContainerTable({
   const [logs, setLogs] = useState<{ deviceId: string; c: Container } | null>(null);
   const [shell, setShell] = useState<{ deviceId: string; c: Container } | null>(null);
   const isAdmin = useCan("admin");
+  const [adopting, setAdopting] = useState<{ deviceId: string; deviceName: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ReactNode>(null);
 
@@ -142,6 +144,9 @@ export default function ContainerTable({
                   <Button size="sm" variant="ghost" title="Restart" loading={busy === c.id + "container.restart"} icon={<RotateCw className="size-3.5" />} onClick={() => run(dev, c, "container.restart")} />
                   <Button size="sm" variant="ghost" title="Back up" loading={busy === c.id + "backup"} icon={<Archive className="size-3.5" />} onClick={() => backup(dev, c)} />
                   <Button size="sm" variant="ghost" title="Logs" icon={<FileText className="size-3.5" />} onClick={() => setLogs({ deviceId: dev, c })} />
+                  {isAdmin && adoptable(c) && (
+                    <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })} />
+                  )}
                   {isAdmin && running && <Button size="sm" variant="ghost" title="Shell" icon={<SquareTerminal className="size-3.5" />} onClick={() => setShell({ deviceId: dev, c })} />}
                 </div>
               </Td>
@@ -150,6 +155,16 @@ export default function ContainerTable({
         })}
       </Table>
       {logs && <LiveLogs deviceId={logs.deviceId} container={logs.c.id} name={logs.c.name} onClose={() => setLogs(null)} />}
+      {adopting && (
+        <AdoptDialog
+          deviceId={adopting.deviceId}
+          deviceName={adopting.deviceName}
+          containers={containers.filter((c) => ("device_id" in c ? c.device_id : deviceId) === adopting.deviceId)}
+          selected={[adopting.id]}
+          onClose={() => setAdopting(null)}
+          onDone={() => onChanged?.()}
+        />
+      )}
       {shell && <Shell deviceId={shell.deviceId} container={shell.c.id} name={shell.c.name} onClose={() => setShell(null)} />}
     </>
   );

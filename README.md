@@ -82,6 +82,18 @@ agent install on each new device.
   Docker) with it, so there is no central proxy. Caddy gets certificates itself, which needs
   ports 80 and 443 reachable from the internet (or use a Cloudflare Tunnel instead).
 
+- **Adopting existing containers** (Workers page, "Import containers", or the adopt button on a
+  row): containers that already run on a device, whether started by hand, by Portainer or by
+  Docker Compose, can become projects. Orchestrator reads each container (image, environment,
+  ports, volumes, labels, network, restart policy), shows what it found, and creates an
+  image-source project named after the container. Adopting never stops, renames or recreates the
+  container; it keeps running as it was and is linked to its project. Start, stop, restart,
+  logs, backups and the env editor work straight away. A project's first deployment pulls the
+  image and replaces the container (you are asked to confirm), and settings the project can't
+  express (privileged mode, devices, limits, several networks and so on) are listed before
+  you adopt and again before that deployment. Portainer's own database is not read. Needs a
+  recent agent.
+
 - **Previews and rollback** (a worker's Previews tab and the deployment menu): turn previews
   on for a GitHub project and every open pull request from the same repository, into the
   tracked branch, is built as its own container (`name--branch`) on a free host port in
@@ -255,6 +267,7 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `POST /api/devices/{id}/commands` | `container.start/stop/restart/logs` |
 | `GET /api/containers` | every container in the fleet |
 | `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}` | projects |
+| `POST /api/devices/{id}/adopt` | read containers and create projects from them (`dry_run` previews) |
 | `POST /api/projects/{id}/deployments` | deploy (GitHub projects use the branch head) |
 | `GET /api/deployments/{id}`, `POST /api/deployments/{id}/retry` | deployment with steps and logs |
 | `POST /api/devices/{id}/containers/{cid}/backup` | back up a container |

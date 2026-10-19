@@ -239,6 +239,13 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		if id, err = a.docker.ContainerByName(cctx, c.Target); err == nil && id != "" {
 			err = a.docker.Remove(cctx, id)
 		}
+	case api.ActionInspect:
+		var spec api.ContainerSpec
+		if spec, err = a.docker.InspectSpec(cctx, c.Target); err == nil {
+			var b []byte
+			b, err = json.Marshal(spec)
+			output = string(b)
+		}
 	case api.ActionProxySync:
 		err = a.syncProxy(cctx, c.Args["caddyfile"])
 	case api.ActionBackup, api.ActionRestore:

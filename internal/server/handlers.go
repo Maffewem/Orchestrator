@@ -422,8 +422,12 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := map[string]string{}
+	adopted := map[string]*store.Project{} // device|container name -> project, until the first redeploy labels the container
 	for _, p := range projects {
 		names[p.ID] = p.Name
+		if p.Runtime.Adopted {
+			adopted[p.DeviceID+"|"+serviceOf(p)] = p
+		}
 	}
 	out := []fleetContainer{}
 	for _, d := range devices {
@@ -436,6 +440,8 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 			fc := fleetContainer{Container: c, DeviceID: d.ID, DeviceName: d.Name, DeviceStatus: status, DeviceAddresses: addrs}
 			if id := c.Labels["orchestrator.project"]; names[id] != "" {
 				fc.ProjectID, fc.ProjectName = id, names[id]
+			} else if p := adopted[d.ID+"|"+c.Name]; p != nil && c.Labels["orchestrator.project"] == "" {
+				fc.ProjectID, fc.ProjectName = p.ID, p.Name
 			}
 			out = append(out, fc)
 		}

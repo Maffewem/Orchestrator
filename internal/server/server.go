@@ -203,6 +203,7 @@ func (s *Server) Handler() http.Handler {
 	admin("DELETE /api/devices/{id}", s.handleDeleteDevice)
 	admin("POST /api/devices/{id}/commands", s.handleCreateCommand)
 	admin("GET /api/containers", s.handleListContainers)
+	admin("POST /api/devices/{id}/adopt", s.handleAdopt)
 	admin("POST /api/devices/{id}/containers/{cid}/backup", s.handleCreateBackup)
 	admin("GET /api/system/update", s.handleUpdateStatus)
 	admin("PUT /api/system/update/schedule", s.handleSetUpdateSchedule)

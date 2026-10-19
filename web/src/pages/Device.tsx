@@ -4,6 +4,8 @@ import { Trash2 } from "lucide-react";
 import { api, type Device } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
+import { ImportContainers } from "../components/Adopt";
+import { useCan } from "../components/auth";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, StatusDot, Tabs, inputClass } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
@@ -14,6 +16,10 @@ export default function DevicePage() {
   const { id = "" } = useParams();
   const dev = usePoll(() => api.device(id), 5000, [id]);
   const d = dev.data;
+  // The fleet list knows which containers already belong to a project; the device's own list doesn't.
+  const fleet = usePoll(api.containers, 5000);
+  const isAdmin = useCan("admin");
+  const rows = fleet.data?.filter((c) => c.device_id === id);
   useCrumbs([{ label: "Devices", to: "/devices" }, { label: d?.name ?? "…" }]);
   if (dev.error && !d) return <ErrorNote>{dev.error}</ErrorNote>;
   if (!d) return <Loading />;
@@ -48,9 +54,16 @@ export default function DevicePage() {
         <Route
           path="containers"
           element={
-            <Card>
-              <ContainerTable containers={d.containers} deviceId={d.id} addresses={d.host.addresses ?? []} onChanged={dev.reload} />
-            </Card>
+            <>
+              {isAdmin && rows && (
+                <div className="mb-4 flex justify-end gap-2">
+                  <ImportContainers containers={rows} onDone={fleet.reload} />
+                </div>
+              )}
+              <Card>
+                <ContainerTable containers={rows ?? d.containers} deviceId={d.id} addresses={d.host.addresses ?? []} onChanged={() => { dev.reload(); fleet.reload(); }} />
+              </Card>
+            </>
           }
         />
         <Route path="deployments" element={<DeviceDeployments d={d} />} />

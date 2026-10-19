@@ -463,15 +463,22 @@ func (d *Docker) Create(ctx context.Context, name string, spec api.DeploySpec, l
 	for k, v := range labels {
 		all[k] = v
 	}
+	host := map[string]any{
+		"PortBindings":  bindings,
+		"RestartPolicy": map[string]string{"Name": spec.Restart},
+	}
+	if len(spec.Volumes) > 0 {
+		host["Binds"] = spec.Volumes
+	}
+	if spec.Network != "" {
+		host["NetworkMode"] = spec.Network
+	}
 	body := map[string]any{
 		"Image":        spec.Image,
 		"Env":          spec.Env,
 		"Labels":       all,
 		"ExposedPorts": exposed,
-		"HostConfig": map[string]any{
-			"PortBindings":  bindings,
-			"RestartPolicy": map[string]string{"Name": spec.Restart},
-		},
+		"HostConfig":   host,
 	}
 	if len(spec.Command) > 0 {
 		body["Cmd"] = spec.Command

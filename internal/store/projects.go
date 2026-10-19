@@ -62,6 +62,17 @@ type Runtime struct {
 	Env     []string `json:"env"`
 	Command []string `json:"command,omitempty"`
 	Restart string   `json:"restart"`
+	// Volumes are "source:/path[:ro]" mounts (named volumes or host paths); Labels are extra container labels.
+	Volumes []string          `json:"volumes,omitempty"`
+	Labels  map[string]string `json:"labels,omitempty"`
+	// Network is a Docker network name or "host"; empty is the default bridge.
+	Network string `json:"network,omitempty"`
+	// Container is the name of the container when it differs from the project name (adopted containers).
+	Container string `json:"container,omitempty"`
+	// Adopted marks a project created from a container that already existed. Orchestrator left that
+	// container as it was; Unsupported lists settings it could not read back and a redeploy would drop.
+	Adopted     bool     `json:"adopted,omitempty"`
+	Unsupported []string `json:"unsupported,omitempty"`
 }
 
 // Project is a deployable service: a source, a target device and runtime settings.

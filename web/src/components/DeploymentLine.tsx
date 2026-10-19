@@ -6,6 +6,7 @@ import { StatusIcon } from "./ui";
 import { ago, cx, duration, span } from "../lib";
 import { useCan } from "./auth";
 import { deploymentTitle } from "../pages/Projects";
+import { confirmDialog, notify } from "./dialogs";
 
 export function Sparkline({ values, color = "#0051c3" }: { values: number[]; color?: string }) {
   if (values.length < 2) return <div className="h-8 w-full rounded bg-neutral-100" />;
@@ -114,13 +115,13 @@ export function DeploymentLine({ d, live, onChanged, compact }: { d: Deployment;
             <button
               className="block w-full px-3 py-1.5 text-left hover:bg-neutral-50"
               onClick={async () => {
-                if (!window.confirm(`Roll back to ${versionId(d)}? It becomes the live version.`)) return;
+                if (!(await confirmDialog({ title: `Roll back to ${versionId(d)}?`, message: "It becomes the live version.", confirmLabel: "Roll back" }))) return;
                 try {
                   const r = await api.rollbackDeployment(d.id);
                   onChanged();
                   nav(`/deployments/${r.id}`);
                 } catch (e) {
-                  window.alert(e instanceof Error ? e.message : String(e));
+                  notify(e instanceof Error ? e.message : String(e));
                 }
               }}
             >

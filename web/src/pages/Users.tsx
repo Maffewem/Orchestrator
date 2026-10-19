@@ -5,6 +5,7 @@ import { useCrumbs } from "../components/Layout";
 import { useMe } from "../components/auth";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, Modal, PageHeader, Table, Td, inputClass } from "../components/ui";
 import { ago, usePoll } from "../lib";
+import { confirmDialog } from "../components/dialogs";
 
 const roleHelp: Record<Role, string> = {
   viewer: "Read-only: sees everything, changes nothing.",
@@ -69,7 +70,7 @@ export default function UsersPage() {
                     variant="danger"
                     aria-label={`Delete ${u.username}`}
                     icon={<Trash2 className="size-4" />}
-                    onClick={() => confirm(`Delete ${u.username}?`) && act(() => api.deleteUser(u.id))}
+                    onClick={async () => (await confirmDialog({ title: `Delete ${u.username}?`, confirmLabel: "Delete", danger: true })) && act(() => api.deleteUser(u.id))}
                   />
                 </div>
               </Td>

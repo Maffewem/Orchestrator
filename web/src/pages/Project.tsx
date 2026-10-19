@@ -10,6 +10,7 @@ import PreviewsPanel from "../components/Previews";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
 import { ago, usePoll } from "../lib";
+import { confirmDialog } from "../components/dialogs";
 
 /** URL of the first published port on the device, if we know an address for it. */
 export function visitUrl(p: Project, device?: Device | null): string | null {
@@ -45,7 +46,7 @@ export default function ProjectPage() {
         d = await api.deployProject(p.id);
       } catch (e) {
         // An adopted container is replaced by its first deployment; ask before doing that.
-        if (!(e instanceof ApiError && e.status === 409 && p.runtime.adopted && window.confirm(e.message))) throw e;
+        if (!(e instanceof ApiError && e.status === 409 && p.runtime.adopted && (await confirmDialog({ title: `Deploying recreates ${p.name}`, message: e.message, confirmLabel: "Deploy", danger: true })))) throw e;
         d = await api.deployProject(p.id, true);
       }
       nav(`/deployments/${d.id}`);
@@ -298,7 +299,7 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
             variant="danger"
             icon={<Trash2 className="size-4" />}
             onClick={async () => {
-              if (!window.confirm(`Delete ${p.name}?`)) return;
+              if (!(await confirmDialog({ title: `Delete ${p.name}?`, confirmLabel: "Delete", danger: true }))) return;
               await api.deleteProject(p.id);
               nav("/projects");
             }}

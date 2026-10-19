@@ -4,6 +4,7 @@ import { api, type AgentProgress, type UpdateSchedule, type UpdateStatus } from 
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, PageHeader, Table, Td, inputClass } from "../components/ui";
 import { ago, usePoll } from "../lib";
+import { confirmDialog } from "../components/dialogs";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -81,8 +82,8 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
             variant="primary"
             loading={st.busy === "updating" || st.updating}
             disabled={busy || !st.can_update || newer === false}
-            onClick={() => {
-              if (window.confirm("Update the server now? The dashboard will be unavailable for a few seconds.")) run(() => api.applyUpdate(st.schedule.agents));
+            onClick={async () => {
+              if (await confirmDialog({ title: "Update the server now?", message: "The dashboard will be unavailable for a few seconds.", confirmLabel: "Update" })) run(() => api.applyUpdate(st.schedule.agents));
             }}
           >
             {newer ? "Update now" : "Update to latest"}

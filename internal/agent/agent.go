@@ -247,7 +247,7 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 			output = string(b)
 		}
 	case api.ActionProxySync:
-		err = a.syncProxy(cctx, c.Args["caddyfile"])
+		err = a.syncProxy(cctx, c.Args["caddyfile"], c.Args["cloudflare_token"])
 	case api.ActionBackup, api.ActionRestore:
 		// Large volumes over a slow link can take a while.
 		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)

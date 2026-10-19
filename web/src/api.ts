@@ -312,11 +312,15 @@ export interface DomainsView {
   addresses: string[];
   proxy: "ok" | "agent_too_old";
   protected: boolean;
+  dns: "manual" | "cloudflare";
+  ssl: "http" | "dns";
 }
 
 export interface Settings {
   base_domain: string;
   backup_password_set: boolean;
+  cloudflare: { connected: boolean; proxied: boolean };
+  ssl_mode: "http" | "dns";
   join_token: string;
   heartbeat_interval_seconds: number;
   version: string;
@@ -568,6 +572,9 @@ export const api = {
   settings: () => request<Settings>("GET", "/api/settings"),
   setGitHubToken: (token: string) =>
     request<{ connected: boolean; login?: string }>("PUT", "/api/settings/github", { token }),
+  setCloudflare: (b: { token?: string; proxied?: boolean }) =>
+    request<{ connected: boolean; zones?: string[]; proxied?: boolean }>("PUT", "/api/settings/cloudflare", { token: b.token ?? "", proxied: b.proxied }),
+  setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
   projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
   setProjectUrls: (id: string, u: { production: boolean; preview: boolean }) =>

@@ -108,8 +108,8 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
             <UrlLine locked={v.protected} label="Production" host={prod.hostname} enabled={prod.enabled} row={prod.status} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: on, preview: prev.enabled }))} />
             {prod.enabled && prod.status !== "active" && prod.records && (
               <div className="space-y-2 bg-neutral-50/60 px-5 py-4">
-                <p className="text-sm text-neutral-600">{prod.detail}</p>
-                <Records rows={prod.records} />
+                <p className="text-sm text-neutral-600">{v.dns === "cloudflare" ? "Cloudflare is connected: the record is created when the proxy next syncs. If it does not appear, check Activity for a DNS warning." : prod.detail}</p>
+                {v.dns !== "cloudflare" && <Records rows={prod.records} />}
               </div>
             )}
             <UrlLine locked={v.protected} label="Preview" host={prev.hostname} enabled={prev.enabled} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: on }))} />

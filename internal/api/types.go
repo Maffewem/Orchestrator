@@ -31,12 +31,13 @@ type HostInfo struct {
 
 // Agent capabilities.
 const (
-	CapBackup  = "backup"  // container.backup and container.restore
-	CapUpdate  = "update"  // agent.update
-	CapProxy   = "proxy"   // proxy.sync
-	CapPreview = "preview" // container.remove
-	CapStream  = "stream"  // live log following and container shells
-	CapInspect = "inspect" // container.inspect, used to adopt existing containers
+	CapBackup   = "backup"    // container.backup and container.restore
+	CapUpdate   = "update"    // agent.update
+	CapProxy    = "proxy"     // proxy.sync
+	CapProxyDNS = "proxy-dns" // proxy.sync with a Cloudflare token (DNS challenge)
+	CapPreview  = "preview"   // container.remove
+	CapStream   = "stream"    // live log following and container shells
+	CapInspect  = "inspect"   // container.inspect, used to adopt existing containers
 )
 
 // DockerInfo summarises the container engine on a device.

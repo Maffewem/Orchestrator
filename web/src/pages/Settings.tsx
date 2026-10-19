@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Github, Globe, KeyRound } from "lucide-react";
+import { Archive, Cloud, Github, Globe, KeyRound, Lock } from "lucide-react";
 import { api } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
@@ -14,6 +14,9 @@ export default function SettingsPage() {
   const [login, setLogin] = useState<string | null>(null);
   const [base, setBase] = useState<string | null>(null);
   const [baseMsg, setBaseMsg] = useState<string | null>(null);
+  const [cfToken, setCfToken] = useState("");
+  const [cfMsg, setCfMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [sslMsg, setSslMsg] = useState<string | null>(null);
   const [bkPw, setBkPw] = useState("");
   const [bkMsg, setBkMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -33,6 +36,28 @@ export default function SettingsPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const cf = async (b: { token?: string; proxied?: boolean }, done: (r: Awaited<ReturnType<typeof api.setCloudflare>>) => string) => {
+    setCfMsg(null);
+    try {
+      const r = await api.setCloudflare(b);
+      setCfToken("");
+      setCfMsg({ ok: true, text: done(r) });
+      settings.reload();
+    } catch (e) {
+      setCfMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const setSSL = async (mode: "http" | "dns") => {
+    setSslMsg(null);
+    try {
+      await api.setSSLMode(mode);
+      settings.reload();
+    } catch (e) {
+      setSslMsg(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -82,6 +107,84 @@ export default function SettingsPage() {
               </Button>
             </div>
             {baseMsg && <p className="mt-2 text-sm text-neutral-600">{baseMsg}</p>}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <Cloud className="size-4" /> Cloudflare
+              </span>
+            }
+            subtitle="Create and update DNS records for your workers automatically."
+            action={s.cloudflare.connected ? <Badge tone="ok">Connected</Badge> : <Badge>Not connected</Badge>}
+          />
+          <div className="space-y-3 p-5">
+            <p className="text-sm text-neutral-500">
+              Create an API token at <b>Cloudflare → My Profile → API Tokens</b> with <b>Zone → Zone → Read</b> and <b>Zone → DNS → Edit</b> on the zones you use. The
+              token is stored on this server and sent to a device only when SSL uses the DNS challenge.
+            </p>
+            <div className="flex gap-2">
+              <input
+                className={inputClass}
+                type="password"
+                autoComplete="off"
+                placeholder={s.cloudflare.connected ? "Paste a new token to replace the current one" : "Cloudflare API token"}
+                value={cfToken}
+                onChange={(e) => setCfToken(e.target.value)}
+              />
+              <Button variant="primary" disabled={!cfToken.trim()} onClick={() => cf({ token: cfToken }, (r) => `Token verified. Zones: ${r.zones?.length ? r.zones.join(", ") : "none visible to this token"}.`)}>
+                {s.cloudflare.connected ? "Replace" : "Connect"}
+              </Button>
+              {s.cloudflare.connected && (
+                <Button variant="danger" onClick={() => window.confirm("Disconnect Cloudflare? Existing DNS records stay; SSL goes back to the default challenge.") && cf({}, () => "Disconnected.")}>
+                  Disconnect
+                </Button>
+              )}
+            </div>
+            {s.cloudflare.connected && (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={s.cloudflare.proxied} onChange={(e) => cf({ proxied: e.target.checked }, () => "Saved.")} />
+                Proxy records through Cloudflare (orange cloud)
+              </label>
+            )}
+            {cfMsg && (cfMsg.ok ? <p className="text-sm text-neutral-600">{cfMsg.text}</p> : <ErrorNote>{cfMsg.text}</ErrorNote>)}
+            <ul className="list-disc space-y-1 pl-5 text-sm text-neutral-500">
+              <li>Each hostname a device serves gets an A record pointing at that device's first IPv4 address. Existing A records are updated; a name that already has a CNAME is left alone, and records are never deleted.</li>
+              <li>Records point at the address the device reports, which is often a private LAN address. That works on your network; for access from outside, port-forward or use a public address.</li>
+            </ul>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader
+            title={
+              <span className="flex items-center gap-2">
+                <Lock className="size-4" /> SSL
+              </span>
+            }
+            subtitle="How each device's proxy gets HTTPS certificates (Let's Encrypt, via Caddy)."
+            action={<Badge tone="ok">{s.ssl_mode === "dns" ? "DNS challenge" : "HTTP challenge"}</Badge>}
+          />
+          <div className="space-y-3 p-5">
+            {(
+              [
+                ["http", "HTTP challenge (default)", "Needs ports 80 and 443 on the device reachable from the internet and DNS pointing straight at it."],
+                ["dns", "Cloudflare DNS challenge", "Proves ownership through a DNS record, so ports can stay closed and it works behind the Cloudflare proxy. Needs Cloudflare connected above."],
+              ] as const
+            ).map(([mode, label, text]) => (
+              <label key={mode} className="flex cursor-pointer items-start gap-2 text-sm">
+                <input type="radio" className="mt-1" name="ssl" checked={s.ssl_mode === mode} disabled={mode === "dns" && !s.cloudflare.connected} onChange={() => setSSL(mode)} />
+                <span>
+                  <span className="font-medium">{label}</span>
+                  <br />
+                  <span className="text-neutral-500">{text}</span>
+                </span>
+              </label>
+            ))}
+            {sslMsg && <ErrorNote>{sslMsg}</ErrorNote>}
+            <p className="text-sm text-neutral-500">
+              The DNS challenge runs a Caddy build that includes the Cloudflare module (<code>ghcr.io/caddybuilds/caddy-cloudflare</code>). Switching modes recreates the proxy container on each device, keeping its certificates.
+            </p>
           </div>
         </Card>
         <Card>

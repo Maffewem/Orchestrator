@@ -165,3 +165,16 @@ func (d *Docker) hasImage(ctx context.Context, ref string) bool {
 	_, err := d.ImageInspect(ctx, ref)
 	return err == nil
 }
+
+// LabelOf returns one label of a container ("" when unset).
+func (d *Docker) LabelOf(ctx context.Context, id, label string) (string, error) {
+	var v struct {
+		Config struct {
+			Labels map[string]string `json:"Labels"`
+		} `json:"Config"`
+	}
+	if err := d.call(ctx, http.MethodGet, "/containers/"+id+"/json", nil, nil, &v); err != nil {
+		return "", err
+	}
+	return v.Config.Labels[label], nil
+}

@@ -112,6 +112,8 @@ type domainsView struct {
 	Addresses  []string    `json:"addresses"`
 	Proxy      string      `json:"proxy"` // ok | agent_too_old
 	Protected  bool        `json:"protected"`
+	DNS        string      `json:"dns"` // manual | cloudflare
+	SSL        string      `json:"ssl"` // http | dns
 }
 
 // ipv4s returns the IPv4 addresses a device reported.
@@ -159,6 +161,10 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 		v.Proxy = "ok"
 	}
 	v.Protected = s.projectProtected(ctx, p.ID)
+	v.DNS, v.SSL = "manual", s.sslMode(ctx)
+	if s.cloudflareToken(ctx) != "" {
+		v.DNS = "cloudflare"
+	}
 	prefs := s.urlPrefs(ctx, p.ID)
 	if base != "" {
 		host := slug(p.Name) + "." + base
@@ -312,6 +318,12 @@ type site struct{ path, upstream, project string }
 // buildCaddyfile renders the proxy configuration for one device. It returns the number of
 // hostnames served.
 func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool, previews map[string][]*store.Preview) (string, int) {
+	file, hosts := buildCaddy(base, serverURL, projects, doms, prefs, protected, previews)
+	return file, len(hosts)
+}
+
+// buildCaddy is buildCaddyfile that also returns the hostnames it serves.
+func buildCaddy(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool, previews map[string][]*store.Preview) (string, []string) {
 	sites := map[string][]site{}
 	for _, p := range projects {
 		port := upstreamPort(p)
@@ -365,7 +377,7 @@ func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[
 		}
 		b.WriteString("}\n")
 	}
-	return b.String(), len(hosts)
+	return b.String(), hosts
 }
 
 // syncProxy pushes the current proxy configuration to a device. Failures are logged and
@@ -400,7 +412,13 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 		protected[p.ID] = s.projectProtected(ctx, p.ID)
 		previews[p.ID], _ = s.store.ListPreviews(ctx, p.ID)
 	}
-	file, n := buildCaddyfile(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews)
+	file, hosts := buildCaddy(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews)
+	n := len(hosts)
+	args := map[string]string{"caddyfile": file}
+	if tok := s.sslDNSToken(ctx); tok != "" && hasCap(d, api.CapProxyDNS) {
+		args["caddyfile"] = withDNSChallenge(file)
+		args["cloudflare_token"] = tok
+	}
 	used, _ := s.store.GetSetting(ctx, settingProxyUsed+deviceID)
 	if n == 0 && used == "" && !force {
 		return nil // nothing to serve and no proxy to empty
@@ -409,11 +427,12 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 		s.event(ctx, d.ID, "warning", "proxy.sync", errAgentTooOld(d, "domains").Error())
 		return errAgentTooOld(d, "domains")
 	}
-	if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionProxySync, "proxy", map[string]string{"caddyfile": file}); err != nil {
+	if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionProxySync, "proxy", args); err != nil {
 		s.log.Warn("queue proxy sync", "device", d.ID, "err", err)
 		return err
 	}
 	s.store.SetSetting(ctx, settingProxyUsed+deviceID, "1")
+	s.syncDNS(ctx, d, hosts)
 	return nil
 }
 

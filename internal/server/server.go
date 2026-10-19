@@ -48,13 +48,14 @@ type Config struct {
 }
 
 type Server struct {
-	store     *store.Store
-	cfg       Config
-	log       *slog.Logger
-	adminHash string
-	githubAPI string
-	metrics   *metricsHistory
-	logins    limiter
+	store         *store.Store
+	cfg           Config
+	log           *slog.Logger
+	adminHash     string
+	githubAPI     string
+	cloudflareAPI string
+	metrics       *metricsHistory
+	logins        limiter
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState
@@ -87,7 +88,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.DockerHost == "" {
 		cfg.DockerHost = "unix:///var/run/docker.sock"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub()}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub()}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 
 	for _, key := range []string{settingJoinToken, settingWebhookSecret} {
@@ -246,6 +247,8 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/projects/{id}/domains/access", s.handleSetAccess)
 	admin("GET /api/settings", s.handleGetSettings)
 	admin("PUT /api/settings/github", s.handleSetGitHub)
+	admin("PUT /api/settings/cloudflare", s.handleSetCloudflare)
+	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 

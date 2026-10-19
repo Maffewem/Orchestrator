@@ -448,8 +448,6 @@ func (s *Server) handleEnableProxy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
 }
 
-
-
 // handleSetAccess turns "visitors must sign in with an Orchestrator account" on or off.
 func (s *Server) handleSetAccess(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.lookupProject(w, r)

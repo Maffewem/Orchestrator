@@ -7,6 +7,7 @@ import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusD
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
 import DomainsPanel from "../components/Domains";
 import PreviewsPanel from "../components/Previews";
+import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
 import { ago, usePoll } from "../lib";
 
@@ -26,6 +27,7 @@ export default function ProjectPage() {
   const device = usePoll(() => (p ? api.device(p.device_id) : Promise.resolve(null)), 10000, [p?.device_id]);
   const [deploying, setDeploying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const worker = device.data?.containers.find((c) => c.name === p?.name);
   useCrumbs([{ label: "Projects", to: "/projects" }, { label: p?.name ?? "…" }]);
 
   if (project.error && !p) return <ErrorNote>{project.error}</ErrorNote>;
@@ -70,6 +72,9 @@ export default function ProjectPage() {
               <Loader2 className="size-3.5 animate-spin" />
               Deployment in progress ›
             </Link>
+          )}
+          {worker && (
+            <PowerControls deviceId={p.device_id} containerId={worker.id} state={worker.state} onDone={device.reload} onError={setError} />
           )}
           <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
             New deployment

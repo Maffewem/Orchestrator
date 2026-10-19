@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { GitBranch, Github, Package, Plus, Rocket } from "lucide-react";
 import { api, type Deployment, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
-import { Button, Card, Empty, Loading, PageHeader, StatusIcon, deploymentLabel } from "../components/ui";
+import { Button, Card, Empty, Loading, PageHeader, StatusDot, StatusIcon, deploymentLabel } from "../components/ui";
+import PowerControls from "../components/PowerControls";
 import { ago, cx, duration, shortId, span, usePoll, useTick } from "../lib";
 
 export function SourceLabel({ p }: { p: Project }) {
@@ -76,6 +78,8 @@ export default function ProjectsPage() {
   useCrumbs([{ label: "Projects" }]);
   const nav = useNavigate();
   const { data } = usePoll(api.projects, 5000);
+  const fleet = usePoll(api.containers, 5000);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <>
@@ -88,6 +92,7 @@ export default function ProjectsPage() {
           </Button>
         }
       />
+      {error && <p className="mb-3 text-sm text-bad">{error}</p>}
       {!data ? (
         <Loading />
       ) : data.length === 0 ? (
@@ -104,7 +109,8 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {data.map((p) => (
-            <Link key={p.id} to={`/projects/${p.id}`}>
+            <div key={p.id} className="relative">
+            <Link to={`/projects/${p.id}`}>
               <Card className="h-full p-5 transition-shadow hover:shadow-md">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -127,8 +133,22 @@ export default function ProjectsPage() {
                     <p className="text-neutral-500">Not deployed yet · {p.device_name}</p>
                   )}
                 </div>
+                <div className="h-9" />
               </Card>
             </Link>
+            {(() => {
+              const w = fleet.data?.find((c) => c.project_id === p.id && c.device_id === p.device_id);
+              return (
+                <div className="absolute bottom-3 left-5 right-5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs text-neutral-600">
+                    <StatusDot status={w?.state ?? "exited"} />
+                    {w ? (w.state === "running" ? "Running" : "Stopped") : "No worker"}
+                  </span>
+                  {w && <div className="flex gap-1"><PowerControls deviceId={w.device_id} containerId={w.id} state={w.state} size="sm" onDone={fleet.reload} onError={setError} /></div>}
+                </div>
+              );
+            })()}
+            </div>
           ))}
         </div>
       )}

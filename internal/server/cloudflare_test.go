@@ -51,7 +51,7 @@ func TestCloudflareSSLAndDNS(t *testing.T) {
 	h.srv.cloudflareAPI = cf.URL
 	reg := h.register("pi-4")
 	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{
-		Host: api.HostInfo{Addresses: []string{"192.168.1.20"}, Capabilities: []string{api.CapProxy}}}, &api.HeartbeatResponse{})
+		Host: api.HostInfo{Addresses: []string{"192.168.1.20"}, Capabilities: []string{api.CapProxy, api.CapProxyDNS}}}, &api.HeartbeatResponse{})
 	var p ProjectView
 	h.do("POST", "/api/projects", adminToken, map[string]any{
 		"name": "blog", "device_id": reg.DeviceID,
@@ -81,7 +81,7 @@ func TestCloudflareSSLAndDNS(t *testing.T) {
 
 	// The device's newest proxy command carries the DNS challenge and the token.
 	var resp api.HeartbeatResponse
-	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Addresses: []string{"192.168.1.20"}, Capabilities: []string{api.CapProxy}}}, &resp)
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Addresses: []string{"192.168.1.20"}, Capabilities: []string{api.CapProxy, api.CapProxyDNS}}}, &resp)
 	var last map[string]string
 	for _, c := range resp.Commands {
 		if c.Action == api.ActionProxySync {

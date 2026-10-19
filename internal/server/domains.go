@@ -409,7 +409,7 @@ func (s *Server) syncProxy(ctx context.Context, deviceID string) {
 	file, hosts := buildCaddy(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews)
 	n := len(hosts)
 	args := map[string]string{"caddyfile": file}
-	if tok := s.sslDNSToken(ctx); tok != "" {
+	if tok := s.sslDNSToken(ctx); tok != "" && hasCap(d, api.CapProxyDNS) {
 		args["caddyfile"] = withDNSChallenge(file)
 		args["cloudflare_token"] = tok
 	}

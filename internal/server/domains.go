@@ -371,13 +371,19 @@ func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[
 // syncProxy pushes the current proxy configuration to a device. Failures are logged and
 // recorded as events: a domain change should still save when the device is unreachable.
 func (s *Server) syncProxy(ctx context.Context, deviceID string) {
+	s.pushProxy(ctx, deviceID, false)
+}
+
+// pushProxy is syncProxy with an option to create the proxy even when nothing needs serving
+// yet, which is what the device page's "Enable proxy" button does.
+func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) error {
 	d, err := s.store.GetDevice(ctx, deviceID)
 	if err != nil {
-		return
+		return err
 	}
 	all, err := s.store.ListProjects(ctx)
 	if err != nil {
-		return
+		return err
 	}
 	var projects []*store.Project
 	doms := map[string][]*store.Domain{}
@@ -396,18 +402,50 @@ func (s *Server) syncProxy(ctx context.Context, deviceID string) {
 	}
 	file, n := buildCaddyfile(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews)
 	used, _ := s.store.GetSetting(ctx, settingProxyUsed+deviceID)
-	if n == 0 && used == "" {
-		return // nothing to serve and no proxy to empty
+	if n == 0 && used == "" && !force {
+		return nil // nothing to serve and no proxy to empty
 	}
 	if !hasCap(d, api.CapProxy) {
 		s.event(ctx, d.ID, "warning", "proxy.sync", errAgentTooOld(d, "domains").Error())
-		return
+		return errAgentTooOld(d, "domains")
 	}
 	if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionProxySync, "proxy", map[string]string{"caddyfile": file}); err != nil {
 		s.log.Warn("queue proxy sync", "device", d.ID, "err", err)
-		return
+		return err
 	}
 	s.store.SetSetting(ctx, settingProxyUsed+deviceID, "1")
+	return nil
+}
+
+// proxyState describes the device's Caddy container as the last heartbeat saw it:
+// running, stopped, none (never created), or agent_too_old.
+func proxyState(d *store.Device) string {
+	if !hasCap(d, api.CapProxy) {
+		return "agent_too_old"
+	}
+	for _, c := range d.Containers {
+		if c.Name == "orchestrator-proxy" || c.Labels["orchestrator.role"] == "proxy" {
+			if c.State == "running" {
+				return "running"
+			}
+			return "stopped"
+		}
+	}
+	return "none"
+}
+
+// handleEnableProxy creates the device's proxy now instead of waiting for the first domain.
+func (s *Server) handleEnableProxy(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.lookupDevice(w, r)
+	if !ok {
+		return
+	}
+	if err := s.pushProxy(r.Context(), d.ID, true); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	s.event(r.Context(), d.ID, "info", "proxy.enable", identityFrom(r).Name+" enabled the proxy on "+d.Name)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
 }
 
 // handleSetAccess turns "visitors must sign in with an Orchestrator account" on or off.

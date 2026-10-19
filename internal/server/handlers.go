@@ -20,10 +20,12 @@ type DeviceView struct {
 	Health string `json:"health"` // ok | warning | critical
 	// Issues explains a non-ok health, Server Manager style.
 	Issues []string `json:"issues"`
+	// Proxy is the state of the per-device domain proxy: running | stopped | none | agent_too_old.
+	Proxy string `json:"proxy"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d)}
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"

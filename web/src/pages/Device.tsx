@@ -83,6 +83,53 @@ function Prop({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
+/**
+ * The per-device Caddy proxy only serves domains, custom domains and login-protected
+ * workers. Without those, workers are still reachable at ip:port, so it is optional.
+ */
+function ProxyCard({ d }: { d: Device }) {
+  const isAdmin = useCan("admin");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const text: Record<Device["proxy"], string> = {
+    running: "Running. Serves domains, previews and login-protected workers on ports 80 and 443.",
+    stopped: "The proxy container exists but is not running.",
+    none: "Not created yet. It is optional: workers are reachable at their IP and port without it. It is created automatically when you add a domain, and you can enable it now.",
+    agent_too_old: "This agent is too old to run the proxy. Re-run the install command on the device to update it.",
+  };
+  return (
+    <Card>
+      <CardHeader title="Domain proxy" />
+      <div className="space-y-3 p-5 text-sm">
+        <p className="flex items-center gap-2">
+          <Badge>{d.proxy === "agent_too_old" ? "agent too old" : d.proxy}</Badge>
+        </p>
+        <p className="text-neutral-500">{text[d.proxy]}</p>
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {isAdmin && (d.proxy === "none" || d.proxy === "stopped") && (
+          <Button
+            variant="primary"
+            disabled={busy || d.status !== "online"}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                await api.enableProxy(d.id);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {d.proxy === "none" ? "Enable proxy" : "Restart proxy"}
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 /** Server Manager-style properties, health and performance for one device. */
 function DeviceOverview({ d }: { d: Device }) {
   const samples = usePoll(() => api.deviceMetrics(d.id), 5000, [d.id]);
@@ -156,6 +203,7 @@ function DeviceOverview({ d }: { d: Device }) {
             )}
           </dl>
         </Card>
+        <ProxyCard d={d} />
         {d.labels.length > 0 && (
           <Card>
             <CardHeader title="Roles" />

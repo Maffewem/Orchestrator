@@ -20,16 +20,34 @@ export function useCrumbs(crumbs: Crumb[]) {
   }, [key, set]);
 }
 
-const nav = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/projects", label: "Projects", icon: Rocket },
-  { to: "/devices", label: "Devices", icon: Server },
-  { to: "/containers", label: "Workers", icon: Boxes },
-  { to: "/backups", label: "Backups", icon: Archive },
-  { to: "/updates", label: "Updates", icon: RefreshCw, admin: true },
-  { to: "/activity", label: "Activity", icon: Activity },
-  { to: "/settings", label: "Settings", icon: Settings, admin: true },
-  { to: "/users", label: "Users", icon: Users, admin: true },
+type NavItem = { to: string; label: string; icon: typeof Server; end?: boolean; admin?: boolean };
+
+// Grouped from most-used to least-used: what is running, where it runs, then administration.
+const navGroups: { title?: string; items: NavItem[] }[] = [
+  { items: [{ to: "/", label: "Overview", icon: LayoutDashboard, end: true }] },
+  {
+    title: "Deploy",
+    items: [
+      { to: "/projects", label: "Projects", icon: Rocket },
+      { to: "/containers", label: "Workers", icon: Boxes },
+    ],
+  },
+  {
+    title: "Infrastructure",
+    items: [
+      { to: "/devices", label: "Devices", icon: Server },
+      { to: "/backups", label: "Backups", icon: Archive },
+      { to: "/updates", label: "Updates", icon: RefreshCw, admin: true },
+    ],
+  },
+  { title: "Monitor", items: [{ to: "/activity", label: "Activity", icon: Activity }] },
+  {
+    title: "Admin",
+    items: [
+      { to: "/users", label: "Users", icon: Users, admin: true },
+      { to: "/settings", label: "Settings", icon: Settings, admin: true },
+    ],
+  },
 ];
 
 export function Logo() {
@@ -62,22 +80,31 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           <Logo />
         </Link>
       </div>
-      {nav.filter((n) => !n.admin || me?.role === "admin").map(({ to, label, icon: Icon, end }) => (
-        <NavLink
-          key={to}
-          to={to}
-          end={end}
-          className={({ isActive }) =>
-            cx(
-              "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-              isActive ? "bg-neutral-200/70 font-medium text-neutral-900" : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900",
-            )
-          }
-        >
-          <Icon className="size-4" />
-          {label}
-        </NavLink>
-      ))}
+      {navGroups.map((g) => {
+        const items = g.items.filter((n) => !n.admin || me?.role === "admin");
+        if (!items.length) return null;
+        return (
+          <div key={g.title ?? "top"} className="mb-3">
+            {g.title && <p className="px-2.5 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-neutral-400">{g.title}</p>}
+            {items.map(({ to, label, icon: Icon, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  cx(
+                    "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                    isActive ? "bg-neutral-200/70 font-medium text-neutral-900" : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900",
+                  )
+                }
+              >
+                <Icon className="size-4" />
+                {label}
+              </NavLink>
+            ))}
+          </div>
+        );
+      })}
       <div className="mt-auto">
         {me && (
           <div className="mb-1 px-2.5 py-2 text-sm">

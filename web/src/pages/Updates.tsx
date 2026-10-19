@@ -52,7 +52,7 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
           <div>
             <dt className="text-neutral-500">Latest build</dt>
             <dd className="font-medium">
-              {!st.check ? "Not checked yet" : st.check.error ? <span className="text-bad">Check failed</span> : newer ? <span className="font-mono">{st.check.version || "newer build"}</span> : "You're up to date"}
+              {!st.check ? "Not checked yet" : st.check.error ? <span className="text-bad">Check failed</span> : newer ? <span className="font-mono">{st.check.version || "newer build"}</span> : <span><span className="font-mono">{st.version || "unknown"}</span> <Badge tone="ok">Latest</Badge></span>}
             </dd>
           </div>
           <div>
@@ -230,9 +230,13 @@ function AgentsCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
         {st.agents.map((a) => (
           <tr key={a.device_id}>
             <Td className="font-medium">{a.name}</Td>
-            <Td className="font-mono text-xs">{a.version || "unknown"}</Td>
+            <Td className="font-mono text-xs">
+              {a.version || "unknown"}
+              {!a.outdated && a.version && <span className="ml-2 font-sans"><Badge tone="ok">Latest</Badge></span>}
+              {a.outdated && st.version && <span className="ml-2 font-sans text-neutral-500">→ {st.version}</span>}
+            </Td>
             <Td>
-              {a.progress && a.progress.state !== "done" ? progressBadge(a.progress) : a.progress ? <Badge tone="ok">Updated to {a.progress.to}</Badge> : a.in_container ? <Badge>Container: pull a new image</Badge> : !a.can_update ? <Badge tone="warn">Too old: re-run the install command</Badge> : !a.online ? <Badge>Offline</Badge> : a.outdated ? <Badge tone="warn">Update available</Badge> : <Badge tone="ok">Up to date</Badge>}
+              {a.progress && a.progress.state !== "done" ? progressBadge(a.progress) : a.progress ? <Badge tone="ok">Updated to {a.progress.to}</Badge> : a.in_container ? <Badge>Container: pull a new image</Badge> : !a.can_update ? <Badge tone="warn">Too old: re-run the install command</Badge> : !a.online ? <Badge>Offline</Badge> : a.outdated ? <Badge tone="warn">Update available</Badge> : <Badge tone="ok">Latest</Badge>}
             </Td>
             <Td>
               <div className="flex justify-end">

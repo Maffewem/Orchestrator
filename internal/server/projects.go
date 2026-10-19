@@ -17,6 +17,7 @@ var (
 	projectNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	repoRe        = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	portRe        = regexp.MustCompile(`^(\d{1,5}:)?\d{1,5}(/(tcp|udp))?$`)
+	volumeRe      = regexp.MustCompile(`^[^:\s]+:/[^:\s]*(:ro|:rw)?$`)
 	restarts      = map[string]bool{"": true, "no": true, "always": true, "unless-stopped": true, "on-failure": true}
 )
 
@@ -111,6 +112,9 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 		if strings.Contains(src.Context, "..") || strings.Contains(src.Dockerfile, "..") {
 			return errors.New("paths must stay inside the repository")
 		}
+		if src.Dockerfile = strings.TrimSpace(src.Dockerfile); api.LooksLikeComposeFile(src.Dockerfile) {
+			return errors.New("the Dockerfile setting points at a Docker Compose file; use the path of a Dockerfile (empty means \"Dockerfile\")")
+		}
 		src.Image = ""
 		if err := cleanWatch(&src.Watch); err != nil {
 			return err
@@ -166,6 +170,12 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 	}
 	if !restarts[in.Runtime.Restart] {
 		return errors.New("unknown restart policy")
+	}
+	in.Runtime.Volumes = cleanLabels(in.Runtime.Volumes)
+	for _, v := range in.Runtime.Volumes {
+		if !volumeRe.MatchString(v) {
+			return fmt.Errorf("volume %q should look like name:/path or /host/path:/path[:ro]", v)
+		}
 	}
 	return nil
 }
@@ -311,6 +321,10 @@ func (s *Server) handleDeployProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if msg := s.adoptedWarning(r, p); msg != "" {
+		writeError(w, http.StatusConflict, msg)
+		return
+	}
 	var commit *store.Commit
 	if p.Source.Type == store.SourceGitHub {
 		var err error
@@ -429,4 +443,28 @@ func (s *Server) finishDeployment(ctx context.Context, dev *store.Device, c *api
 	} else {
 		s.event(ctx, dev.ID, "error", "deployment.failed", fmt.Sprintf("%s failed to deploy to %s: %s", name, dev.Name, res.Error))
 	}
+}
+
+// adoptedWarning explains what the first deployment of an adopted project would change, unless
+// the request carries confirm=1. Once Orchestrator has recreated the container (it then has the
+// project label) there is nothing left to warn about.
+func (s *Server) adoptedWarning(r *http.Request, p *store.Project) string {
+	if !p.Runtime.Adopted || r.URL.Query().Get("confirm") == "1" {
+		return ""
+	}
+	dev, err := s.store.GetDevice(r.Context(), p.DeviceID)
+	if err != nil {
+		return ""
+	}
+	for _, c := range dev.Containers {
+		if c.Name != serviceOf(p) || c.Labels["orchestrator.project"] != "" {
+			continue
+		}
+		msg := "Deploying recreates " + c.Name + ": the running container is replaced by a new one built from this project's settings."
+		if len(p.Runtime.Unsupported) > 0 {
+			msg += " These settings can't be carried over and will be lost: " + strings.Join(p.Runtime.Unsupported, ", ") + "."
+		}
+		return msg + " Confirm to continue."
+	}
+	return ""
 }

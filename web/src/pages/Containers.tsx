@@ -2,6 +2,8 @@ import { useState } from "react";
 import { api, type FleetContainer } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
+import { ImportContainers } from "../components/Adopt";
+import { useCan } from "../components/auth";
 import { Card, CardHeader, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
 
@@ -16,6 +18,7 @@ export default function ContainersPage() {
   const [q, setQ] = useState("");
   const [state, setState] = useState("all");
   const [group, setGroup] = useState(true);
+  const isAdmin = useCan("admin");
   const rows = (data ?? []).filter(
     (c) =>
       (state === "all" || (state === "running" ? c.state === "running" : c.state !== "running")) &&
@@ -32,6 +35,7 @@ export default function ContainersPage() {
       <PageHeader
         title="Workers & stacks"
         description="Every container in the fleet: which device it runs on, its ports, and where to reach it."
+        actions={isAdmin && data && <ImportContainers containers={data} onDone={reload} />}
       />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input className={`${inputClass} max-w-xs`} placeholder="Filter by name, image, device or IP" value={q} onChange={(e) => setQ(e.target.value)} />

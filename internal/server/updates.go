@@ -275,6 +275,7 @@ func (s *Server) updateStatus(ctx context.Context) updateStatus {
 			st.Agents = append(st.Agents, agentUpdateView{
 				DeviceID: d.ID, Name: d.Name, Version: d.Host.AgentVersion, Arch: d.Host.Arch,
 				Online: v.Status == "online", InContainer: d.Host.InContainer, Outdated: s.agentOutdated(d), CanUpdate: hasCap(d, api.CapUpdate),
+				Progress: s.agentProgress(ctx, d),
 			})
 		}
 	}

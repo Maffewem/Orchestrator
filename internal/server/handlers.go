@@ -20,10 +20,12 @@ type DeviceView struct {
 	Health string `json:"health"` // ok | warning | critical
 	// Issues explains a non-ok health, Server Manager style.
 	Issues []string `json:"issues"`
+	// Proxy is the state of the per-device domain proxy: running | stopped | none | agent_too_old.
+	Proxy string `json:"proxy"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d)}
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"
@@ -422,8 +424,12 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := map[string]string{}
+	adopted := map[string]*store.Project{} // device|container name -> project, until the first redeploy labels the container
 	for _, p := range projects {
 		names[p.ID] = p.Name
+		if p.Runtime.Adopted {
+			adopted[p.DeviceID+"|"+serviceOf(p)] = p
+		}
 	}
 	out := []fleetContainer{}
 	for _, d := range devices {
@@ -436,6 +442,8 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 			fc := fleetContainer{Container: c, DeviceID: d.ID, DeviceName: d.Name, DeviceStatus: status, DeviceAddresses: addrs}
 			if id := c.Labels["orchestrator.project"]; names[id] != "" {
 				fc.ProjectID, fc.ProjectName = id, names[id]
+			} else if p := adopted[d.ID+"|"+c.Name]; p != nil && c.Labels["orchestrator.project"] == "" {
+				fc.ProjectID, fc.ProjectName = p.ID, p.Name
 			}
 			out = append(out, fc)
 		}

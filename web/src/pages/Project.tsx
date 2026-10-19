@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router";
-import { ArrowUpRight, CloudUpload, Loader2, Rocket, Trash2 } from "lucide-react";
-import { api, type Device, type Project } from "../api";
+import { ArrowUpRight, CloudUpload, Loader2, PackagePlus, Rocket, Trash2 } from "lucide-react";
+import { api, ApiError, type Device, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
 import DomainsPanel from "../components/Domains";
 import PreviewsPanel from "../components/Previews";
+import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
 import { ago, usePoll } from "../lib";
 
@@ -26,6 +27,7 @@ export default function ProjectPage() {
   const device = usePoll(() => (p ? api.device(p.device_id) : Promise.resolve(null)), 10000, [p?.device_id]);
   const [deploying, setDeploying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const worker = device.data?.containers.find((c) => c.name === (p?.runtime.container || p?.name));
   useCrumbs([{ label: "Projects", to: "/projects" }, { label: p?.name ?? "…" }]);
 
   if (project.error && !p) return <ErrorNote>{project.error}</ErrorNote>;
@@ -38,7 +40,14 @@ export default function ProjectPage() {
     setDeploying(true);
     setError(null);
     try {
-      const d = await api.deployProject(p.id);
+      let d;
+      try {
+        d = await api.deployProject(p.id);
+      } catch (e) {
+        // An adopted container is replaced by its first deployment; ask before doing that.
+        if (!(e instanceof ApiError && e.status === 409 && p.runtime.adopted && window.confirm(e.message))) throw e;
+        d = await api.deployProject(p.id, true);
+      }
       nav(`/deployments/${d.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -70,6 +79,9 @@ export default function ProjectPage() {
               <Loader2 className="size-3.5 animate-spin" />
               Deployment in progress ›
             </Link>
+          )}
+          {worker && (
+            <PowerControls deviceId={p.device_id} containerId={worker.id} state={worker.state} onDone={device.reload} onError={setError} />
           )}
           <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
             New deployment
@@ -105,7 +117,7 @@ function ProjectOverview({ p, device, url }: { p: Project; device: Device | null
   // Production is the newest deployment that went live, as on Cloudflare Pages.
   const d = deps.data?.find((x) => x.status === "succeeded") ?? p.latest_deployment;
   const latest = p.latest_deployment;
-  const container = device?.containers.find((c) => c.name === p.name);
+  const container = device?.containers.find((c) => c.name === (p.runtime.container || p.name));
   return (
     <div className="space-y-6">
       <div>
@@ -138,6 +150,12 @@ function ProjectOverview({ p, device, url }: { p: Project; device: Device | null
                 </p>
               )}
             </Link>
+          ) : p.runtime.adopted ? (
+            <Empty icon={<PackagePlus className="size-8" />} title="Adopted, running as it was">
+              This project took over a container that already ran on the device. Orchestrator has not changed it. A new deployment pulls{" "}
+              {p.source.image} and recreates the container from these settings.
+              {p.runtime.unsupported?.length ? ` Not carried over: ${p.runtime.unsupported.join(", ")}.` : ""}
+            </Empty>
           ) : (
             <Empty icon={<Rocket className="size-8" />} title="Not deployed yet">
               Use New deployment to roll this project out.

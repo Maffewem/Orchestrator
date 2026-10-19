@@ -381,6 +381,10 @@ func (d *Docker) Build(ctx context.Context, remote, dockerfile, tag string, logf
 
 func (d *Docker) buildCLI(ctx context.Context, cli, remote, dockerfile, tag string, logf func(string)) error {
 	args := []string{"build", "--progress=plain", "-t", tag}
+	if api.LooksLikeComposeFile(dockerfile) {
+		logf("Ignoring " + dockerfile + ": it is a Compose file, not a Dockerfile. Building ./Dockerfile instead.")
+		dockerfile = ""
+	}
 	if dockerfile != "" {
 		args = append(args, "-f", dockerfile)
 	}
@@ -463,15 +467,22 @@ func (d *Docker) Create(ctx context.Context, name string, spec api.DeploySpec, l
 	for k, v := range labels {
 		all[k] = v
 	}
+	host := map[string]any{
+		"PortBindings":  bindings,
+		"RestartPolicy": map[string]string{"Name": spec.Restart},
+	}
+	if len(spec.Volumes) > 0 {
+		host["Binds"] = spec.Volumes
+	}
+	if spec.Network != "" {
+		host["NetworkMode"] = spec.Network
+	}
 	body := map[string]any{
 		"Image":        spec.Image,
 		"Env":          spec.Env,
 		"Labels":       all,
 		"ExposedPorts": exposed,
-		"HostConfig": map[string]any{
-			"PortBindings":  bindings,
-			"RestartPolicy": map[string]string{"Name": spec.Restart},
-		},
+		"HostConfig":   host,
 	}
 	if len(spec.Command) > 0 {
 		body["Cmd"] = spec.Command

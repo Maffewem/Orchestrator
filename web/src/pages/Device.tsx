@@ -4,16 +4,22 @@ import { Trash2 } from "lucide-react";
 import { api, type Device } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
+import { ImportContainers } from "../components/Adopt";
+import { useCan } from "../components/auth";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, StatusDot, Tabs, inputClass } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
-import { ago, bytes, pct, uptime, usePoll } from "../lib";
+import { ago, bytes, bytesOrDash, pct, uptime, usePoll } from "../lib";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
   const dev = usePoll(() => api.device(id), 5000, [id]);
   const d = dev.data;
+  // The fleet list knows which containers already belong to a project; the device's own list doesn't.
+  const fleet = usePoll(api.containers, 5000);
+  const isAdmin = useCan("admin");
+  const rows = fleet.data?.filter((c) => c.device_id === id);
   useCrumbs([{ label: "Devices", to: "/devices" }, { label: d?.name ?? "…" }]);
   if (dev.error && !d) return <ErrorNote>{dev.error}</ErrorNote>;
   if (!d) return <Loading />;
@@ -48,9 +54,16 @@ export default function DevicePage() {
         <Route
           path="containers"
           element={
-            <Card>
-              <ContainerTable containers={d.containers} deviceId={d.id} addresses={d.host.addresses ?? []} onChanged={dev.reload} />
-            </Card>
+            <>
+              {isAdmin && rows && (
+                <div className="mb-4 flex justify-end gap-2">
+                  <ImportContainers containers={rows} onDone={fleet.reload} />
+                </div>
+              )}
+              <Card>
+                <ContainerTable containers={rows ?? d.containers} deviceId={d.id} addresses={d.host.addresses ?? []} onChanged={() => { dev.reload(); fleet.reload(); }} />
+              </Card>
+            </>
           }
         />
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
@@ -67,6 +80,53 @@ function Prop({ k, v }: { k: string; v: React.ReactNode }) {
       <dt className="shrink-0 text-neutral-500">{k}</dt>
       <dd className="min-w-0 truncate text-right">{v || "—"}</dd>
     </div>
+  );
+}
+
+/**
+ * The per-device Caddy proxy only serves domains, custom domains and login-protected
+ * workers. Without those, workers are still reachable at ip:port, so it is optional.
+ */
+function ProxyCard({ d }: { d: Device }) {
+  const isAdmin = useCan("admin");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const text: Record<Device["proxy"], string> = {
+    running: "Running. Serves domains, previews and login-protected workers on ports 80 and 443.",
+    stopped: "The proxy container exists but is not running.",
+    none: "Not created yet. It is optional: workers are reachable at their IP and port without it. It is created automatically when you add a domain, and you can enable it now.",
+    agent_too_old: "This agent is too old to run the proxy. Re-run the install command on the device to update it.",
+  };
+  return (
+    <Card>
+      <CardHeader title="Domain proxy" />
+      <div className="space-y-3 p-5 text-sm">
+        <p className="flex items-center gap-2">
+          <Badge>{d.proxy === "agent_too_old" ? "agent too old" : d.proxy}</Badge>
+        </p>
+        <p className="text-neutral-500">{text[d.proxy]}</p>
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {isAdmin && (d.proxy === "none" || d.proxy === "stopped") && (
+          <Button
+            variant="primary"
+            disabled={busy || d.status !== "online"}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                await api.enableProxy(d.id);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {d.proxy === "none" ? "Enable proxy" : "Restart proxy"}
+          </Button>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -92,9 +152,9 @@ function DeviceOverview({ d }: { d: Device }) {
           <CardHeader title="Performance" subtitle="Live samples from the agent (last hour)." />
           <div className="space-y-6 p-5">
             <div className="grid grid-cols-3 gap-6">
-              <Meter label="CPU" value={m.cpu_percent} />
-              <Meter label={`Memory · ${bytes(m.memory_used)} of ${bytes(m.memory_total)}`} value={pct(m.memory_used, m.memory_total)} />
-              <Meter label={`Disk · ${bytes(m.disk_used)} of ${bytes(m.disk_total)}`} value={pct(m.disk_used, m.disk_total)} />
+              <Meter label={`CPU · ${d.host.cpus ? `${d.host.cpus} ${d.host.cpus === 1 ? "core" : "cores"}` : "—"}`} value={m.cpu_percent} />
+              <Meter label={`Memory · ${bytes(m.memory_used)} of ${bytesOrDash(m.memory_total)}`} value={pct(m.memory_used, m.memory_total)} />
+              <Meter label={`Disk · ${bytes(m.disk_used)} of ${bytesOrDash(m.disk_total)}`} value={pct(m.disk_used, m.disk_total)} />
             </div>
             <LineChart
               series={[
@@ -119,7 +179,9 @@ function DeviceOverview({ d }: { d: Device }) {
             <Prop k="Operating system" v={d.host.platform || d.host.os} />
             <Prop k="Kernel" v={d.host.kernel} />
             <Prop k="Architecture" v={d.host.arch} />
-            <Prop k="Processors" v={d.host.cpus} />
+            <Prop k="CPU cores" v={d.host.cpus || "—"} />
+            <Prop k="Total RAM" v={bytesOrDash(m.memory_total || d.host.memory_total)} />
+            <Prop k="Total disk" v={bytesOrDash(m.disk_total)} />
             <Prop k="IP addresses" v={d.host.addresses?.join(", ")} />
             <Prop k="Uptime" v={uptime(m.uptime_seconds)} />
             <Prop k="Load average" v={`${m.load1.toFixed(2)} ${m.load5.toFixed(2)} ${m.load15.toFixed(2)}`} />
@@ -141,6 +203,7 @@ function DeviceOverview({ d }: { d: Device }) {
             )}
           </dl>
         </Card>
+        <ProxyCard d={d} />
         {d.labels.length > 0 && (
           <Card>
             <CardHeader title="Roles" />

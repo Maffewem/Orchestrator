@@ -57,6 +57,7 @@ export default function ProjectForm({
   );
   const [ports, setPorts] = useState((initial?.runtime.ports ?? []).join("\n"));
   const [env, setEnv] = useState((initial?.runtime.env ?? []).join("\n"));
+  const [volumes, setVolumes] = useState((initial?.runtime.volumes ?? []).join("\n"));
   const [restart, setRestart] = useState(initial?.runtime.restart || "unless-stopped");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -82,7 +83,7 @@ export default function ProjectForm({
     setError(null);
     try {
       await onSubmit(
-        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), env: lines(env), restart } },
+        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), env: lines(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
     } catch (err) {
@@ -214,7 +215,7 @@ export default function ProjectForm({
                         </Field>
                       )}
                       {!node && (
-                        <Field label="Dockerfile" hint="Relative to the root directory.">
+                        <Field label="Dockerfile" hint="Relative to the root directory. Must be a Dockerfile, not docker-compose.yml. Empty: Dockerfile.">
                           <input className={inputClass} placeholder="Dockerfile" value={source.dockerfile} onChange={(e) => set({ dockerfile: e.target.value })} />
                         </Field>
                       )}
@@ -338,6 +339,9 @@ export default function ProjectForm({
             </select>
           </Field>
         </div>
+        <Field label="Volumes" hint="One per line: name:/path for a named volume, /host/path:/path for a folder, add :ro for read-only. Existing data stays when the container is recreated.">
+          <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
+        </Field>
         <Field as="div" label="Environment variables" hint={node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
           <EnvEditor value={env} onChange={setEnv} />
         </Field>

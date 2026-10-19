@@ -70,6 +70,7 @@ export interface Device {
   status: "online" | "offline";
   health: Health;
   issues: string[];
+  proxy: "running" | "stopped" | "none" | "agent_too_old";
 }
 
 export interface FleetContainer extends Container {
@@ -127,6 +128,30 @@ export interface Runtime {
   env: string[];
   command?: string[];
   restart: string;
+  volumes?: string[];
+  labels?: Record<string, string>;
+  network?: string;
+  /** Name of the container, when it differs from the project name (adopted containers). */
+  container?: string;
+  /** Created from a container that already existed; it keeps running until the first deployment. */
+  adopted?: boolean;
+  /** Settings of an adopted container that a redeploy would not carry over. */
+  unsupported?: string[];
+}
+
+export interface AdoptItem {
+  container_id: string;
+  container_name: string;
+  compose_project?: string;
+  status: "ready" | "adopted" | "skipped" | "failed";
+  reason?: string;
+  project_name?: string;
+  project_id?: string;
+  image?: string;
+  ports?: string[];
+  volumes?: string[];
+  env_count: number;
+  warnings?: string[];
 }
 
 export interface Commit {
@@ -507,6 +532,7 @@ export const api = {
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
   updateDevice: (id: string, patch: { name?: string; labels?: string[] }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
+  enableProxy: (id: string) => request<void>("POST", `/api/devices/${id}/proxy`),
   deleteDevice: (id: string) => request<void>("DELETE", `/api/devices/${id}`),
   containers: () => request<FleetContainer[]>("GET", "/api/containers"),
   command: (deviceId: string, action: string, target: string, args?: Record<string, string>) =>
@@ -519,7 +545,9 @@ export const api = {
   createProject: (p: ProjectInput) => request<Project>("POST", "/api/projects", p),
   updateProject: (id: string, p: Partial<ProjectInput>) => request<Project>("PATCH", `/api/projects/${id}`, p),
   deleteProject: (id: string) => request<void>("DELETE", `/api/projects/${id}`),
-  deployProject: (id: string) => request<Deployment>("POST", `/api/projects/${id}/deployments`),
+  deployProject: (id: string, confirm = false) => request<Deployment>("POST", `/api/projects/${id}/deployments${confirm ? "?confirm=1" : ""}`),
+  adopt: (deviceId: string, containers: { id: string; name?: string }[], dryRun: boolean) =>
+    request<AdoptItem[]>("POST", `/api/devices/${deviceId}/adopt`, { containers, dry_run: dryRun }),
   projectDeployments: (id: string) => request<Deployment[]>("GET", `/api/projects/${id}/deployments`),
   deployments: (q: { device?: string; limit?: number } = {}) =>
     request<Deployment[]>("GET", `/api/deployments?limit=${q.limit ?? 50}${q.device ? `&device=${q.device}` : ""}`),

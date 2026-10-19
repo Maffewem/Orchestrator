@@ -1,7 +1,11 @@
 // Package api holds the wire types shared by the control plane and the agent.
 package api
 
-import "time"
+import (
+	"path"
+	"strings"
+	"time"
+)
 
 // HostInfo describes a device. Agents send it on registration and with every heartbeat.
 type HostInfo struct {
@@ -33,6 +37,7 @@ const (
 	CapProxyDNS = "proxy-dns" // proxy.sync with a Cloudflare token (DNS challenge)
 	CapPreview  = "preview"   // container.remove
 	CapStream   = "stream"    // live log following and container shells
+	CapInspect  = "inspect"   // container.inspect, used to adopt existing containers
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -119,7 +124,26 @@ const (
 	ActionProxySync = "proxy.sync"
 	// ActionRemove force-removes the container named Target (a preview that is no longer wanted).
 	ActionRemove = "container.remove"
+	// ActionInspect reads a container's configuration and returns a ContainerSpec as JSON in the output.
+	// It never changes the container.
+	ActionInspect = "container.inspect"
 )
+
+// ContainerSpec is a running container's configuration, translated into what a DeploySpec can
+// express. Anything the translation cannot carry over is named in Unsupported.
+type ContainerSpec struct {
+	Name    string            `json:"name"`
+	Image   string            `json:"image"`
+	Env     []string          `json:"env,omitempty"`
+	Command []string          `json:"command,omitempty"`
+	Ports   []string          `json:"ports,omitempty"`
+	Volumes []string          `json:"volumes,omitempty"`
+	Labels  map[string]string `json:"labels,omitempty"`
+	Restart string            `json:"restart,omitempty"`
+	Network string            `json:"network,omitempty"`
+	// Unsupported lists settings that a redeploy would lose (privileged mode, devices, limits, ...).
+	Unsupported []string `json:"unsupported,omitempty"`
+}
 
 // AgentUpdateInfo tells an agent which build the control plane serves for its architecture.
 type AgentUpdateInfo struct {
@@ -173,6 +197,10 @@ type DeploySpec struct {
 	Build *BuildSpec `json:"build,omitempty"`
 	// Labels are added to the container.
 	Labels map[string]string `json:"labels,omitempty"`
+	// Volumes are Docker-style mounts: a named volume or host path, a colon, the container path, optionally ":ro".
+	Volumes []string `json:"volumes,omitempty"`
+	// Network is a network name or "host"; empty is Docker's default bridge.
+	Network string `json:"network,omitempty"`
 	// Reuse lets the agent skip the build when Image already exists on the device (rollbacks).
 	Reuse bool `json:"reuse,omitempty"`
 }
@@ -296,4 +324,14 @@ type StreamInput struct {
 	Cols   int    `json:"cols,omitempty"`
 	Rows   int    `json:"rows,omitempty"`
 	Closed bool   `json:"closed,omitempty"`
+}
+
+// LooksLikeComposeFile reports whether a build "Dockerfile" path is really a Docker
+// Compose or stack file, which BuildKit would fail to parse as a Dockerfile.
+func LooksLikeComposeFile(p string) bool {
+	b := strings.ToLower(path.Base(strings.TrimSpace(p)))
+	if !strings.HasSuffix(b, ".yml") && !strings.HasSuffix(b, ".yaml") {
+		return false
+	}
+	return strings.Contains(b, "compose") || strings.Contains(b, "stack")
 }

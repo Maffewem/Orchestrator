@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { copyText } from "../clipboard";
 import { Link, useNavigate, useParams } from "react-router";
 import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server, Undo2 } from "lucide-react";
 import { api, type Deployment, type Step } from "../api";
@@ -254,12 +255,9 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
           <button
             className="inline-flex items-center gap-1.5 border-l border-neutral-300 px-3 py-1.5 hover:bg-neutral-100"
             onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(text);
+              if (await copyText(text)) {
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
-              } catch {
-                /* clipboard blocked */
               }
             }}
           >

@@ -70,6 +70,7 @@ export interface Device {
   status: "online" | "offline";
   health: Health;
   issues: string[];
+  proxy: "running" | "stopped" | "none" | "agent_too_old";
 }
 
 export interface FleetContainer extends Container {
@@ -527,6 +528,7 @@ export const api = {
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
   updateDevice: (id: string, patch: { name?: string; labels?: string[] }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
+  enableProxy: (id: string) => request<void>("POST", `/api/devices/${id}/proxy`),
   deleteDevice: (id: string) => request<void>("DELETE", `/api/devices/${id}`),
   containers: () => request<FleetContainer[]>("GET", "/api/containers"),
   command: (deviceId: string, action: string, target: string, args?: Record<string, string>) =>

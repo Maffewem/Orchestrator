@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
+import { confirmDialog } from "../components/dialogs";
 
 export default function SettingsPage() {
   useCrumbs([{ label: "Settings" }]);
@@ -213,7 +214,7 @@ export default function SettingsPage() {
               {s.backup_password_set && (
                 <Button
                   variant="danger"
-                  onClick={() => window.confirm("Stop encrypting new backups? Backups already made stay encrypted and need this password to restore.") && saveBackupPassword("")}
+                  onClick={async () => (await confirmDialog({ title: "Stop encrypting new backups?", message: "Backups already made stay encrypted and need this password to restore.", confirmLabel: "Remove password", danger: true })) && saveBackupPassword("")}
                 >
                   Remove
                 </Button>
@@ -299,7 +300,7 @@ export default function SettingsPage() {
               <Button
                 size="sm"
                 onClick={async () => {
-                  if (!window.confirm("Rotate the join token? Install commands you've already copied will stop working.")) return;
+                  if (!(await confirmDialog({ title: "Rotate the join token?", message: "Install commands you've already copied will stop working.", confirmLabel: "Rotate", danger: true }))) return;
                   await api.rotateJoinToken();
                   settings.reload();
                 }}

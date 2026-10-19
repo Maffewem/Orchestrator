@@ -11,6 +11,7 @@ import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, pct, uptime, usePoll } from "../lib";
+import { confirmDialog } from "../components/dialogs";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -288,7 +289,7 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
             variant="danger"
             icon={<Trash2 className="size-4" />}
             onClick={async () => {
-              if (!window.confirm(`Remove ${d.name} from the fleet?`)) return;
+              if (!(await confirmDialog({ title: `Remove ${d.name} from the fleet?`, confirmLabel: "Remove", danger: true }))) return;
               await api.deleteDevice(d.id);
               nav("/devices");
             }}

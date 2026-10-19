@@ -6,6 +6,7 @@ import { Badge, Card, CardHeader, Empty, ErrorNote, Loading, Table, Td } from ".
 import { Toggle } from "./Domains";
 import { useCan } from "./auth";
 import { ago, usePoll } from "../lib";
+import { confirmDialog } from "./dialogs";
 
 export function PreviewStatus({ s }: { s: Preview["status"] }) {
   if (s === "succeeded") return <Badge tone="ok">Ready</Badge>;
@@ -83,7 +84,7 @@ export default function PreviewsPanel({ projectId }: { projectId: string }) {
                       aria-label={`Delete preview ${p.branch}`}
                       className="rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-bad"
                       onClick={async () => {
-                        if (!window.confirm(`Delete the preview for ${p.branch}?`)) return;
+                        if (!(await confirmDialog({ title: `Delete the preview for ${p.branch}?`, confirmLabel: "Delete", danger: true }))) return;
                         await api.deletePreview(projectId, p.id);
                         q.reload();
                       }}

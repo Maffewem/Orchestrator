@@ -8,6 +8,7 @@ import { Button, Card, ErrorNote, Loading, StatusIcon } from "../components/ui";
 import { visitUrl } from "./Project";
 import { useCan } from "../components/auth";
 import { ago, clock, cx, duration, shortId, span, usePoll, useTick } from "../lib";
+import { confirmDialog } from "../components/dialogs";
 
 type LogLine = { time: string; text: string; step: number };
 
@@ -96,7 +97,7 @@ export default function DeploymentPage() {
             <Button
               icon={<Undo2 className="size-4" />}
               onClick={async () => {
-                if (!window.confirm("Roll back to this version? It becomes the live version.")) return;
+                if (!(await confirmDialog({ title: "Roll back to this version?", message: "It becomes the live version.", confirmLabel: "Roll back" }))) return;
                 try {
                   const n = await api.rollbackDeployment(d.id);
                   nav(`/deployments/${n.id}`);

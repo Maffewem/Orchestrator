@@ -5,6 +5,7 @@ import { api, type Backup } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, Empty, ErrorNote, Loading, PageHeader, Table, Td } from "../components/ui";
 import { ago, bytes, usePoll } from "../lib";
+import { confirmDialog } from "../components/dialogs";
 
 const tone = { pending: "info", complete: "ok", failed: "bad" } as const;
 
@@ -15,8 +16,8 @@ export default function BackupsPage() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const act = async (b: Backup, kind: "download" | "restore" | "delete") => {
-    if (kind === "restore" && !window.confirm(`Restore ${b.container_name} from this backup? Files in the backup overwrite the current data, and the container restarts.`)) return;
-    if (kind === "delete" && !window.confirm("Delete this backup?")) return;
+    if (kind === "restore" && !(await confirmDialog({ title: `Restore ${b.container_name}?`, message: "Files in the backup overwrite the current data, and the container restarts.", confirmLabel: "Restore", danger: true }))) return;
+    if (kind === "delete" && !(await confirmDialog({ title: "Delete this backup?", confirmLabel: "Delete", danger: true }))) return;
     setBusy(b.id + kind);
     setMsg(null);
     try {

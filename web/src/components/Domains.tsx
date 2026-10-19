@@ -5,6 +5,7 @@ import { api, type DomainRow, type DomainsView } from "../api";
 import { Badge, Button, Card, CardHeader, CopyButton, Empty, ErrorNote, Field, Loading, Modal, Table, Td, inputClass } from "./ui";
 import { cx, usePoll } from "../lib";
 import { useCan } from "./auth";
+import { confirmDialog } from "./dialogs";
 
 export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
@@ -167,7 +168,7 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
                     <button
                       aria-label={`Remove ${d.hostname}`}
                       className="rounded-md p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-bad"
-                      onClick={(e) => { e.stopPropagation(); if (confirm(`Remove ${d.hostname}${d.path ?? ""}?`)) act(async () => { await api.deleteDomain(projectId, d.id!); }); }}
+                      onClick={async (e) => { e.stopPropagation(); if (await confirmDialog({ title: `Remove ${d.hostname}${d.path ?? ""}?`, confirmLabel: "Remove", danger: true })) act(async () => { await api.deleteDomain(projectId, d.id!); }); }}
                     >
                       <Trash2 className="size-4" />
                     </button>

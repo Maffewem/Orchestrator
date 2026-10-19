@@ -12,6 +12,7 @@ import { Badge, Button, Card, CardHeader, Empty, ErrorNote, Field, Loading, Page
 import { ago, bytes, pct, usePoll, useTick } from "../lib";
 import WorkerOverview from "./WorkerOverview";
 import { DeploymentLine, Sparkline, versionId } from "../components/DeploymentLine";
+import { confirmDialog } from "../components/dialogs";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -212,8 +213,8 @@ function Backups({ w, canBackup, deviceLoaded }: { w: FleetContainer; canBackup:
     }
   };
   const act = async (b: Backup, kind: "download" | "restore" | "delete") => {
-    if (kind === "restore" && !window.confirm(`Restore ${b.container_name} from this backup? Files in the backup overwrite the current data, and the container restarts.`)) return;
-    if (kind === "delete" && !window.confirm("Delete this backup?")) return;
+    if (kind === "restore" && !(await confirmDialog({ title: `Restore ${b.container_name}?`, message: "Files in the backup overwrite the current data, and the container restarts.", confirmLabel: "Restore", danger: true }))) return;
+    if (kind === "delete" && !(await confirmDialog({ title: "Delete this backup?", confirmLabel: "Delete", danger: true }))) return;
     setBusy(b.id + kind);
     setError(null);
     try {

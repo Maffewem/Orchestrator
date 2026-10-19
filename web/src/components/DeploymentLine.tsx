@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { copyText } from "../clipboard";
 import { Link, useNavigate } from "react-router";
 import { Check, Copy, GitBranch, MoreHorizontal } from "lucide-react";
 import { api, type Deployment } from "../api";
@@ -45,12 +46,9 @@ export function DeploymentLine({ d, live, onChanged, compact }: { d: Deployment;
   }, []);
   const copy = async () => {
     if (!hash) return;
-    try {
-      await navigator.clipboard.writeText(hash);
+    if (await copyText(hash)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked */
     }
   };
   const label = { queued: "Queued", running: "Building", succeeded: "Ready", failed: "Failed" }[d.status];

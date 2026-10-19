@@ -4,7 +4,7 @@ import { Plus, Server } from "lucide-react";
 import { api, type Device } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CodeBlock, Empty, HealthBadge, Loading, Meter, Modal, PageHeader, StatusDot } from "../components/ui";
-import { ago, cx, pct, usePoll } from "../lib";
+import { ago, bytesOrDash, cx, pct, usePoll } from "../lib";
 
 export function AddDeviceModal({ onClose }: { onClose: () => void }) {
   const settings = usePoll(api.settings, 0);
@@ -107,9 +107,9 @@ export default function DevicesPage() {
                 )}
               </div>
               <div className="grid grid-cols-3 gap-4">
-                <Meter label="CPU" value={d.metrics.cpu_percent} />
-                <Meter label="Memory" value={pct(d.metrics.memory_used, d.metrics.memory_total)} />
-                <Meter label="Disk" value={pct(d.metrics.disk_used, d.metrics.disk_total)} />
+                <Meter label={`CPU · ${d.host.cpus ? `${d.host.cpus} ${d.host.cpus === 1 ? "core" : "cores"}` : "—"}`} value={d.metrics.cpu_percent} />
+                <Meter label={`Memory · ${bytesOrDash(d.metrics.memory_total)}`} value={pct(d.metrics.memory_used, d.metrics.memory_total)} />
+                <Meter label={`Disk · ${bytesOrDash(d.metrics.disk_total)}`} value={pct(d.metrics.disk_used, d.metrics.disk_total)} />
               </div>
               <div className="text-xs text-neutral-500 md:text-right">
                 <p>{d.containers.filter((c) => c.state === "running").length}/{d.containers.length} containers</p>

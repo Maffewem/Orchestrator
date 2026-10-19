@@ -11,6 +11,11 @@ export function bytes(n: number): string {
   return `${(n / 1024 ** i).toFixed(i >= 3 ? 1 : 0)} ${units[i]}`;
 }
 
+/** Like bytes(), but a dash when the agent does not report the value. */
+export function bytesOrDash(n?: number): string {
+  return n ? bytes(n) : "—";
+}
+
 export function pct(used: number, total: number): number {
   return total ? (used / total) * 100 : 0;
 }

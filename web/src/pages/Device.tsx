@@ -10,7 +10,7 @@ import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineCha
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
-import { ago, bytes, pct, uptime, usePoll } from "../lib";
+import { ago, bytes, bytesOrDash, pct, uptime, usePoll } from "../lib";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -105,9 +105,9 @@ function DeviceOverview({ d }: { d: Device }) {
           <CardHeader title="Performance" subtitle="Live samples from the agent (last hour)." />
           <div className="space-y-6 p-5">
             <div className="grid grid-cols-3 gap-6">
-              <Meter label="CPU" value={m.cpu_percent} />
-              <Meter label={`Memory · ${bytes(m.memory_used)} of ${bytes(m.memory_total)}`} value={pct(m.memory_used, m.memory_total)} />
-              <Meter label={`Disk · ${bytes(m.disk_used)} of ${bytes(m.disk_total)}`} value={pct(m.disk_used, m.disk_total)} />
+              <Meter label={`CPU · ${d.host.cpus ? `${d.host.cpus} ${d.host.cpus === 1 ? "core" : "cores"}` : "—"}`} value={m.cpu_percent} />
+              <Meter label={`Memory · ${bytes(m.memory_used)} of ${bytesOrDash(m.memory_total)}`} value={pct(m.memory_used, m.memory_total)} />
+              <Meter label={`Disk · ${bytes(m.disk_used)} of ${bytesOrDash(m.disk_total)}`} value={pct(m.disk_used, m.disk_total)} />
             </div>
             <LineChart
               series={[
@@ -132,7 +132,9 @@ function DeviceOverview({ d }: { d: Device }) {
             <Prop k="Operating system" v={d.host.platform || d.host.os} />
             <Prop k="Kernel" v={d.host.kernel} />
             <Prop k="Architecture" v={d.host.arch} />
-            <Prop k="Processors" v={d.host.cpus} />
+            <Prop k="CPU cores" v={d.host.cpus || "—"} />
+            <Prop k="Total RAM" v={bytesOrDash(m.memory_total || d.host.memory_total)} />
+            <Prop k="Total disk" v={bytesOrDash(m.disk_total)} />
             <Prop k="IP addresses" v={d.host.addresses?.join(", ")} />
             <Prop k="Uptime" v={uptime(m.uptime_seconds)} />
             <Prop k="Load average" v={`${m.load1.toFixed(2)} ${m.load5.toFixed(2)} ${m.load15.toFixed(2)}`} />

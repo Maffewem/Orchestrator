@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router";
-import { ArrowUpRight, CloudUpload, Loader2, PackagePlus, Play, Rocket, RotateCw, Square, Trash2 } from "lucide-react";
+import { ArrowUpRight, CloudUpload, Loader2, PackagePlus, Rocket, Trash2 } from "lucide-react";
 import { api, ApiError, type Device, type Project } from "../api";
-import { waitFor } from "../components/ContainerTable";
-import { useCan } from "../components/auth";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
 import DomainsPanel from "../components/Domains";
 import PreviewsPanel from "../components/Previews";
+import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
 import { ago, usePoll } from "../lib";
 
@@ -27,9 +26,8 @@ export default function ProjectPage() {
   const p = project.data;
   const device = usePoll(() => (p ? api.device(p.device_id) : Promise.resolve(null)), 10000, [p?.device_id]);
   const [deploying, setDeploying] = useState(false);
-  const [power, setPower] = useState<string | null>(null);
-  const canOperate = useCan("operator");
   const [error, setError] = useState<string | null>(null);
+  const worker = device.data?.containers.find((c) => c.name === (p?.runtime.container || p?.name));
   useCrumbs([{ label: "Projects", to: "/projects" }, { label: p?.name ?? "…" }]);
 
   if (project.error && !p) return <ErrorNote>{project.error}</ErrorNote>;
@@ -37,23 +35,6 @@ export default function ProjectPage() {
   const latest = p.latest_deployment;
   const inProgress = latest && (latest.status === "queued" || latest.status === "running");
   const url = visitUrl(p, device.data);
-
-  const container = device.data?.containers.find((c) => c.name === (p.runtime.container || p.name));
-  const running = container?.state === "running";
-  const control = async (action: string) => {
-    if (!container) return;
-    setPower(action);
-    setError(null);
-    try {
-      const r = await waitFor((await api.command(p.device_id, action, container.id)).id);
-      if (r.status === "failed") setError(r.error ?? "The command failed");
-      device.reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPower(null);
-    }
-  };
 
   const deploy = async () => {
     setDeploying(true);
@@ -99,21 +80,8 @@ export default function ProjectPage() {
               Deployment in progress ›
             </Link>
           )}
-          {canOperate && container && (
-            <>
-              {running ? (
-                <Button icon={<Square className="size-4" />} loading={power === "container.stop"} onClick={() => control("container.stop")}>
-                  Stop
-                </Button>
-              ) : (
-                <Button icon={<Play className="size-4" />} loading={power === "container.start"} onClick={() => control("container.start")}>
-                  Start
-                </Button>
-              )}
-              <Button icon={<RotateCw className="size-4" />} loading={power === "container.restart"} onClick={() => control("container.restart")}>
-                Restart
-              </Button>
-            </>
+          {worker && (
+            <PowerControls deviceId={p.device_id} containerId={worker.id} state={worker.state} onDone={device.reload} onError={setError} />
           )}
           <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
             New deployment

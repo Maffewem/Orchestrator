@@ -2,7 +2,11 @@ import { useState } from "react";
 import { api, type FleetContainer } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
-import { ImportContainers, isSystem } from "../components/Adopt";
+import { waitFor } from "../components/ContainerTable";
+import { confirmDialog, notify } from "../components/dialogs";
+import { Button } from "../components/ui";
+import { Trash2 } from "lucide-react";
+import { ImportContainers, cleanable, isSystem } from "../components/Adopt";
 import { useCan } from "../components/auth";
 import { Card, CardHeader, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
@@ -28,6 +32,28 @@ export default function ContainersPage() {
         .toLowerCase()
         .includes(q.toLowerCase()),
   );
+  const leftovers = (data ?? []).filter(cleanable);
+  const cleanUp = async () => {
+    const list = leftovers.map((c) => `• ${c.name} on ${c.device_name}`).join("\n");
+    const ok = await confirmDialog({
+      title: `Remove ${leftovers.length} exited ${leftovers.length === 1 ? "container" : "containers"}?`,
+      message: `Leftovers of deleted projects and old blue/green copies. Volumes are kept.\n${list}`,
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+    let failed = 0;
+    for (const c of leftovers) {
+      try {
+        if ((await waitFor((await api.command(c.device_id, "container.remove", c.id)).id)).status === "failed") failed++;
+      } catch (e) {
+        failed++;
+        notify(`${c.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (failed) notify(`${failed} could not be removed.`);
+    reload();
+  };
   const stacks = new Map<string, FleetContainer[]>();
   for (const c of rows) stacks.set(stackOf(c), [...(stacks.get(stackOf(c)) ?? []), c]);
   const ordered = [...stacks.entries()].sort(([a], [b]) => (a === SYSTEM ? 1 : b === SYSTEM ? -1 : a.startsWith("Standalone") ? 1 : b.startsWith("Standalone") ? -1 : a.localeCompare(b)));
@@ -37,7 +63,19 @@ export default function ContainersPage() {
       <PageHeader
         title="Workers & stacks"
         description="Every container in the fleet: which device it runs on, its ports, and where to reach it."
-        actions={isAdmin && data && <ImportContainers containers={data} onDone={reload} />}
+        actions={
+          isAdmin &&
+          data && (
+            <>
+              {leftovers.length > 0 && (
+                <Button icon={<Trash2 className="size-4" />} onClick={cleanUp}>
+                  Clean up {leftovers.length} exited
+                </Button>
+              )}
+              <ImportContainers containers={data} onDone={reload} />
+            </>
+          )
+        }
       />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input className={`${inputClass} max-w-xs`} placeholder="Filter by name, image, device or IP" value={q} onChange={(e) => setQ(e.target.value)} />

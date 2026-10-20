@@ -14,6 +14,21 @@ export function isSystem(c: { name: string; project_name?: string; labels?: Reco
   return !c.project_name && !c.labels?.["orchestrator.project"] && c.name.startsWith("orchestrator");
 }
 
+/** Left behind by a deleted project: labelled as Orchestrator's but no project owns it any more. */
+export function isLeftover(c: { name: string; project_name?: string; labels?: Record<string, string> }): boolean {
+  return !c.project_name && !!c.labels?.["orchestrator.project"] && !isSystem(c);
+}
+
+/** Old blue/green copies (`name-previous-<timestamp>`) that nothing will start again. */
+export function isPreviousCopy(c: { name: string; state: string; project_name?: string }): boolean {
+  return c.state !== "running" && /-previous-\d+$/.test(c.name);
+}
+
+/** Exited containers that are safe to offer for clean-up: leftovers of deleted projects and old blue/green copies. */
+export function cleanable(c: { name: string; state: string; project_name?: string; labels?: Record<string, string> }): boolean {
+  return c.state !== "running" && !c.project_name && !isSystem(c) && (isLeftover(c) || isPreviousCopy(c));
+}
+
 /** A name for the project made from a container: lowercase letters, digits and dashes. */
 export function projectNameFor(container: string) {
   return container.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);

@@ -13,6 +13,8 @@ import { ago, bytes, pct, usePoll, useTick } from "../lib";
 import WorkerOverview from "./WorkerOverview";
 import { DeploymentLine, Sparkline, versionId } from "../components/DeploymentLine";
 import { confirmDialog } from "../components/dialogs";
+import { AdoptDialog, adoptable } from "../components/Adopt";
+import { PackagePlus } from "lucide-react";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -84,9 +86,25 @@ function WorkerActions({ w, onDone }: { w: FleetContainer; onDone: () => void })
   const [error, setError] = useState<string | null>(null);
   const running = w.state === "running";
   const isAdmin = useCan("admin");
-  const [view, setView] = useState<"logs" | "shell" | null>(null);
+  const [view, setView] = useState<"logs" | "shell" | "adopt" | null>(null);
+  const fleet = usePoll(api.containers, 5000);
   return (
     <>
+      {isAdmin && adoptable(w) && (
+        <Button variant="primary" icon={<PackagePlus className="size-4" />} onClick={() => setView("adopt")}>
+          Adopt as project
+        </Button>
+      )}
+      {view === "adopt" && (
+        <AdoptDialog
+          deviceId={w.device_id}
+          deviceName={w.device_name}
+          containers={(fleet.data ?? [w]).filter((c) => c.device_id === w.device_id)}
+          selected={[w.id]}
+          onClose={() => setView(null)}
+          onDone={onDone}
+        />
+      )}
       {error && <span className="text-sm text-bad">{error}</span>}
       <Button icon={<FileText className="size-4" />} onClick={() => setView("logs")}>
         Logs
@@ -115,7 +133,7 @@ function Deployments({ w }: { w: FleetContainer }) {
     return (
       <Card>
         <Empty icon={<GitBranch className="size-8" />} title="Not deployed by Orchestrator">
-          Deployments appear here for workers created from a project. This one was started outside Orchestrator.
+          Deployments appear here for workers created from a project. This one was started outside Orchestrator; use Adopt as project at the top of the page to manage it here.
         </Empty>
       </Card>
     );

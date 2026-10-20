@@ -544,7 +544,8 @@ export const api = {
   project: (id: string) => request<Project>("GET", `/api/projects/${id}`),
   createProject: (p: ProjectInput) => request<Project>("POST", "/api/projects", p),
   updateProject: (id: string, p: Partial<ProjectInput>) => request<Project>("PATCH", `/api/projects/${id}`, p),
-  deleteProject: (id: string) => request<void>("DELETE", `/api/projects/${id}`),
+  deleteProject: (id: string, removeContainer = false) =>
+    request<void>("DELETE", `/api/projects/${id}${removeContainer ? "?remove_container=1" : ""}`),
   deployProject: (id: string, confirm = false) => request<Deployment>("POST", `/api/projects/${id}/deployments${confirm ? "?confirm=1" : ""}`),
   adopt: (deviceId: string, containers: { id: string; name?: string }[], dryRun: boolean) =>
     request<AdoptItem[]>("POST", `/api/devices/${deviceId}/adopt`, { containers, dry_run: dryRun }),

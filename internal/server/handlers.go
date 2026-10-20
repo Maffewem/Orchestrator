@@ -383,13 +383,27 @@ func (s *Server) handleCreateCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Action == api.ActionRemove {
-		// The agent removes by name. Orchestrator's own containers and project containers are
-		// never removed from here; deleting the project is the way to do that.
+		// The agent removes by name. Orchestrator's own containers and containers of projects that
+		// still exist are never removed from here; deleting the project is the way to do that.
 		name := containerName(d, req.Target)
+		projects, err := s.store.ListProjects(r.Context())
+		if err != nil {
+			s.internal(w, err)
+			return
+		}
 		for _, c := range d.Containers {
-			if c.ID == req.Target && (c.Labels["orchestrator.project"] != "" || strings.HasPrefix(c.Name, "orchestrator")) {
-				writeError(w, http.StatusBadRequest, "this container belongs to Orchestrator; delete its project instead")
+			if c.ID != req.Target {
+				continue
+			}
+			if strings.HasPrefix(c.Name, "orchestrator") {
+				writeError(w, http.StatusBadRequest, "this is one of Orchestrator's own containers and can't be removed from here")
 				return
+			}
+			for _, p := range projects {
+				if p.ID == c.Labels["orchestrator.project"] || (p.DeviceID == d.ID && p.Runtime.Adopted && serviceOf(p) == c.Name) {
+					writeError(w, http.StatusBadRequest, "this container belongs to project "+p.Name+"; delete the project (and tick \"remove the container\") instead")
+					return
+				}
 			}
 		}
 		if !hasCap(d, api.CapPreview) {

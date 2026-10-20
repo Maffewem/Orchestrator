@@ -122,8 +122,10 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	}
 	taken := map[string]bool{}
 	managed := map[string]string{} // container name on this device -> project
+	known := map[string]bool{}     // ids of projects that exist
 	for _, p := range projects {
 		taken[p.Name] = true
+		known[p.ID] = true
 		if p.DeviceID == dev.ID {
 			managed[serviceOf(p)] = p.Name
 		}
@@ -146,7 +148,7 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 		}
 		it.ContainerName, it.Compose = c.Name, c.ComposeProject
 		switch {
-		case c.Labels["orchestrator.project"] != "" || managed[c.Name] != "":
+		case known[c.Labels["orchestrator.project"]] || managed[c.Name] != "":
 			it.Status, it.Reason = AdoptSkipped, "already managed by a project"
 		case strings.HasPrefix(c.Name, "orchestrator"):
 			it.Status, it.Reason = AdoptSkipped, "part of Orchestrator itself"

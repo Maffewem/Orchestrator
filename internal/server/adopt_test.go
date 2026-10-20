@@ -43,6 +43,8 @@ func TestAdoptContainers(t *testing.T) {
 	specs := map[string]api.ContainerSpec{
 		"c1": {Name: "Portainer_UI", Image: "portainer/portainer-ce:2.21", Env: []string{"A=1"}, Ports: []string{"9443:9443"},
 			Volumes: []string{"portainer_data:/data", "/var/run/docker.sock:/var/run/docker.sock"}, Restart: "always"},
+		// Labelled by Orchestrator, but no such project exists, so it can still be adopted.
+		"c4": {Name: "managed", Image: "y"},
 		"c2": {Name: "db", Image: "postgres:16", Restart: "unless-stopped", Unsupported: []string{"memory limit"}},
 	}
 
@@ -55,7 +57,7 @@ func TestAdoptContainers(t *testing.T) {
 				"containers": []map[string]string{{"id": "c1"}, {"id": "c2"}, {"id": "c3"}, {"id": "c4"}, {"id": "nope"}},
 			}, &items)
 		}()
-		answerInspects(h, reg.AgentToken, hb, specs, 2)
+		answerInspects(h, reg.AgentToken, hb, specs, 3)
 		return <-done, items
 	}
 
@@ -72,7 +74,7 @@ func TestAdoptContainers(t *testing.T) {
 	if code != 200 || len(items) != 5 {
 		t.Fatalf("dry run: %d %+v", code, items)
 	}
-	want := []string{AdoptReady, AdoptReady, AdoptSkipped, AdoptSkipped, AdoptFailed}
+	want := []string{AdoptReady, AdoptReady, AdoptSkipped, AdoptReady, AdoptFailed}
 	for i, it := range items {
 		if it.Status != want[i] {
 			t.Fatalf("item %d (%s): %s %s", i, it.ContainerName, it.Status, it.Reason)

@@ -37,7 +37,7 @@ export default function ContainersPage() {
     const list = leftovers.map((c) => `• ${c.name} on ${c.device_name}`).join("\n");
     const ok = await confirmDialog({
       title: `Remove ${leftovers.length} exited ${leftovers.length === 1 ? "container" : "containers"}?`,
-      message: `Leftovers of deleted projects and old blue/green copies. Volumes are kept.\n${list}`,
+      message: `Exited containers made by Orchestrator that no project owns, and old blue/green copies. Volumes are kept.\n${list}`,
       confirmLabel: "Remove",
       danger: true,
     });

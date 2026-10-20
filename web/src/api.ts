@@ -54,6 +54,8 @@ export interface Container {
   ports?: Port[];
   labels?: Record<string, string>;
   compose_project?: string;
+  /** Named Docker volumes mounted in the container (not bind mounts). */
+  volumes?: string[];
 }
 
 export type Health = "ok" | "warning" | "critical";

@@ -170,6 +170,21 @@ type dockerContainer struct {
 		PublicPort  int    `json:"PublicPort"`
 		Type        string `json:"Type"`
 	} `json:"Ports"`
+	Mounts []struct {
+		Type string `json:"Type"`
+		Name string `json:"Name"`
+	} `json:"Mounts"`
+}
+
+// namedVolumes lists the named (not bind) volumes a container mounts.
+func (c dockerContainer) namedVolumes() []string {
+	var out []string
+	for _, m := range c.Mounts {
+		if m.Type == "volume" && m.Name != "" {
+			out = append(out, m.Name)
+		}
+	}
+	return out
 }
 
 func (c dockerContainer) toAPI() api.Container {
@@ -179,7 +194,7 @@ func (c dockerContainer) toAPI() api.Container {
 	}
 	out := api.Container{
 		ID: c.ID, Name: name, Image: c.Image, State: c.State, Status: c.Status, Created: c.Created,
-		Labels: c.Labels, ComposeProject: c.Labels["com.docker.compose.project"],
+		Labels: c.Labels, ComposeProject: c.Labels["com.docker.compose.project"], Volumes: c.namedVolumes(),
 	}
 	for _, p := range c.Ports {
 		out.Ports = append(out.Ports, api.Port{IP: p.IP, PrivatePort: p.PrivatePort, PublicPort: p.PublicPort, Type: p.Type})
@@ -241,6 +256,43 @@ func (d *Docker) Restart(ctx context.Context, id string) error {
 
 func (d *Docker) Remove(ctx context.Context, id string) error {
 	return d.call(ctx, http.MethodDelete, "/containers/"+id, url.Values{"force": {"1"}}, nil, nil)
+}
+
+// RemoveWithVolumes removes the container and then its named volumes. Bind mounts are never
+// touched, and a volume another container (running or not) still mounts is kept. The result says
+// what happened to each volume.
+func (d *Docker) RemoveWithVolumes(ctx context.Context, id string) (string, error) {
+	all, err := d.listContainers(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	var mine []string
+	usedElsewhere := map[string]bool{}
+	for _, c := range all {
+		if c.ID == id {
+			mine = c.namedVolumes()
+			continue
+		}
+		for _, v := range c.namedVolumes() {
+			usedElsewhere[v] = true
+		}
+	}
+	if err := d.Remove(ctx, id); err != nil {
+		return "", err
+	}
+	var notes []string
+	for _, v := range mine {
+		if usedElsewhere[v] {
+			notes = append(notes, "kept volume "+v+" (another container uses it)")
+			continue
+		}
+		if err := d.call(ctx, http.MethodDelete, "/volumes/"+url.PathEscape(v), nil, nil, nil); err != nil && !isStatus(err, http.StatusNotFound) {
+			notes = append(notes, "could not delete volume "+v+": "+err.Error())
+			continue
+		}
+		notes = append(notes, "deleted volume "+v)
+	}
+	return strings.Join(notes, "; "), nil
 }
 
 func (d *Docker) Rename(ctx context.Context, id, name string) error {

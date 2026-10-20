@@ -6,7 +6,7 @@ import { Button, Empty, StatusDot, Table, Td } from "./ui";
 import { useCan } from "./auth";
 import { LiveLogs, Shell } from "./Streams";
 import { AdoptDialog, adoptable, isSystem, isUnowned } from "./Adopt";
-import { confirmDialog } from "./dialogs";
+import { confirmWithOption } from "./dialogs";
 
 /** Reachable URLs for a container's published ports on its device. */
 export function endpoints(c: Container, addresses: string[]): string[] {
@@ -61,12 +61,13 @@ export default function ContainerTable({
 
   if (containers.length === 0) return <Empty title="No containers">Containers on this device will show up here.</Empty>;
 
-  const run = async (dev: string, c: Container, action: string) => {
+  const run = async (dev: string, c: Container, action: string, args?: Record<string, string>) => {
     setBusy(c.id + action);
     setError(null);
     try {
-      const r = await waitFor((await api.command(dev, action, c.id)).id);
+      const r = await waitFor((await api.command(dev, action, c.id, args)).id);
       if (r.status === "failed") setError(`${c.name}: ${r.error}`);
+      else if (r.output && action === "container.remove") setNotice(`${c.name}: ${r.output}`);
       onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -114,20 +115,17 @@ export default function ContainerTable({
                     project: {c.project_name}
                   </Link>
                 ) : (
-                  <>
-                    {c.compose_project && <span className="ml-4 text-xs text-neutral-500">stack: {c.compose_project}</span>}
+                  <span className="ml-4 inline-flex flex-wrap items-center gap-1.5 align-middle">
+                    {c.compose_project && <span className="text-xs text-neutral-500">stack: {c.compose_project}</span>}
                     {isUnowned(c) && (
-                      <span className="ml-4 text-xs text-amber-700" title="Labelled by Orchestrator, but no existing project owns it (its project may have been deleted, or it was created separately)">Orchestrator-managed, no matching project</span>
-                    )}
-                    {isAdmin && adoptable(c) && (
-                      <button
-                        className="ml-4 text-xs text-primary hover:underline"
-                        onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })}
+                      <span
+                        className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600"
+                        title="Labelled by Orchestrator, but no existing project owns it (its project may have been deleted, or it was created separately)"
                       >
-                        Adopt as project
-                      </button>
+                        Orchestrator
+                      </span>
                     )}
-                  </>
+                  </span>
                 )}
               </Td>
               {showDevice && "device_name" in c && (
@@ -160,7 +158,9 @@ export default function ContainerTable({
                   <Button size="sm" variant="ghost" title="Back up" loading={busy === c.id + "backup"} icon={<Archive className="size-3.5" />} onClick={() => backup(dev, c)} />
                   <Button size="sm" variant="ghost" title="Logs" icon={<FileText className="size-3.5" />} onClick={() => setLogs({ deviceId: dev, c })} />
                   {isAdmin && adoptable(c) && (
-                    <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })} />
+                    <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })}>
+                      Adopt
+                    </Button>
                   )}
                   {isAdmin && adoptable(c) && (
                     <Button
@@ -170,7 +170,15 @@ export default function ContainerTable({
                       loading={busy === c.id + "container.remove"}
                       icon={<Trash2 className="size-3.5 text-bad" />}
                       onClick={async () => {
-                        if (await confirmDialog({ title: `Remove ${c.name}?`, message: "The container is stopped and deleted from the device. Its volumes are kept.", confirmLabel: "Remove", danger: true })) run(dev, c, "container.remove");
+                        const vols = c.volumes ?? [];
+                        const del = await confirmWithOption({
+                          title: `Remove ${c.name}?`,
+                          message: `The container is stopped and deleted from the device.${vols.length ? " Its volumes are kept unless you tick the box below." : ""}`,
+                          confirmLabel: "Remove",
+                          danger: true,
+                          option: vols.length ? { label: `Also delete its volumes (permanent): ${vols.join(", ")}`, checked: false } : undefined,
+                        });
+                        if (del !== null) run(dev, c, "container.remove", del && vols.length ? { volumes: "delete" } : undefined);
                       }}
                     />
                   )}

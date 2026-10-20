@@ -74,6 +74,8 @@ type Container struct {
 	Ports          []Port            `json:"ports,omitempty"`
 	Labels         map[string]string `json:"labels,omitempty"`
 	ComposeProject string            `json:"compose_project,omitempty"`
+	// Volumes are the names of the named Docker volumes mounted in the container (not bind mounts).
+	Volumes []string `json:"volumes,omitempty"`
 }
 
 // Port is a published or exposed container port.
@@ -123,6 +125,7 @@ const (
 	// ActionProxySync writes Args["caddyfile"] for the per-device Caddy proxy and (re)starts it.
 	ActionProxySync = "proxy.sync"
 	// ActionRemove force-removes the container named Target (a preview that is no longer wanted).
+	// With Args["volumes"] == "delete" its named volumes go too, except any another container still mounts.
 	ActionRemove = "container.remove"
 	// ActionInspect reads a container's configuration and returns a ContainerSpec as JSON in the output.
 	// It never changes the container.

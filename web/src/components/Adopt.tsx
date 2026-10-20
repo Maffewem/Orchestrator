@@ -9,6 +9,11 @@ export function adoptable(c: Container & { project_name?: string }): boolean {
   return !c.project_name && !c.labels?.["orchestrator.project"] && !c.name.startsWith("orchestrator");
 }
 
+/** Orchestrator's own containers: server, agent, proxy and update helper. */
+export function isSystem(c: { name: string; project_name?: string; labels?: Record<string, string> }): boolean {
+  return !c.project_name && !c.labels?.["orchestrator.project"] && c.name.startsWith("orchestrator");
+}
+
 /** A name for the project made from a container: lowercase letters, digits and dashes. */
 export function projectNameFor(container: string) {
   return container.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 63);

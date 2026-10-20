@@ -10,7 +10,7 @@ import PreviewsPanel from "../components/Previews";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
 import { ago, usePoll } from "../lib";
-import { confirmDialog } from "../components/dialogs";
+import { confirmDialog, confirmWithOption } from "../components/dialogs";
 
 /** URL of the first published port on the device, if we know an address for it. */
 export function visitUrl(p: Project, device?: Device | null): string | null {
@@ -293,14 +293,21 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
         />
       </Card>
       <Card className="border-red-200">
-        <CardHeader title="Delete project" subtitle="Removes the project and its deployment history. The container keeps running on the device." />
+        <CardHeader title="Delete project" subtitle="Removes the project and its deployment history. You can also remove its container from the device." />
         <div className="p-5">
           <Button
             variant="danger"
             icon={<Trash2 className="size-4" />}
             onClick={async () => {
-              if (!(await confirmDialog({ title: `Delete ${p.name}?`, confirmLabel: "Delete", danger: true }))) return;
-              await api.deleteProject(p.id);
+              const remove = await confirmWithOption({
+                title: `Delete ${p.name}?`,
+                message: "The project and its deployment history are removed.",
+                confirmLabel: "Delete",
+                danger: true,
+                option: { label: "Also remove the container from the device", checked: !p.runtime?.adopted },
+              });
+              if (remove === null) return;
+              await api.deleteProject(p.id, remove);
               nav("/projects");
             }}
           >

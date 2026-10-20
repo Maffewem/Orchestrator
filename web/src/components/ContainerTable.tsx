@@ -1,11 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Archive, FileText, PackagePlus, Play, RotateCw, Square, SquareTerminal } from "lucide-react";
+import { Archive, FileText, PackagePlus, Play, RotateCw, Trash2, Square, SquareTerminal } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, StatusDot, Table, Td } from "./ui";
 import { useCan } from "./auth";
 import { LiveLogs, Shell } from "./Streams";
-import { AdoptDialog, adoptable } from "./Adopt";
+import { AdoptDialog, adoptable, isSystem } from "./Adopt";
+import { confirmDialog } from "./dialogs";
 
 /** Reachable URLs for a container's published ports on its device. */
 export function endpoints(c: Container, addresses: string[]): string[] {
@@ -99,6 +100,7 @@ export default function ContainerTable({
         {containers.map((c) => {
           const dev = "device_id" in c ? c.device_id : deviceId!;
           const running = c.state === "running";
+          const system = isSystem(c);
           return (
             <tr key={dev + c.id} className="hover:bg-neutral-50">
               <Td>
@@ -112,7 +114,17 @@ export default function ContainerTable({
                     project: {c.project_name}
                   </Link>
                 ) : (
-                  c.compose_project && <span className="ml-4 text-xs text-neutral-500">stack: {c.compose_project}</span>
+                  <>
+                    {c.compose_project && <span className="ml-4 text-xs text-neutral-500">stack: {c.compose_project}</span>}
+                    {isAdmin && adoptable(c) && (
+                      <button
+                        className="ml-4 text-xs text-primary hover:underline"
+                        onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })}
+                      >
+                        Adopt as project
+                      </button>
+                    )}
+                  </>
                 )}
               </Td>
               {showDevice && "device_name" in c && (
@@ -136,7 +148,7 @@ export default function ContainerTable({
               </Td>
               <Td>
                 <div className="flex justify-end gap-1">
-                  {running ? (
+                  {system ? null : running ? (
                     <Button size="sm" variant="ghost" title="Stop" loading={busy === c.id + "container.stop"} icon={<Square className="size-3.5" />} onClick={() => run(dev, c, "container.stop")} />
                   ) : (
                     <Button size="sm" variant="ghost" title="Start" loading={busy === c.id + "container.start"} icon={<Play className="size-3.5" />} onClick={() => run(dev, c, "container.start")} />
@@ -147,7 +159,19 @@ export default function ContainerTable({
                   {isAdmin && adoptable(c) && (
                     <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })} />
                   )}
-                  {isAdmin && running && <Button size="sm" variant="ghost" title="Shell" icon={<SquareTerminal className="size-3.5" />} onClick={() => setShell({ deviceId: dev, c })} />}
+                  {isAdmin && adoptable(c) && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="Remove container"
+                      loading={busy === c.id + "container.remove"}
+                      icon={<Trash2 className="size-3.5 text-bad" />}
+                      onClick={async () => {
+                        if (await confirmDialog({ title: `Remove ${c.name}?`, message: "The container is stopped and deleted from the device. Its volumes are kept.", confirmLabel: "Remove", danger: true })) run(dev, c, "container.remove");
+                      }}
+                    />
+                  )}
+                  {isAdmin && running && !system && <Button size="sm" variant="ghost" title="Shell" icon={<SquareTerminal className="size-3.5" />} onClick={() => setShell({ deviceId: dev, c })} />}
                 </div>
               </Td>
             </tr>

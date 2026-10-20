@@ -273,12 +273,33 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		}
 		s.previewMu.Unlock()
 	}
+	removed := false
+	if r.URL.Query().Get("remove_container") == "1" {
+		d, err := s.store.GetDevice(r.Context(), p.DeviceID)
+		switch {
+		case err != nil:
+			// The device is gone, so there is no container left to remove.
+		case !hasCap(d, api.CapPreview):
+			writeError(w, http.StatusConflict, "this device's agent is too old to remove containers; update it from the Updates page first")
+			return
+		default:
+			if _, err := s.store.CreateCommand(r.Context(), d.ID, api.ActionRemove, serviceOf(p), nil); err != nil {
+				s.internal(w, err)
+				return
+			}
+			removed = true
+		}
+	}
 	if err := s.store.DeleteProject(r.Context(), p.ID); err != nil {
 		s.internal(w, err)
 		return
 	}
 	defer s.syncProxy(context.WithoutCancel(r.Context()), p.DeviceID)
-	s.event(r.Context(), p.DeviceID, "warning", "project.deleted", "Project "+p.Name+" deleted (its container was left running)")
+	left := " (its container was left running)"
+	if removed {
+		left = " (its container was removed)"
+	}
+	s.event(r.Context(), p.DeviceID, "warning", "project.deleted", "Project "+p.Name+" deleted"+left)
 	w.WriteHeader(http.StatusNoContent)
 }
 

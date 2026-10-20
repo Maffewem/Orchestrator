@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { AlertTriangle, CircleAlert, X } from "lucide-react";
 import { Button } from "./ui";
 
@@ -8,8 +8,10 @@ type ConfirmOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   danger?: boolean;
+  /** A checkbox under the message; its state is returned by confirmWithOption. */
+  option?: { label: string; checked: boolean };
 };
-type Pending = ConfirmOptions & { resolve: (ok: boolean) => void };
+type Pending = ConfirmOptions & { resolve: (ok: boolean, checked: boolean) => void };
 type Toast = { id: number; message: string; tone: "error" | "info" };
 
 // Module-level store so call sites can `await confirmDialog(...)` from any handler, no hook needed.
@@ -23,7 +25,15 @@ const subscribe = (l: () => void) => (listeners.add(l), () => void listeners.del
 /** In-page replacement for window.confirm; resolves true on Confirm, false on Cancel/Esc/backdrop. */
 export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => {
-    pending = [...pending, { ...opts, resolve }];
+    pending = [...pending, { ...opts, resolve: (ok) => resolve(ok) }];
+    emit();
+  });
+}
+
+/** confirmDialog with a checkbox; resolves null on Cancel, otherwise the checkbox state. */
+export function confirmWithOption(opts: ConfirmOptions): Promise<boolean | null> {
+  return new Promise((resolve) => {
+    pending = [...pending, { ...opts, resolve: (ok, checked) => resolve(ok ? checked : null) }];
     emit();
   });
 }
@@ -41,15 +51,18 @@ function dismiss(id: number) {
   emit();
 }
 
+let optionChecked = false;
 function settle(ok: boolean) {
   const [first, ...rest] = pending;
   pending = rest;
-  first?.resolve(ok);
+  first?.resolve(ok, optionChecked);
   emit();
 }
 
 function ConfirmModal({ p }: { p: Pending }) {
   const footerRef = useRef<HTMLDivElement>(null);
+  const [checked, setChecked] = useState(p.option?.checked ?? false);
+  optionChecked = checked;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     // Destructive actions focus Cancel so a stray Enter doesn't delete anything.
@@ -88,6 +101,12 @@ function ConfirmModal({ p }: { p: Pending }) {
           <div className="min-w-0">
             <h2 id="confirm-title" className="font-semibold">{p.title}</h2>
             {p.message && <p className="mt-1 text-sm text-neutral-600">{p.message}</p>}
+            {p.option && (
+              <label className="mt-3 flex items-center gap-2 text-sm">
+                <input type="checkbox" className="size-4 accent-primary" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+                {p.option.label}
+              </label>
+            )}
           </div>
         </div>
         <div ref={footerRef} className="flex justify-end gap-2 border-t border-neutral-200 px-5 py-3">

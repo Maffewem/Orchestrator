@@ -351,6 +351,7 @@ var allowedActions = map[string]bool{
 	api.ActionStop:    true,
 	api.ActionRestart: true,
 	api.ActionLogs:    true,
+	api.ActionRemove:  true,
 }
 
 func (s *Server) handleCreateCommand(w http.ResponseWriter, r *http.Request) {
@@ -380,6 +381,22 @@ func (s *Server) handleCreateCommand(w http.ResponseWriter, r *http.Request) {
 	if !known {
 		writeError(w, http.StatusBadRequest, "container is not known on this device")
 		return
+	}
+	if req.Action == api.ActionRemove {
+		// The agent removes by name. Orchestrator's own containers and project containers are
+		// never removed from here; deleting the project is the way to do that.
+		name := containerName(d, req.Target)
+		for _, c := range d.Containers {
+			if c.ID == req.Target && (c.Labels["orchestrator.project"] != "" || strings.HasPrefix(c.Name, "orchestrator")) {
+				writeError(w, http.StatusBadRequest, "this container belongs to Orchestrator; delete its project instead")
+				return
+			}
+		}
+		if !hasCap(d, api.CapPreview) {
+			writeError(w, http.StatusConflict, "this device's agent is too old to remove containers; update it from the Updates page first")
+			return
+		}
+		req.Target = name
 	}
 	c, err := s.store.CreateCommand(r.Context(), d.ID, req.Action, req.Target, req.Args)
 	if err != nil {

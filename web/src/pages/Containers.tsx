@@ -2,14 +2,16 @@ import { useState } from "react";
 import { api, type FleetContainer } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
-import { ImportContainers } from "../components/Adopt";
+import { ImportContainers, isSystem } from "../components/Adopt";
 import { useCan } from "../components/auth";
 import { Card, CardHeader, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
 
+const SYSTEM = "System · Orchestrator (read-only)";
+
 /** A stack is an Orchestrator project or a Docker Compose project; anything else is standalone. */
 function stackOf(c: FleetContainer) {
-  return c.project_name ? `Project · ${c.project_name}` : c.compose_project ? `Compose · ${c.compose_project}` : "Standalone containers";
+  return isSystem(c) ? SYSTEM : c.project_name ? `Project · ${c.project_name}` : c.compose_project ? `Compose · ${c.compose_project}` : "Standalone containers";
 }
 
 export default function ContainersPage() {
@@ -28,7 +30,7 @@ export default function ContainersPage() {
   );
   const stacks = new Map<string, FleetContainer[]>();
   for (const c of rows) stacks.set(stackOf(c), [...(stacks.get(stackOf(c)) ?? []), c]);
-  const ordered = [...stacks.entries()].sort(([a], [b]) => (a.startsWith("Standalone") ? 1 : b.startsWith("Standalone") ? -1 : a.localeCompare(b)));
+  const ordered = [...stacks.entries()].sort(([a], [b]) => (a === SYSTEM ? 1 : b === SYSTEM ? -1 : a.startsWith("Standalone") ? 1 : b.startsWith("Standalone") ? -1 : a.localeCompare(b)));
 
   return (
     <>
@@ -55,7 +57,7 @@ export default function ContainersPage() {
         <div className="space-y-4">
           {ordered.map(([name, list]) => (
             <Card key={name}>
-              <CardHeader title={name} subtitle={`${list.filter((c) => c.state === "running").length} of ${list.length} running on ${new Set(list.map((c) => c.device_name)).size} device(s)`} />
+              <CardHeader title={name} subtitle={`${name === SYSTEM ? "Orchestrator's own containers. Kept apart so they aren't removed by accident; only restart and logs are offered. " : ""}${list.filter((c) => c.state === "running").length} of ${list.length} running on ${new Set(list.map((c) => c.device_name)).size} device(s)`} />
               <ContainerTable containers={list} showDevice onChanged={reload} />
             </Card>
           ))}

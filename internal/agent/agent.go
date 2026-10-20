@@ -237,7 +237,11 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 	case api.ActionRemove:
 		var id string
 		if id, err = a.docker.ContainerByName(cctx, c.Target); err == nil && id != "" {
-			err = a.docker.Remove(cctx, id)
+			if c.Args["volumes"] == "delete" {
+				output, err = a.docker.RemoveWithVolumes(cctx, id)
+			} else {
+				err = a.docker.Remove(cctx, id)
+			}
 		}
 	case api.ActionInspect:
 		var spec api.ContainerSpec

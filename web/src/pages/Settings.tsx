@@ -138,7 +138,7 @@ export default function SettingsPage() {
                 {s.cloudflare.connected ? "Replace" : "Connect"}
               </Button>
               {s.cloudflare.connected && (
-                <Button variant="danger" onClick={() => window.confirm("Disconnect Cloudflare? Existing DNS records stay; SSL goes back to the default challenge.") && cf({}, () => "Disconnected.")}>
+                <Button variant="danger" onClick={async () => (await confirmDialog({ title: "Disconnect Cloudflare?", message: "Existing DNS records stay; SSL goes back to the default challenge.", confirmLabel: "Disconnect", danger: true })) && cf({}, () => "Disconnected.")}>
                   Disconnect
                 </Button>
               )}

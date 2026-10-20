@@ -4,7 +4,7 @@ import { api, type AgentProgress, type UpdateSchedule, type UpdateStatus } from 
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, PageHeader, Table, Td, inputClass } from "../components/ui";
 import { ago, usePoll } from "../lib";
-import { confirmDialog } from "../components/dialogs";
+import { confirmDialog, notify } from "../components/dialogs";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -30,10 +30,11 @@ function ServerSteps({ stage }: { stage?: string }) {
 
 function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const run = async (f: () => Promise<unknown>) => {
+  const run = async (f: () => Promise<unknown>, updating = false) => {
     setError(null);
     try {
       await f();
+      if (updating) notify("Update started. The dashboard goes offline for a few seconds while the server restarts, then reconnects by itself.", "info");
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -83,7 +84,7 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
             loading={st.busy === "updating" || st.updating}
             disabled={busy || !st.can_update || newer === false}
             onClick={async () => {
-              if (await confirmDialog({ title: "Update the server now?", message: "The dashboard will be unavailable for a few seconds.", confirmLabel: "Update" })) run(() => api.applyUpdate(st.schedule.agents));
+              if (await confirmDialog({ title: "Update the server now?", message: "The dashboard will be unavailable for a few seconds.", confirmLabel: "Update" })) run(() => api.applyUpdate(st.schedule.agents), true);
             }}
           >
             {newer ? "Update now" : "Update to latest"}
@@ -206,10 +207,14 @@ function AgentsCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const outdated = st.agents.filter((a) => a.outdated && a.online && !a.in_container && a.can_update);
   const go = async (device?: string) => {
+    const n = device ? 1 : outdated.length;
+    if (!(await confirmDialog({ title: device ? "Update this agent?" : `Update ${n} outdated agent${n === 1 ? "" : "s"}?`, message: "Each agent restarts on the new build and is offline for a few seconds. Its containers keep running.", confirmLabel: "Update" }))) return;
     setError(null);
     try {
       const r = await api.updateAgents(device);
-      setMsg(r.queued ? `Update queued for ${r.queued} device(s). Progress shows below for each device.` : "Nothing to update right now.");
+      const m = r.queued ? `Update queued for ${r.queued} device(s). Progress shows below for each device.` : "Nothing to update right now.";
+      setMsg(m);
+      notify(m, "info");
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

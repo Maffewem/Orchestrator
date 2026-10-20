@@ -5,7 +5,7 @@ import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, StatusDot, Table, Td } from "./ui";
 import { useCan } from "./auth";
 import { LiveLogs, Shell } from "./Streams";
-import { AdoptDialog, adoptable, isLeftover, isSystem } from "./Adopt";
+import { AdoptDialog, adoptable, isSystem, isUnowned } from "./Adopt";
 import { confirmDialog } from "./dialogs";
 
 /** Reachable URLs for a container's published ports on its device. */
@@ -116,8 +116,8 @@ export default function ContainerTable({
                 ) : (
                   <>
                     {c.compose_project && <span className="ml-4 text-xs text-neutral-500">stack: {c.compose_project}</span>}
-                    {isLeftover(c) && (
-                      <span className="ml-4 text-xs text-amber-700" title="Built by Orchestrator for a project that has since been deleted">leftover from a deleted project</span>
+                    {isUnowned(c) && (
+                      <span className="ml-4 text-xs text-amber-700" title="Labelled by Orchestrator, but no existing project owns it (its project may have been deleted, or it was created separately)">Orchestrator-managed, no matching project</span>
                     )}
                     {isAdmin && adoptable(c) && (
                       <button
@@ -162,7 +162,7 @@ export default function ContainerTable({
                   {isAdmin && adoptable(c) && (
                     <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })} />
                   )}
-                  {isAdmin && (adoptable(c) || isLeftover(c)) && (
+                  {isAdmin && adoptable(c) && (
                     <Button
                       size="sm"
                       variant="ghost"

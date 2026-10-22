@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Archive, FileText, PackagePlus, Play, RotateCw, Trash2, Square, SquareTerminal } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, StatusDot, Table, Td } from "./ui";
+import { cx } from "../lib";
 import { useCan } from "./auth";
 import { LiveLogs, Shell } from "./Streams";
 import { AdoptDialog, adoptable, isSystem, isUnowned } from "./Adopt";
@@ -56,6 +57,28 @@ export default function ContainerTable({
   const [shell, setShell] = useState<{ deviceId: string; c: Container } | null>(null);
   const isAdmin = useCan("admin");
   const canOperate = useCan("operator");
+  const [sort, setSort] = useState<{ key: "name" | "device" | "image" | "status"; dir: 1 | -1 }>({ key: "name", dir: 1 });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [compact, setCompact] = useState(() => {
+    try {
+      return localStorage.getItem("orchestrator.compactRows") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setDensity = (v: boolean) => {
+    setCompact(v);
+    try {
+      localStorage.setItem("orchestrator.compactRows", v ? "1" : "0");
+    } catch {
+      /* private window: keep the choice for this visit only */
+    }
+  };
+  const keyOf = (c: Container | FleetContainer) => ("device_id" in c ? c.device_id : deviceId!) + "/" + c.id;
+  const sorted = useMemo(() => {
+    const val = (c: Container | FleetContainer) => (sort.key === "name" ? c.name : sort.key === "device" ? ("device_name" in c ? c.device_name : "") : sort.key === "image" ? c.image : c.state);
+    return [...containers].sort((a, b) => val(a).localeCompare(val(b)) * sort.dir);
+  }, [containers, sort]);
   const [adopting, setAdopting] = useState<{ deviceId: string; deviceName: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ReactNode>(null);
@@ -92,6 +115,38 @@ export default function ContainerTable({
     } finally {
       setBusy(null);
     }
+  };
+
+  const selectable = sorted.filter((c) => !isSystem(c));
+  const togglePick = (c: Container | FleetContainer) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (!n.delete(keyOf(c))) n.add(keyOf(c));
+      return n;
+    });
+  const sortHead = (key: typeof sort.key, label: string) => (
+    <button key={key} className="inline-flex items-center gap-1 font-medium hover:text-neutral-900" onClick={() => setSort({ key, dir: sort.key === key ? (-sort.dir as 1 | -1) : 1 })}>
+      {label}
+      {sort.key === key && <span aria-hidden>{sort.dir === 1 ? "▲" : "▼"}</span>}
+    </button>
+  );
+  const bulk = async (action: string, done: string) => {
+    const targets = sorted.filter((c) => picked.has(keyOf(c)));
+    setError(null);
+    let failed = 0;
+    for (const c of targets) {
+      const dev = "device_id" in c ? c.device_id : deviceId!;
+      try {
+        if (action === "backup") await api.createBackup(dev, c.id);
+        else if ((await waitFor((await api.command(dev, action, c.id)).id)).status === "failed") failed++;
+      } catch {
+        failed++;
+      }
+    }
+    setPicked(new Set());
+    setNotice(`${done} ${targets.length - failed} of ${targets.length} workers.`);
+    if (failed) setError(`${failed} could not be changed.`);
+    onChanged?.();
   };
 
   const endpointLinks = (c: Container | FleetContainer) =>
@@ -186,23 +241,67 @@ export default function ContainerTable({
     <>
       {notice && <p className="border-b border-neutral-200 bg-blue-50 px-5 py-2 text-sm text-neutral-800">{notice}</p>}
       {error && <p className="border-b border-neutral-200 bg-red-50 px-5 py-2 text-sm text-bad">{error}</p>}
+      <div className="hidden items-center gap-2 border-b border-neutral-200 px-5 py-2 text-sm md:flex">
+        {picked.size > 0 ? (
+          <>
+            <span className="font-medium">{picked.size} selected</span>
+            <Button size="sm" onClick={() => bulk("container.restart", "Restarted")}>Restart</Button>
+            <Button size="sm" onClick={() => bulk("backup", "Backup started for")}>Back up</Button>
+            <Button size="sm" onClick={() => bulk("container.stop", "Stopped")}>Stop</Button>
+            <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
+          </>
+        ) : (
+          <span className="text-neutral-500">{canOperate ? "Select rows to act on several workers at once." : ""}</span>
+        )}
+        <span className="flex-1" />
+        <span className="text-neutral-500">Rows</span>
+        <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300">
+          <button aria-pressed={!compact} className={cx("px-2.5 py-1 text-xs", !compact && "bg-neutral-900 text-white")} onClick={() => setDensity(false)}>Comfortable</button>
+          <button aria-pressed={compact} className={cx("border-l border-neutral-300 px-2.5 py-1 text-xs", compact && "bg-neutral-900 text-white")} onClick={() => setDensity(true)}>Compact</button>
+        </div>
+      </div>
       <div className="hidden md:block">
-        <Table head={["Name", ...(showDevice ? ["Device"] : []), "Image", "Status", "Ports", "Endpoints", ""]}>
-          {containers.map((c) => {
+        <Table
+          compact={compact}
+          head={[
+            canOperate ? (
+              <input
+                key="all"
+                type="checkbox"
+                aria-label="Select all"
+                checked={picked.size > 0 && picked.size === selectable.length}
+                onChange={(e) => setPicked(new Set(e.target.checked ? selectable.map(keyOf) : []))}
+              />
+            ) : null,
+            sortHead("name", "Name"),
+            ...(showDevice ? [sortHead("device", "Device")] : []),
+            sortHead("image", "Image"),
+            sortHead("status", "Status"),
+            "Ports",
+            "Endpoints",
+            "",
+          ].filter((h) => h !== null)}
+        >
+          {sorted.map((c) => {
             const dev = "device_id" in c ? c.device_id : deviceId!;
             const running = c.state === "running";
             return (
-              <tr key={dev + c.id} className="hover:bg-neutral-50">
+              <tr key={dev + c.id} className={cx("hover:bg-neutral-50", picked.has(keyOf(c)) && "bg-blue-50/60")}>
+                {canOperate && (
+                  <Td className="w-8">
+                    {!isSystem(c) && <input type="checkbox" aria-label={`Select ${c.name}`} checked={picked.has(keyOf(c))} onChange={() => togglePick(c)} />}
+                  </Td>
+                )}
                 <Td>{nameCell(c, dev)}</Td>
                 {showDevice && "device_name" in c && <Td>{deviceCell(c)}</Td>}
-                <Td className="max-w-48 truncate font-mono text-xs">
+                <Td className="max-w-36 truncate font-mono text-xs">
                   <span title={c.image}>{c.image}</span>
                 </Td>
                 <Td className="min-w-24 text-neutral-600">{c.status}</Td>
                 <Td className="font-mono text-xs text-neutral-600">{ports(c) || "—"}</Td>
-                <Td className="text-xs break-all">{running && endpointLinks(c)}</Td>
+                <Td className="text-xs whitespace-nowrap">{running && endpointLinks(c)}</Td>
                 <Td>
-                  <div className="flex max-w-40 flex-wrap justify-end gap-1 lg:max-w-52">{actionButtons(c, dev)}</div>
+                  <div className="flex max-w-40 flex-wrap justify-end gap-1 lg:max-w-60">{actionButtons(c, dev)}</div>
                 </Td>
               </tr>
             );
@@ -210,7 +309,7 @@ export default function ContainerTable({
         </Table>
       </div>
       <ul className="divide-y divide-neutral-100 md:hidden">
-        {containers.map((c) => {
+        {sorted.map((c) => {
           const dev = "device_id" in c ? c.device_id : deviceId!;
           const eps = c.state === "running" ? endpointLinks(c) : null;
           return (

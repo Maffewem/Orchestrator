@@ -342,10 +342,10 @@ export function LineChart({
   );
 }
 
-export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
+export function Table({ head, children, compact }: { head: ReactNode[]; children: ReactNode; compact?: boolean }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+      <table className={cx("w-full text-left text-sm", compact && "[&_td]:!py-1.5")}>
         <thead>
           <tr className="border-b border-neutral-200 text-xs text-neutral-500">
             {head.map((h, i) => (

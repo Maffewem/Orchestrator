@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText } from "../clipboard";
 import { Link, useNavigate, useParams } from "react-router";
 import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server, Undo2 } from "lucide-react";
@@ -237,9 +237,58 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
   const lines = useMemo(() => parseLog(d.steps ?? []), [d.steps]);
   const text = lines.map((l) => `${l.time} ${l.text}`).join("\n");
   const [copied, setCopied] = useState(false);
+  const [find, setFind] = useState("");
+  const [onlyErrors, setOnlyErrors] = useState(false);
+  const live = d.status === "queued" || d.status === "running";
+  const [follow, setFollow] = useState(true);
+  const end = useRef<HTMLDivElement>(null);
+  const isError = (t: string) => /^(Error|Rollback failed)/.test(t);
+  const needle = find.trim().toLowerCase();
+  const shown = lines.filter((l) => (!onlyErrors || isError(l.text)) && (!needle || l.text.toLowerCase().includes(needle)));
+
+  // Keep the newest line in view while the deployment runs, until the reader scrolls up.
+  useEffect(() => {
+    if (live && follow) end.current?.scrollIntoView({ block: "end" });
+  }, [lines.length, live, follow]);
+  useEffect(() => {
+    if (!live) return;
+    const up = (e: WheelEvent) => e.deltaY < 0 && setFollow(false);
+    const touch = () => setFollow(false);
+    window.addEventListener("wheel", up, { passive: true });
+    window.addEventListener("touchmove", touch, { passive: true });
+    return () => {
+      window.removeEventListener("wheel", up);
+      window.removeEventListener("touchmove", touch);
+    };
+  }, [live]);
+
   return (
     <div className="relative border-t border-neutral-200 bg-neutral-50">
-      <div className="sticky top-14 z-10 flex justify-end px-4 pt-3 sm:px-8">
+      <div className="sticky top-14 z-10 flex flex-wrap items-center justify-end gap-2 px-4 pt-3 sm:px-8">
+        <input
+          type="search"
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          placeholder="Search log"
+          aria-label="Search log"
+          className="h-9 w-40 rounded-lg border border-neutral-300 bg-white px-3 text-sm shadow-sm sm:w-52"
+        />
+        <button
+          aria-pressed={onlyErrors}
+          onClick={() => setOnlyErrors(!onlyErrors)}
+          className={cx("h-9 rounded-lg border px-3 text-sm shadow-sm", onlyErrors ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100")}
+        >
+          Errors only
+        </button>
+        {live && (
+          <button
+            aria-pressed={follow}
+            onClick={() => setFollow(!follow)}
+            className={cx("h-9 rounded-lg border px-3 text-sm shadow-sm", follow ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100")}
+          >
+            Follow tail
+          </button>
+        )}
         <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300 bg-white text-sm shadow-sm">
           <button
             className="inline-flex items-center gap-1.5 px-3 py-1.5 hover:bg-neutral-100"
@@ -270,13 +319,15 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
         {lines.length === 0 ? (
           <p className="pt-2 text-neutral-500">{d.status === "queued" ? "Waiting for the device to pick up this deployment…" : "No output yet."}</p>
         ) : (
-          lines.map((l, i) => (
-            <div key={i} className={cx("flex gap-3 whitespace-pre-wrap sm:gap-6", /^(Error|Rollback failed)/.test(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
+          shown.map((l, i) => (
+            <div key={i} className={cx("flex gap-3 whitespace-pre-wrap sm:gap-6", isError(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
               <span className="shrink-0 text-neutral-500 select-none">{clock(l.time)}</span>
               <span className="min-w-0 break-words">{l.text}</span>
             </div>
           ))
         )}
+        {lines.length > 0 && shown.length === 0 && <p className="pt-2 text-neutral-500">No lines match.</p>}
+        <div ref={end} />
       </div>
     </div>
   );

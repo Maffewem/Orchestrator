@@ -11,6 +11,42 @@
   --color-bad: #c42b1c;
 }
 
+/* Dark theme: the neutral scale is mirrored, so every bg/text/border utility flips together. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-neutral-50: #161615;
+  --color-neutral-100: #232321;
+  --color-neutral-200: #32322e;
+  --color-neutral-300: #46463f;
+  --color-neutral-400: #7c7c74;
+  --color-neutral-500: #9a9a93;
+  --color-neutral-600: #b4b4ad;
+  --color-neutral-700: #cfcfc9;
+  --color-neutral-800: #e2e2dd;
+  --color-neutral-900: #f0f0ec;
+  --color-neutral-950: #f8f8f5;
+  --color-primary: #5a97ff;
+  --color-primary-hover: #7aaaff;
+  --color-ok: #4cc27a;
+  --color-warn: #f0a24a;
+  --color-bad: #ff7a70;
+  --color-red-50: #3a1d1b;
+  --color-red-300: #8a3a34;
+  --color-red-600: #ff8a80;
+  --color-blue-50: #172640;
+  --color-amber-50: #33260f;
+  --color-amber-200: #5c4318;
+  --color-amber-700: #f0a24a;
+  --color-amber-900: #f6c27a;
+  --color-green-50: #14301f;
+  --color-emerald-50: #14301f;
+  --color-emerald-800: #6fd9a0;
+}
+:root[data-theme="dark"] .bg-white { background-color: #1f1f1d; }
+:root[data-theme="dark"] .bg-white\/90 { background-color: rgb(31 31 29 / 0.9); }
+:root[data-theme="dark"] .bg-white\/95 { background-color: rgb(31 31 29 / 0.95); }
+:root[data-theme="dark"] .bg-neutral-900.text-white { color: var(--color-neutral-50); }
+
 html,
 body,
 #root {

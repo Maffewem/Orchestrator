@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import { DialogHost } from "./components/dialogs";
 import "./index.css";
+import { initTheme } from "./theme";
+
+initTheme();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

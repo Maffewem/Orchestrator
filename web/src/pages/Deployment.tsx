@@ -271,9 +271,9 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
           <p className="pt-2 text-neutral-500">{d.status === "queued" ? "Waiting for the device to pick up this deployment…" : "No output yet."}</p>
         ) : (
           lines.map((l, i) => (
-            <div key={i} className={cx("flex gap-3 whitespace-pre-wrap break-all sm:gap-6 sm:whitespace-pre sm:break-normal", /^(Error|Rollback failed)/.test(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
+            <div key={i} className={cx("flex gap-3 whitespace-pre-wrap sm:gap-6", /^(Error|Rollback failed)/.test(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
               <span className="shrink-0 text-neutral-500 select-none">{clock(l.time)}</span>
-              <span>{l.text}</span>
+              <span className="min-w-0 break-words">{l.text}</span>
             </div>
           ))
         )}

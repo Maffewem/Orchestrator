@@ -137,10 +137,12 @@ export default function ContainerTable({
                   <span className="mt-0.5 block font-mono text-xs text-neutral-500">{c.device_addresses.join(", ") || "no address reported"}</span>
                 </Td>
               )}
-              <Td className="max-w-64 truncate font-mono text-xs">{c.image}</Td>
-              <Td className="whitespace-nowrap text-neutral-600">{c.status}</Td>
-              <Td className="font-mono text-xs whitespace-nowrap text-neutral-600">{ports(c) || "—"}</Td>
-              <Td className="text-xs whitespace-nowrap">
+              <Td className="max-w-48 truncate font-mono text-xs">
+                <span title={c.image}>{c.image}</span>
+              </Td>
+              <Td className="min-w-24 text-neutral-600">{c.status}</Td>
+              <Td className="font-mono text-xs text-neutral-600">{ports(c) || "—"}</Td>
+              <Td className="text-xs break-all">
                 {running && endpoints(c, addresses ?? ("device_addresses" in c ? c.device_addresses : [])).map((e) => (
                   <a key={e} href={`http://${e}`} target="_blank" rel="noreferrer" className="block font-mono text-primary hover:underline">
                     {e}
@@ -148,7 +150,7 @@ export default function ContainerTable({
                 ))}
               </Td>
               <Td>
-                <div className="flex justify-end gap-1">
+                <div className="flex max-w-40 flex-wrap justify-end gap-1 lg:max-w-52">
                   {system ? null : running ? (
                     <Button size="sm" variant="ghost" title="Stop" loading={busy === c.id + "container.stop"} icon={<Square className="size-3.5" />} onClick={() => run(dev, c, "container.stop")} />
                   ) : (

@@ -285,7 +285,7 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
 export function CodeBlock({ code }: { code: string }) {
   return (
     <div className="relative">
-      <pre className="rounded-lg bg-neutral-900 p-4 pr-20 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-neutral-100">{code}</pre>
+      <pre className="code-surface rounded-lg p-4 pr-20 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">{code}</pre>
       <div className="absolute top-2 right-2">
         <CopyButton text={code} />
       </div>

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
 import { api, type Device, type FleetContainer, type Project } from "../api";
@@ -23,6 +23,16 @@ export function useCrumbs(crumbs: Crumb[]) {
 type NavItem = { to: string; label: string; icon: typeof Server; end?: boolean; admin?: boolean };
 
 // Grouped from most-used to least-used: what is running, where it runs, then administration.
+const settingsSections = [
+  ["appearance", "Appearance"],
+  ["github", "GitHub"],
+  ["cloudflare", "Cloudflare"],
+  ["ssl", "SSL"],
+  ["domains", "Domains"],
+  ["backups", "Backup password"],
+  ["join", "Join token"],
+] as const;
+
 const navGroups: { title?: string; items: NavItem[] }[] = [
   { items: [{ to: "/", label: "Overview", icon: LayoutDashboard, end: true }] },
   {
@@ -105,7 +115,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
   }, []);
   const me = useMe();
   const loc = useLocation();
-  useEffect(() => setOpen(false), [loc.pathname]);
+  useEffect(() => setOpen(false), [loc.pathname, loc.hash]);
 
   const sidebar = (compact: boolean) => (
     <nav className="flex h-full flex-col gap-0.5 overflow-x-hidden p-3">
@@ -121,8 +131,8 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           <div key={g.title ?? "top"} className="mb-3">
             {g.title && !compact && <p className="px-2.5 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-neutral-400">{g.title}</p>}
             {items.map(({ to, label, icon: Icon, end }) => (
+              <Fragment key={to}>
               <NavLink
-                key={to}
                 to={to}
                 end={end}
                 title={compact ? label : undefined}
@@ -137,6 +147,23 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
                 <Icon className="size-4 shrink-0" />
                 {!compact && label}
               </NavLink>
+              {!compact && to === "/settings" && loc.pathname === "/settings" && (
+                <div key="settings-sections" className="mb-1 ml-5 mt-0.5 space-y-px border-l border-neutral-200 pl-2">
+                  {settingsSections.map(([id, name]) => (
+                    <Link
+                      key={id}
+                      to={`/settings#${id}`}
+                      className={cx(
+                        "block rounded-md px-2.5 py-1.5 text-[13px]",
+                        loc.hash === `#${id}` ? "bg-neutral-200/70 font-medium text-neutral-900" : "text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900",
+                      )}
+                    >
+                      {name}
+                    </Link>
+                  ))}
+                </div>
+              )}
+              </Fragment>
             ))}
           </div>
         );
@@ -176,16 +203,16 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         <aside className={cx("sticky top-0 hidden h-screen shrink-0 border-r border-neutral-200 bg-neutral-50 transition-[width] lg:block", rail ? "w-16" : "w-60")}>{sidebar(rail)}</aside>
         {open && (
           <div className="fixed inset-0 z-40 bg-black/30 lg:hidden" onClick={() => setOpen(false)}>
-            <aside className="h-full w-64 bg-neutral-50" onClick={(e) => e.stopPropagation()}>
+            <aside className="relative h-full w-64 overflow-y-auto bg-neutral-50" onClick={(e) => e.stopPropagation()}>
+              <button className="absolute right-2 top-2 rounded-md p-2 text-neutral-500 hover:bg-neutral-100" onClick={() => setOpen(false)} aria-label="Close menu">
+                <X className="size-5" />
+              </button>
               {sidebar(false)}
             </aside>
           </div>
         )}
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-neutral-200 bg-white/90 px-4 backdrop-blur sm:px-6">
-            <button className="-ml-1 rounded-md p-1.5 hover:bg-neutral-100 lg:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
-              {open ? <X className="size-5" /> : <Menu className="size-5" />}
-            </button>
             <button
               className="-ml-1 hidden rounded-md p-1.5 text-neutral-600 hover:bg-neutral-100 lg:block"
               onClick={toggleRail}

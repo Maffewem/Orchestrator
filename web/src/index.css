@@ -47,6 +47,12 @@
 :root[data-theme="dark"] .bg-white\/95 { background-color: rgb(31 31 29 / 0.95); }
 :root[data-theme="dark"] .bg-neutral-900.text-white { color: var(--color-neutral-50); }
 
+/* Code and secret boxes stay dark in both themes. */
+.code-surface {
+  background-color: #1c1c1a;
+  color: #ececE8;
+}
+
 html,
 body,
 #root {

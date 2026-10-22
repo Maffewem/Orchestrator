@@ -1,9 +1,12 @@
-import { useState } from "react";
-import { Archive, Cloud, Github, Globe, KeyRound, Lock } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useLocation } from "react-router";
+import { Archive, Cloud, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
 import { api } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
+import { copyText } from "../clipboard";
+import { getTheme, setTheme, type ThemeChoice } from "../theme";
 import { confirmDialog } from "../components/dialogs";
 
 export default function SettingsPage() {
@@ -20,6 +23,7 @@ export default function SettingsPage() {
   const [sslMsg, setSslMsg] = useState<string | null>(null);
   const [bkPw, setBkPw] = useState("");
   const [bkMsg, setBkMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [find, setFind] = useState("");
 
   const s = settings.data;
   if (!s) return <Loading />;
@@ -86,12 +90,42 @@ export default function SettingsPage() {
     }
   };
 
+  const keywords: Record<string, string> = {
+    appearance: "appearance theme dark light",
+    github: "github token webhook repositories",
+    cloudflare: "cloudflare dns token zone",
+    ssl: "ssl https certificates caddy",
+    domains: "domains base domain wildcard",
+    backups: "backup password encrypt",
+    join: "join token devices register",
+  };
+  const vis = (id: string) => !find.trim() || keywords[id].includes(find.trim().toLowerCase());
+
   return (
     <div className="max-w-3xl">
       <PageHeader title="Settings" />
+      <input className={`${inputClass} mb-4 max-w-xs`} type="search" placeholder="Search settings" aria-label="Search settings" value={find} onChange={(e) => setFind(e.target.value)} />
+      {Object.keys(keywords).every((k) => !vis(k)) && <p className="mb-4 text-sm text-neutral-500">No settings match. Try a word such as token, domain or theme.</p>}
       <div className="space-y-6">
-        <Card>
-          <CardHeader
+        {vis("appearance") && (
+          <Collapsible
+            id="appearance"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <Moon className="size-4" /> Appearance
+              </span>
+            }
+            subtitle="Light, dark, or follow this device."
+          >
+            <AppearanceChoice />
+          </Collapsible>
+        )}
+        {vis("github") && (
+        <Collapsible
+          id="github"
+          defaultOpen={!s.github.connected}
+          openLabel="Set up"
             title={
               <span className="flex items-center gap-2">
                 <Github className="size-4" /> GitHub
@@ -99,14 +133,18 @@ export default function SettingsPage() {
             }
             subtitle="Deploy from repositories and redeploy on every push."
             action={s.github.connected ? <Badge tone="ok">Connected{login ? ` as ${login}` : ""}</Badge> : <Badge>Not connected</Badge>}
-          />
+        >
           <div className="space-y-6 p-5">
             <div>
-              <p className="mb-1 text-sm font-medium">1. Access token</p>
-              <p className="mb-3 text-sm text-neutral-500">
-                Create a fine-grained personal access token with read-only <b>Contents</b> and <b>Metadata</b> access to the repositories you want to
-                deploy. It is used to list repositories, read commits and clone private repos on your devices. Public repos work without one.
-              </p>
+              <p className="mb-2 text-sm font-medium">1. Access token</p>
+              <div className="mb-3">
+                <Help title="How to create the token">
+                  <p>
+                    Create a fine-grained personal access token with read-only <b>Contents</b> and <b>Metadata</b> access to the repositories you want to
+                    deploy. It is used to list repositories, read commits and clone private repos on your devices. Public repos work without one.
+                  </p>
+                </Help>
+              </div>
               <div className="flex gap-2">
                 <input
                   className={inputClass}
@@ -131,25 +169,33 @@ export default function SettingsPage() {
               )}
             </div>
             <div>
-              <p className="mb-1 text-sm font-medium">2. Push webhook</p>
-              <p className="mb-3 text-sm text-neutral-500">
-                In each repository go to <b>Settings → Webhooks → Add webhook</b>, use content type <code>application/json</code>, the secret
-                below, and the <b>Just the push event</b> option. The dashboard must be reachable from GitHub for this to work.
-              </p>
+              <p className="mb-2 text-sm font-medium">2. Push webhook</p>
+              <div className="mb-3">
+                <Help title="How to add the webhook">
+                  <p>
+                    In each repository go to <b>Settings → Webhooks → Add webhook</b>, use content type <code>application/json</code>, the secret
+                    below, and the <b>Just the push event</b> option. The dashboard must be reachable from GitHub for this to work.
+                  </p>
+                </Help>
+              </div>
               <div className="space-y-3">
                 <Field label="Payload URL">
                   <CodeBlock code={webhook} />
                 </Field>
                 <Field label="Secret">
-                  <CodeBlock code={s.github.webhook_secret} />
+                  <SecretBlock value={s.github.webhook_secret} />
                 </Field>
               </div>
             </div>
           </div>
-        </Card>
+        </Collapsible>
+        )}
 
-        <Card>
-          <CardHeader
+        {vis("cloudflare") && (
+        <Collapsible
+          id="cloudflare"
+          defaultOpen={!s.cloudflare.connected}
+          openLabel="Set up"
             title={
               <span className="flex items-center gap-2">
                 <Cloud className="size-4" /> Cloudflare
@@ -157,12 +203,14 @@ export default function SettingsPage() {
             }
             subtitle="Create and update DNS records for your workers automatically."
             action={s.cloudflare.connected ? <Badge tone="ok">Connected</Badge> : <Badge>Not connected</Badge>}
-          />
+        >
           <div className="space-y-3 p-5">
-            <p className="text-sm text-neutral-500">
-              Create an API token at <b>Cloudflare → My Profile → API Tokens</b> with <b>Zone → Zone → Read</b> and <b>Zone → DNS → Edit</b> on the zones you use. The
-              token is stored on this server and sent to a device only when SSL uses the DNS challenge.
-            </p>
+            <Help title="How to create the token">
+              <p>
+                Create an API token at <b>Cloudflare → My Profile → API Tokens</b> with <b>Zone → Zone → Read</b> and <b>Zone → DNS → Edit</b> on the zones you use. The
+                token is stored on this server and sent to a device only when SSL uses the DNS challenge.
+              </p>
+            </Help>
             <div className="flex gap-2">
               <input
                 className={inputClass}
@@ -188,14 +236,19 @@ export default function SettingsPage() {
               </label>
             )}
             {cfMsg && (cfMsg.ok ? <p className="text-sm text-neutral-600">{cfMsg.text}</p> : <ErrorNote>{cfMsg.text}</ErrorNote>)}
-            <ul className="list-disc space-y-1 pl-5 text-sm text-neutral-500">
+            <Help title="What gets created">
+            <ul className="list-disc space-y-1 pl-5">
               <li>Each hostname a device serves gets an A record pointing at that device's first IPv4 address. Existing A records are updated; a name that already has a CNAME is left alone, and records are never deleted.</li>
               <li>Records point at the address the device reports, which is often a private LAN address. That works on your network; for access from outside, port-forward or use a public address.</li>
             </ul>
+            </Help>
           </div>
-        </Card>
-        <Card>
-          <CardHeader
+        </Collapsible>
+        )}
+        {vis("ssl") && (
+        <Collapsible
+          id="ssl"
+          defaultOpen={false}
             title={
               <span className="flex items-center gap-2">
                 <Lock className="size-4" /> SSL
@@ -203,7 +256,7 @@ export default function SettingsPage() {
             }
             subtitle="How each device's proxy gets HTTPS certificates (Let's Encrypt, via Caddy)."
             action={<Badge tone="ok">{s.ssl_mode === "dns" ? "DNS challenge" : "HTTP challenge"}</Badge>}
-          />
+        >
           <div className="space-y-3 p-5">
             {(
               [
@@ -225,16 +278,19 @@ export default function SettingsPage() {
               The DNS challenge runs a Caddy build that includes the Cloudflare module (<code>ghcr.io/caddybuilds/caddy-cloudflare</code>). Switching modes recreates the proxy container on each device, keeping its certificates.
             </p>
           </div>
-        </Card>
-        <Card>
-          <CardHeader
+        </Collapsible>
+        )}
+        {vis("domains") && (
+        <Collapsible
+          id="domains"
+          defaultOpen={!s.base_domain}
             title={
               <span className="flex items-center gap-2">
                 <Globe className="size-4" /> Domains
               </span>
             }
             subtitle="Every worker gets name.<base domain>. Point a wildcard DNS record at your device, or add records per worker."
-          />
+        >
           <div className="p-5">
             <p className="mb-1 text-sm font-medium">Base domain</p>
             <div className="flex gap-2">
@@ -245,9 +301,12 @@ export default function SettingsPage() {
             </div>
             {baseMsg && <p className="mt-2 text-sm text-neutral-600">{baseMsg}</p>}
           </div>
-        </Card>
-        <Card>
-          <CardHeader
+        </Collapsible>
+        )}
+        {vis("backups") && (
+        <Collapsible
+          id="backups"
+          defaultOpen={false}
             title={
               <span className="flex items-center gap-2">
                 <Archive className="size-4" /> Backup password
@@ -255,7 +314,7 @@ export default function SettingsPage() {
             }
             subtitle="Optional. With a password set, new backups are encrypted (AES-256) before they are written to disk."
             action={s.backup_password_set ? <Badge tone="ok">Encrypting</Badge> : <Badge>Off</Badge>}
-          />
+        >
           <div className="space-y-3 p-5">
             <div className="flex gap-2">
               <input
@@ -279,17 +338,22 @@ export default function SettingsPage() {
               )}
             </div>
             {bkMsg && (bkMsg.ok ? <p className="text-sm text-neutral-600">{bkMsg.text}</p> : <ErrorNote>{bkMsg.text}</ErrorNote>)}
-            <ul className="list-disc space-y-1 pl-5 text-sm text-neutral-500">
+            <Help title="What this protects">
+            <ul className="list-disc space-y-1 pl-5">
               <li>The password is kept on this server so scheduled backups can run and the dashboard can restore and download them. What it protects is the backup files on disk and any copy of them taken elsewhere.</li>
               <li>Changing it does not re-encrypt old backups: restoring one needs the password it was made with, so keep the old password until those backups are gone. There is no way to recover a lost password.</li>
               <li>
                 To open an encrypted copy without this server: <code>ORCH_BACKUP_PASSWORD=… orchestrator-server decrypt-backup -in x.tar.gz.enc -out x.tar.gz</code>
               </li>
             </ul>
+            </Help>
           </div>
-        </Card>
-        <Card>
-          <CardHeader
+        </Collapsible>
+        )}
+        {vis("join") && (
+        <Collapsible
+          id="join"
+          defaultOpen={false}
             title={
               <span className="flex items-center gap-2">
                 <KeyRound className="size-4" /> Join token
@@ -308,11 +372,12 @@ export default function SettingsPage() {
                 Rotate
               </Button>
             }
-          />
+        >
           <div className="p-5">
-            <CodeBlock code={s.join_token} />
+            <SecretBlock value={s.join_token} />
           </div>
-        </Card>
+        </Collapsible>
+        )}
 
         <Card>
           <CardHeader title="About" />
@@ -328,6 +393,121 @@ export default function SettingsPage() {
           </dl>
         </Card>
       </div>
+    </div>
+  );
+}
+
+/** A settings card that opens and closes, and opens itself when the sidebar links to it (/settings#id). */
+function Collapsible({
+  id,
+  title,
+  subtitle,
+  action,
+  defaultOpen,
+  openLabel = "Manage",
+  children,
+}: {
+  id: string;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  action?: ReactNode;
+  defaultOpen: boolean;
+  openLabel?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== `#${id}`) return;
+    setOpen(true);
+    requestAnimationFrame(() => document.getElementById(`sec-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+  }, [hash, id]);
+  return (
+    <section id={`sec-${id}`} className="scroll-mt-20">
+      <Card>
+        <CardHeader
+          title={title}
+          subtitle={subtitle}
+          action={
+            <span className="flex items-center gap-2">
+              {action}
+              <Button size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>
+                {open ? "Close" : openLabel}
+              </Button>
+            </span>
+          }
+        />
+        {open && children}
+      </Card>
+    </section>
+  );
+}
+
+/** Setup steps and background reading, tucked away once the section is working. */
+function Help({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="rounded-lg border border-neutral-200 bg-neutral-50">
+      <summary className="cursor-pointer px-3 py-2.5 text-sm font-medium">{title}</summary>
+      <div className="space-y-2 px-3 pb-3 text-sm text-neutral-500">{children}</div>
+    </details>
+  );
+}
+
+/** A secret shown as dots until asked for, so it cannot be read off a shared screen by accident. */
+function SecretBlock({ value }: { value: string }) {
+  const [shown, setShown] = useState(false);
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center gap-2 code-surface rounded-lg py-2 pl-3 pr-2 font-mono text-xs">
+      <span className="min-w-0 flex-1 break-all">{shown ? value : "•".repeat(28)}</span>
+      <button className="shrink-0 rounded-md bg-white/10 px-2.5 py-1.5 hover:bg-white/20" onClick={() => setShown(!shown)}>
+        {shown ? "Hide" : "Reveal"}
+      </button>
+      <button
+        className="shrink-0 rounded-md bg-white/10 px-2.5 py-1.5 hover:bg-white/20"
+        onClick={async () => {
+          if (await copyText(value)) {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }
+        }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
+function AppearanceChoice() {
+  const [choice, setChoice] = useState<ThemeChoice>(getTheme());
+  return (
+    <div className="space-y-3 p-5">
+      {(
+        [
+          ["light", "Light", "Always light."],
+          ["dark", "Dark", "Always dark."],
+          ["auto", "Auto", "Follows this device's setting."],
+        ] as const
+      ).map(([v, label, text]) => (
+        <label key={v} className="flex cursor-pointer items-start gap-2 text-sm">
+          <input
+            type="radio"
+            className="mt-1"
+            name="theme"
+            checked={choice === v}
+            onChange={() => {
+              setChoice(v);
+              setTheme(v);
+            }}
+          />
+          <span>
+            <span className="font-medium">{label}</span>
+            <br />
+            <span className="text-neutral-500">{text}</span>
+          </span>
+        </label>
+      ))}
+      <p className="text-sm text-neutral-500">Saved in this browser, so each device can use its own.</p>
     </div>
   );
 }

@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Archive, FileText, PackagePlus, Play, RotateCw, Trash2, Square, SquareTerminal } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, StatusDot, Table, Td } from "./ui";
+import { cx } from "../lib";
 import { useCan } from "./auth";
 import { LiveLogs, Shell } from "./Streams";
 import { AdoptDialog, adoptable, isSystem, isUnowned } from "./Adopt";
@@ -55,6 +56,29 @@ export default function ContainerTable({
   const [logs, setLogs] = useState<{ deviceId: string; c: Container } | null>(null);
   const [shell, setShell] = useState<{ deviceId: string; c: Container } | null>(null);
   const isAdmin = useCan("admin");
+  const canOperate = useCan("operator");
+  const [sort, setSort] = useState<{ key: "name" | "device" | "image" | "status"; dir: 1 | -1 }>({ key: "name", dir: 1 });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [compact, setCompact] = useState(() => {
+    try {
+      return localStorage.getItem("orchestrator.compactRows") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setDensity = (v: boolean) => {
+    setCompact(v);
+    try {
+      localStorage.setItem("orchestrator.compactRows", v ? "1" : "0");
+    } catch {
+      /* private window: keep the choice for this visit only */
+    }
+  };
+  const keyOf = (c: Container | FleetContainer) => ("device_id" in c ? c.device_id : deviceId!) + "/" + c.id;
+  const sorted = useMemo(() => {
+    const val = (c: Container | FleetContainer) => (sort.key === "name" ? c.name : sort.key === "device" ? ("device_name" in c ? c.device_name : "") : sort.key === "image" ? c.image : c.state);
+    return [...containers].sort((a, b) => val(a).localeCompare(val(b)) * sort.dir);
+  }, [containers, sort]);
   const [adopting, setAdopting] = useState<{ deviceId: string; deviceName: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<ReactNode>(null);
@@ -93,102 +117,230 @@ export default function ContainerTable({
     }
   };
 
+  const selectable = sorted.filter((c) => !isSystem(c));
+  const togglePick = (c: Container | FleetContainer) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (!n.delete(keyOf(c))) n.add(keyOf(c));
+      return n;
+    });
+  const sortHead = (key: typeof sort.key, label: string) => (
+    <button key={key} className="inline-flex items-center gap-1 font-medium hover:text-neutral-900" onClick={() => setSort({ key, dir: sort.key === key ? (-sort.dir as 1 | -1) : 1 })}>
+      {label}
+      {sort.key === key && <span aria-hidden>{sort.dir === 1 ? "▲" : "▼"}</span>}
+    </button>
+  );
+  const bulk = async (action: string, done: string) => {
+    const targets = sorted.filter((c) => picked.has(keyOf(c)));
+    setError(null);
+    let failed = 0;
+    for (const c of targets) {
+      const dev = "device_id" in c ? c.device_id : deviceId!;
+      try {
+        if (action === "backup") await api.createBackup(dev, c.id);
+        else if ((await waitFor((await api.command(dev, action, c.id)).id)).status === "failed") failed++;
+      } catch {
+        failed++;
+      }
+    }
+    setPicked(new Set());
+    setNotice(`${done} ${targets.length - failed} of ${targets.length} workers.`);
+    if (failed) setError(`${failed} could not be changed.`);
+    onChanged?.();
+  };
+
+  const endpointLinks = (c: Container | FleetContainer) =>
+    endpoints(c, addresses ?? ("device_addresses" in c ? c.device_addresses : [])).map((e) => (
+      <a key={e} href={`http://${e}`} target="_blank" rel="noreferrer" className="block font-mono text-primary hover:underline">
+        {e}
+      </a>
+    ));
+
+  const nameCell = (c: Container | FleetContainer, dev: string) => (
+    <>
+      <Link to={`/workers/${dev}/${encodeURIComponent(c.name)}`} className="flex items-center gap-2 font-medium text-neutral-900 hover:text-primary hover:underline">
+        <StatusDot status={c.state} />
+        {c.name}
+        {c.name === "orchestrator-previous" && <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-normal text-neutral-600" title="Kept by the last server update so it can be rolled back">rollback copy</span>}
+      </Link>
+      {"project_name" in c && c.project_name ? (
+        <Link to={`/projects/${c.project_id}`} className="ml-4 text-xs text-primary hover:underline">
+          project: {c.project_name}
+        </Link>
+      ) : (
+        <span className="ml-4 inline-flex flex-wrap items-center gap-1.5 align-middle">
+          {c.compose_project && <span className="text-xs text-neutral-500">stack: {c.compose_project}</span>}
+          {isUnowned(c) && (
+            <span
+              className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600"
+              title="Labelled by Orchestrator, but no existing project owns it (its project may have been deleted, or it was created separately)"
+            >
+              Orchestrator
+            </span>
+          )}
+        </span>
+      )}
+    </>
+  );
+
+  const deviceCell = (c: FleetContainer | Container) =>
+    "device_name" in c && (
+      <>
+        <Link to={`/devices/${c.device_id}`} className="flex items-center gap-1.5 text-primary hover:underline">
+          <StatusDot status={c.device_status} />
+          {c.device_name}
+        </Link>
+        <span className="mt-0.5 block font-mono text-xs text-neutral-500">{c.device_addresses.join(", ") || "no address reported"}</span>
+      </>
+    );
+
+  const actionButtons = (c: Container | FleetContainer, dev: string) => {
+    const running = c.state === "running";
+    const system = isSystem(c);
+    return (
+      <>
+        {canOperate && !system && (running ? (
+          <Button size="sm" variant="ghost" title="Stop" loading={busy === c.id + "container.stop"} icon={<Square className="size-3.5" />} onClick={() => run(dev, c, "container.stop")} />
+        ) : (
+          <Button size="sm" variant="ghost" title="Start" loading={busy === c.id + "container.start"} icon={<Play className="size-3.5" />} onClick={() => run(dev, c, "container.start")} />
+        ))}
+        {canOperate && <Button size="sm" variant="ghost" title="Restart" loading={busy === c.id + "container.restart"} icon={<RotateCw className="size-3.5" />} onClick={() => run(dev, c, "container.restart")} />}
+        {canOperate && <Button size="sm" variant="ghost" title="Back up" loading={busy === c.id + "backup"} icon={<Archive className="size-3.5" />} onClick={() => backup(dev, c)} />}
+        {canOperate && <Button size="sm" variant="ghost" title="Logs" icon={<FileText className="size-3.5" />} onClick={() => setLogs({ deviceId: dev, c })} />}
+        {isAdmin && adoptable(c) && (
+          <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })}>
+            Adopt
+          </Button>
+        )}
+        {isAdmin && adoptable(c) && (
+          <Button
+            size="sm"
+            variant="ghost"
+            title="Remove container"
+            loading={busy === c.id + "container.remove"}
+            icon={<Trash2 className="size-3.5 text-bad" />}
+            onClick={async () => {
+              const vols = c.volumes ?? [];
+              const del = await confirmWithOption({
+                title: `Remove ${c.name}?`,
+                message: `The container is stopped and deleted from the device.${vols.length ? " Its volumes are kept unless you tick the box below." : ""}`,
+                confirmLabel: "Remove",
+                danger: true,
+                option: vols.length ? { label: `Also delete its volumes (permanent): ${vols.join(", ")}`, checked: false } : undefined,
+              });
+              if (del !== null) run(dev, c, "container.remove", del && vols.length ? { volumes: "delete" } : undefined);
+            }}
+          />
+        )}
+        {isAdmin && running && !system && <Button size="sm" variant="ghost" title="Shell" icon={<SquareTerminal className="size-3.5" />} onClick={() => setShell({ deviceId: dev, c })} />}
+      </>
+    );
+  };
+
   return (
     <>
       {notice && <p className="border-b border-neutral-200 bg-blue-50 px-5 py-2 text-sm text-neutral-800">{notice}</p>}
       {error && <p className="border-b border-neutral-200 bg-red-50 px-5 py-2 text-sm text-bad">{error}</p>}
-      <Table head={["Name", ...(showDevice ? ["Device"] : []), "Image", "Status", "Ports", "Endpoints", ""]}>
-        {containers.map((c) => {
-          const dev = "device_id" in c ? c.device_id : deviceId!;
-          const running = c.state === "running";
-          const system = isSystem(c);
-          return (
-            <tr key={dev + c.id} className="hover:bg-neutral-50">
-              <Td>
-                <Link to={`/workers/${dev}/${encodeURIComponent(c.name)}`} className="flex items-center gap-2 font-medium text-neutral-900 hover:text-primary hover:underline">
-                  <StatusDot status={c.state} />
-                  {c.name}
-                  {c.name === "orchestrator-previous" && <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-normal text-neutral-600" title="Kept by the last server update so it can be rolled back">rollback copy</span>}
-                </Link>
-                {"project_name" in c && c.project_name ? (
-                  <Link to={`/projects/${c.project_id}`} className="ml-4 text-xs text-primary hover:underline">
-                    project: {c.project_name}
-                  </Link>
-                ) : (
-                  <span className="ml-4 inline-flex flex-wrap items-center gap-1.5 align-middle">
-                    {c.compose_project && <span className="text-xs text-neutral-500">stack: {c.compose_project}</span>}
-                    {isUnowned(c) && (
-                      <span
-                        className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600"
-                        title="Labelled by Orchestrator, but no existing project owns it (its project may have been deleted, or it was created separately)"
-                      >
-                        Orchestrator
-                      </span>
-                    )}
-                  </span>
+      <div className="hidden items-center gap-2 border-b border-neutral-200 px-5 py-2 text-sm md:flex">
+        {picked.size > 0 ? (
+          <>
+            <span className="font-medium">{picked.size} selected</span>
+            <Button size="sm" onClick={() => bulk("container.restart", "Restarted")}>Restart</Button>
+            <Button size="sm" onClick={() => bulk("backup", "Backup started for")}>Back up</Button>
+            <Button size="sm" onClick={() => bulk("container.stop", "Stopped")}>Stop</Button>
+            <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
+          </>
+        ) : (
+          <span className="text-neutral-500">{canOperate ? "Select rows to act on several workers at once." : ""}</span>
+        )}
+        <span className="flex-1" />
+        <span className="text-neutral-500">Rows</span>
+        <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300">
+          <button aria-pressed={!compact} className={cx("px-2.5 py-1 text-xs", !compact && "bg-neutral-900 text-white")} onClick={() => setDensity(false)}>Comfortable</button>
+          <button aria-pressed={compact} className={cx("border-l border-neutral-300 px-2.5 py-1 text-xs", compact && "bg-neutral-900 text-white")} onClick={() => setDensity(true)}>Compact</button>
+        </div>
+      </div>
+      <div className="hidden md:block">
+        <Table
+          compact={compact}
+          head={[
+            canOperate ? (
+              <input
+                key="all"
+                type="checkbox"
+                aria-label="Select all"
+                checked={picked.size > 0 && picked.size === selectable.length}
+                onChange={(e) => setPicked(new Set(e.target.checked ? selectable.map(keyOf) : []))}
+              />
+            ) : null,
+            sortHead("name", "Name"),
+            ...(showDevice ? [sortHead("device", "Device")] : []),
+            sortHead("image", "Image"),
+            sortHead("status", "Status"),
+            "Ports",
+            "Endpoints",
+            "",
+          ].filter((h) => h !== null)}
+        >
+          {sorted.map((c) => {
+            const dev = "device_id" in c ? c.device_id : deviceId!;
+            const running = c.state === "running";
+            return (
+              <tr key={dev + c.id} className={cx("hover:bg-neutral-50", picked.has(keyOf(c)) && "bg-blue-50/60")}>
+                {canOperate && (
+                  <Td className="w-8">
+                    {!isSystem(c) && <input type="checkbox" aria-label={`Select ${c.name}`} checked={picked.has(keyOf(c))} onChange={() => togglePick(c)} />}
+                  </Td>
                 )}
-              </Td>
-              {showDevice && "device_name" in c && (
-                <Td>
-                  <Link to={`/devices/${c.device_id}`} className="flex items-center gap-1.5 text-primary hover:underline">
-                    <StatusDot status={c.device_status} />
-                    {c.device_name}
-                  </Link>
-                  <span className="mt-0.5 block font-mono text-xs text-neutral-500">{c.device_addresses.join(", ") || "no address reported"}</span>
+                <Td>{nameCell(c, dev)}</Td>
+                {showDevice && "device_name" in c && <Td>{deviceCell(c)}</Td>}
+                <Td className="max-w-36 truncate font-mono text-xs">
+                  <span title={c.image}>{c.image}</span>
                 </Td>
-              )}
-              <Td className="max-w-64 truncate font-mono text-xs">{c.image}</Td>
-              <Td className="whitespace-nowrap text-neutral-600">{c.status}</Td>
-              <Td className="font-mono text-xs whitespace-nowrap text-neutral-600">{ports(c) || "—"}</Td>
-              <Td className="text-xs whitespace-nowrap">
-                {running && endpoints(c, addresses ?? ("device_addresses" in c ? c.device_addresses : [])).map((e) => (
-                  <a key={e} href={`http://${e}`} target="_blank" rel="noreferrer" className="block font-mono text-primary hover:underline">
-                    {e}
-                  </a>
-                ))}
-              </Td>
-              <Td>
-                <div className="flex justify-end gap-1">
-                  {system ? null : running ? (
-                    <Button size="sm" variant="ghost" title="Stop" loading={busy === c.id + "container.stop"} icon={<Square className="size-3.5" />} onClick={() => run(dev, c, "container.stop")} />
-                  ) : (
-                    <Button size="sm" variant="ghost" title="Start" loading={busy === c.id + "container.start"} icon={<Play className="size-3.5" />} onClick={() => run(dev, c, "container.start")} />
-                  )}
-                  <Button size="sm" variant="ghost" title="Restart" loading={busy === c.id + "container.restart"} icon={<RotateCw className="size-3.5" />} onClick={() => run(dev, c, "container.restart")} />
-                  <Button size="sm" variant="ghost" title="Back up" loading={busy === c.id + "backup"} icon={<Archive className="size-3.5" />} onClick={() => backup(dev, c)} />
-                  <Button size="sm" variant="ghost" title="Logs" icon={<FileText className="size-3.5" />} onClick={() => setLogs({ deviceId: dev, c })} />
-                  {isAdmin && adoptable(c) && (
-                    <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })}>
-                      Adopt
-                    </Button>
-                  )}
-                  {isAdmin && adoptable(c) && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      title="Remove container"
-                      loading={busy === c.id + "container.remove"}
-                      icon={<Trash2 className="size-3.5 text-bad" />}
-                      onClick={async () => {
-                        const vols = c.volumes ?? [];
-                        const del = await confirmWithOption({
-                          title: `Remove ${c.name}?`,
-                          message: `The container is stopped and deleted from the device.${vols.length ? " Its volumes are kept unless you tick the box below." : ""}`,
-                          confirmLabel: "Remove",
-                          danger: true,
-                          option: vols.length ? { label: `Also delete its volumes (permanent): ${vols.join(", ")}`, checked: false } : undefined,
-                        });
-                        if (del !== null) run(dev, c, "container.remove", del && vols.length ? { volumes: "delete" } : undefined);
-                      }}
-                    />
-                  )}
-                  {isAdmin && running && !system && <Button size="sm" variant="ghost" title="Shell" icon={<SquareTerminal className="size-3.5" />} onClick={() => setShell({ deviceId: dev, c })} />}
-                </div>
-              </Td>
-            </tr>
+                <Td className="min-w-24 text-neutral-600">{c.status}</Td>
+                <Td className="font-mono text-xs text-neutral-600">{ports(c) || "—"}</Td>
+                <Td className="text-xs whitespace-nowrap">{running && endpointLinks(c)}</Td>
+                <Td>
+                  <div className="flex max-w-40 flex-wrap justify-end gap-1 lg:max-w-60">{actionButtons(c, dev)}</div>
+                </Td>
+              </tr>
+            );
+          })}
+        </Table>
+      </div>
+      <ul className="divide-y divide-neutral-100 md:hidden">
+        {sorted.map((c) => {
+          const dev = "device_id" in c ? c.device_id : deviceId!;
+          const eps = c.state === "running" ? endpointLinks(c) : null;
+          return (
+            <li key={dev + c.id} className="px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">{nameCell(c, dev)}</div>
+                <span className="shrink-0 text-xs text-neutral-500">{c.status}</span>
+              </div>
+              <dl className="mt-3 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+                {showDevice && "device_name" in c && (
+                  <>
+                    <dt className="text-neutral-500">Device</dt>
+                    <dd>{deviceCell(c)}</dd>
+                  </>
+                )}
+                <dt className="text-neutral-500">Image</dt>
+                <dd className="break-all font-mono text-xs leading-5">{c.image}</dd>
+                <dt className="text-neutral-500">Ports</dt>
+                <dd className="font-mono text-xs leading-5 text-neutral-700">{ports(c) || "—"}</dd>
+                {eps && (
+                  <>
+                    <dt className="text-neutral-500">Open</dt>
+                    <dd className="text-xs break-all leading-5">{eps}</dd>
+                  </>
+                )}
+              </dl>
+              <div className="mt-3 flex flex-wrap gap-1.5 border-t border-neutral-100 pt-3">{actionButtons(c, dev)}</div>
+            </li>
           );
         })}
-      </Table>
+      </ul>
       {logs && <LiveLogs deviceId={logs.deviceId} container={logs.c.id} name={logs.c.name} onClose={() => setLogs(null)} />}
       {adopting && (
         <AdoptDialog

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText } from "../clipboard";
 import { Link, useNavigate, useParams } from "react-router";
 import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server, Undo2 } from "lucide-react";
@@ -147,7 +147,7 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
   ];
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-4 sm:px-5">
         {url && (
           <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900">
             <Globe className="size-4 text-neutral-500" />
@@ -170,7 +170,7 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
         ) : (
           <>
             <span className="rounded-full border border-neutral-200 px-2.5 py-0.5 font-mono text-sm">{d.spec.image}</span>
-            <span className="min-w-0 flex-1 truncate">Deploy {d.spec.image}</span>
+            <span className="min-w-0 flex-1 basis-full truncate sm:basis-0">Deploy {d.spec.image}</span>
             <span className="text-sm text-neutral-500">
               {d.trigger} · {ago(d.created_at)}
             </span>
@@ -211,9 +211,9 @@ function Timeline({ steps }: { steps: Step[] }) {
   const known = times.filter(Boolean);
   const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1000;
   return (
-    <div className="flex gap-1.5 overflow-x-auto px-4 py-5 sm:px-8">
+    <div className="grid grid-cols-2 gap-2 px-4 py-5 sm:flex sm:gap-1.5 sm:overflow-x-auto sm:px-8">
       {steps.map((s, i) => (
-        <div key={s.index} className="min-w-28" style={{ flexGrow: times[i] || avg * 0.6, flexBasis: 0 }}>
+        <div key={s.index} className="min-w-0 sm:min-w-28" style={{ flexGrow: times[i] || avg * 0.6, flexBasis: 0 }}>
           <p className={cx("mb-1.5 truncate text-sm", s.status === "pending" || s.status === "skipped" ? "text-neutral-400" : "text-neutral-700")}>{s.name}</p>
           <div
             className={cx(
@@ -237,9 +237,58 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
   const lines = useMemo(() => parseLog(d.steps ?? []), [d.steps]);
   const text = lines.map((l) => `${l.time} ${l.text}`).join("\n");
   const [copied, setCopied] = useState(false);
+  const [find, setFind] = useState("");
+  const [onlyErrors, setOnlyErrors] = useState(false);
+  const live = d.status === "queued" || d.status === "running";
+  const [follow, setFollow] = useState(true);
+  const end = useRef<HTMLDivElement>(null);
+  const isError = (t: string) => /^(Error|Rollback failed)/.test(t);
+  const needle = find.trim().toLowerCase();
+  const shown = lines.filter((l) => (!onlyErrors || isError(l.text)) && (!needle || l.text.toLowerCase().includes(needle)));
+
+  // Keep the newest line in view while the deployment runs, until the reader scrolls up.
+  useEffect(() => {
+    if (live && follow) end.current?.scrollIntoView({ block: "end" });
+  }, [lines.length, live, follow]);
+  useEffect(() => {
+    if (!live) return;
+    const up = (e: WheelEvent) => e.deltaY < 0 && setFollow(false);
+    const touch = () => setFollow(false);
+    window.addEventListener("wheel", up, { passive: true });
+    window.addEventListener("touchmove", touch, { passive: true });
+    return () => {
+      window.removeEventListener("wheel", up);
+      window.removeEventListener("touchmove", touch);
+    };
+  }, [live]);
+
   return (
     <div className="relative border-t border-neutral-200 bg-neutral-50">
-      <div className="sticky top-14 z-10 flex justify-end px-4 pt-3 sm:px-8">
+      <div className="sticky top-14 z-10 flex flex-wrap items-center justify-end gap-2 px-4 pt-3 sm:px-8">
+        <input
+          type="search"
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          placeholder="Search log"
+          aria-label="Search log"
+          className="h-9 w-40 rounded-lg border border-neutral-300 bg-white px-3 text-sm shadow-sm sm:w-52"
+        />
+        <button
+          aria-pressed={onlyErrors}
+          onClick={() => setOnlyErrors(!onlyErrors)}
+          className={cx("h-9 rounded-lg border px-3 text-sm shadow-sm", onlyErrors ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100")}
+        >
+          Errors only
+        </button>
+        {live && (
+          <button
+            aria-pressed={follow}
+            onClick={() => setFollow(!follow)}
+            className={cx("h-9 rounded-lg border px-3 text-sm shadow-sm", follow ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100")}
+          >
+            Follow tail
+          </button>
+        )}
         <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300 bg-white text-sm shadow-sm">
           <button
             className="inline-flex items-center gap-1.5 px-3 py-1.5 hover:bg-neutral-100"
@@ -270,13 +319,15 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
         {lines.length === 0 ? (
           <p className="pt-2 text-neutral-500">{d.status === "queued" ? "Waiting for the device to pick up this deployment…" : "No output yet."}</p>
         ) : (
-          lines.map((l, i) => (
-            <div key={i} className={cx("flex gap-6 whitespace-pre", /^(Error|Rollback failed)/.test(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
+          shown.map((l, i) => (
+            <div key={i} className={cx("flex gap-3 whitespace-pre-wrap sm:gap-6", isError(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
               <span className="shrink-0 text-neutral-500 select-none">{clock(l.time)}</span>
-              <span>{l.text}</span>
+              <span className="min-w-0 break-words">{l.text}</span>
             </div>
           ))
         )}
+        {lines.length > 0 && shown.length === 0 && <p className="pt-2 text-neutral-500">No lines match.</p>}
+        <div ref={end} />
       </div>
     </div>
   );

@@ -13,10 +13,10 @@ export function EventList({ events, devices, compact }: { events: Event[]; devic
       {events.map((e) => {
         const Icon = e.level === "error" ? AlertCircle : e.level === "warning" ? AlertTriangle : Info;
         return (
-          <li key={e.id} className={cx("flex gap-3 px-5", compact ? "py-2.5" : "py-3")}>
+          <li key={e.id} className={cx("flex gap-3 px-4 sm:px-5", compact ? "py-2.5" : "py-3")}>
             <Icon className={cx("mt-0.5 size-4 shrink-0", e.level === "error" ? "text-bad" : e.level === "warning" ? "text-warn" : "text-neutral-400")} />
             <div className="min-w-0 flex-1">
-              <p className={cx("text-sm", compact && "truncate")}>{e.message}</p>
+              <p className={cx("break-words text-sm", compact && "line-clamp-2")}>{e.message}</p>
               <p className="mt-0.5 text-xs text-neutral-500">
                 {ago(e.created_at)}
                 {!compact && name(e.device_id) && (

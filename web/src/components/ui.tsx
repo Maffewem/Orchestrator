@@ -27,7 +27,7 @@ export function Button({
       disabled={props.disabled || loading}
       className={cx(
         "inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-        size === "md" ? "h-9 px-3.5 text-sm" : "h-7 px-2.5 text-xs",
+        size === "md" ? "h-11 px-3.5 text-sm sm:h-9" : "h-11 min-w-11 px-3 text-sm sm:h-7 sm:min-w-0 sm:px-2.5 sm:text-xs",
         variant === "primary" && "bg-primary text-white hover:bg-primary-hover",
         variant === "secondary" && "border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100",
         variant === "danger" && "border border-red-200 bg-white text-bad hover:bg-red-50",
@@ -97,7 +97,7 @@ export function Tabs({ items }: { items: { to: string; label: string; end?: bool
           end={t.end}
           className={({ isActive }) =>
             cx(
-              "rounded-lg px-3.5 py-1.5 text-sm whitespace-nowrap transition-colors",
+              "rounded-lg px-3.5 py-2.5 text-sm whitespace-nowrap transition-colors sm:py-1.5",
               isActive
                 ? "border border-neutral-200 bg-white font-medium text-neutral-900 shadow-sm"
                 : "border border-transparent text-neutral-600 hover:text-neutral-900",
@@ -285,7 +285,7 @@ export function CopyButton({ text, label = "Copy" }: { text: string; label?: str
 export function CodeBlock({ code }: { code: string }) {
   return (
     <div className="relative">
-      <pre className="rounded-lg bg-neutral-900 p-4 pr-20 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap text-neutral-100">{code}</pre>
+      <pre className="code-surface rounded-lg p-4 pr-20 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap">{code}</pre>
       <div className="absolute top-2 right-2">
         <CopyButton text={code} />
       </div>
@@ -342,14 +342,14 @@ export function LineChart({
   );
 }
 
-export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
+export function Table({ head, children, compact }: { head: ReactNode[]; children: ReactNode; compact?: boolean }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+      <table className={cx("w-full text-left text-sm", compact && "[&_td]:!py-1.5")}>
         <thead>
           <tr className="border-b border-neutral-200 text-xs text-neutral-500">
             {head.map((h, i) => (
-              <th key={i} className="px-5 py-2.5 font-medium whitespace-nowrap">
+              <th key={i} className="px-3 py-2.5 sm:px-5 font-medium whitespace-nowrap">
                 {h}
               </th>
             ))}
@@ -362,7 +362,7 @@ export function Table({ head, children }: { head: ReactNode[]; children: ReactNo
 }
 
 export function Td({ children, className }: { children?: ReactNode; className?: string }) {
-  return <td className={cx("px-5 py-3 align-middle", className)}>{children}</td>;
+  return <td className={cx("px-3 py-3 align-middle sm:px-5", className)}>{children}</td>;
 }
 
 /** Cloudflare-style on/off switch. */

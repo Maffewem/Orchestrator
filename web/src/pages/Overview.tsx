@@ -70,6 +70,7 @@ export default function OverviewPage() {
                       <Meter label="Memory" value={pct(d.metrics.memory_used, d.metrics.memory_total)} />
                       <Meter label="Disk" value={pct(d.metrics.disk_used, d.metrics.disk_total)} />
                     </div>
+                    <CpuSpark id={d.id} />
                     <p className="mt-3 flex items-center gap-1.5 text-xs text-neutral-500">
                       <Boxes className="size-3.5" />
                       {d.containers.filter((c) => c.state === "running").length} of {d.containers.length} containers running
@@ -100,7 +101,7 @@ export default function OverviewPage() {
             </Card>
           </Section>
         </div>
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <Section title="Activity" action={<Link to="/activity" className="text-sm text-primary hover:underline">View all</Link>}>
             <Card>
               <EventList events={o.recent_events} devices={devices.data} compact />
@@ -109,5 +110,19 @@ export default function OverviewPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/** Recent CPU history for a device card, so a busy device stands out before it raises an alert. */
+function CpuSpark({ id }: { id: string }) {
+  const { data } = usePoll(() => api.deviceMetrics(id).catch(() => []), 60000, [id]);
+  const v = (data ?? []).slice(-30).map((m) => m.cpu);
+  if (v.length < 2) return null;
+  const max = Math.max(20, ...v);
+  const pts = v.map((x, i) => `${(i / (v.length - 1)) * 100},${22 - (x / max) * 20}`).join(" ");
+  return (
+    <svg viewBox="0 0 100 24" preserveAspectRatio="none" className="mt-3 h-6 w-full" role="img" aria-label="CPU over the last samples">
+      <polyline points={pts} fill="none" stroke="var(--color-primary)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+    </svg>
   );
 }

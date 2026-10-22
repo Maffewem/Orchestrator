@@ -79,11 +79,19 @@ export default function ContainersPage() {
       />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <input className={`${inputClass} max-w-xs`} placeholder="Filter by name, image, device or IP" value={q} onChange={(e) => setQ(e.target.value)} />
-        <select className={inputClass.replace("w-full", "w-auto")} value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="all">All states</option>
-          <option value="running">Running</option>
-          <option value="stopped">Stopped</option>
-        </select>
+        {(["all", "running", "stopped"] as const).map((k) => {
+          const n = (data ?? []).filter((c) => k === "all" || (k === "running" ? c.state === "running" : c.state !== "running")).length;
+          return (
+            <button
+              key={k}
+              aria-pressed={state === k}
+              onClick={() => setState(k)}
+              className={`h-9 rounded-full border px-3.5 text-sm capitalize ${state === k ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100"}`}
+            >
+              {k} <span className="opacity-60">{data ? n : ""}</span>
+            </button>
+          );
+        })}
         <label className="ml-1 flex items-center gap-2 text-sm text-neutral-700">
           <input type="checkbox" className="size-4 accent-primary" checked={group} onChange={(e) => setGroup(e.target.checked)} />
           Group by stack

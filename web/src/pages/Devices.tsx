@@ -1,3 +1,4 @@
+import { useCan } from "../components/auth";
 import { useState } from "react";
 import { Link } from "react-router";
 import { Plus, Server } from "lucide-react";
@@ -59,6 +60,7 @@ export default function DevicesPage() {
   useCrumbs([{ label: "Devices" }]);
   const { data } = usePoll(api.devices, 5000);
   const [adding, setAdding] = useState(false);
+  const isAdmin = useCan("admin");
 
   return (
     <>
@@ -66,9 +68,11 @@ export default function DevicesPage() {
         title="Devices"
         description="Raspberry Pis, VMs and servers running the Orchestrator agent."
         actions={
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>
-            Add device
-          </Button>
+          isAdmin && (
+            <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding(true)}>
+              Add device
+            </Button>
+          )
         }
       />
       {adding && <AddDeviceModal onClose={() => setAdding(false)} />}

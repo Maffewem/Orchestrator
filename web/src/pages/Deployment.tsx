@@ -211,9 +211,9 @@ function Timeline({ steps }: { steps: Step[] }) {
   const known = times.filter(Boolean);
   const avg = known.length ? known.reduce((a, b) => a + b, 0) / known.length : 1000;
   return (
-    <div className="flex gap-1.5 overflow-x-auto px-4 py-5 sm:px-8">
+    <div className="grid grid-cols-2 gap-2 px-4 py-5 sm:flex sm:gap-1.5 sm:overflow-x-auto sm:px-8">
       {steps.map((s, i) => (
-        <div key={s.index} className="min-w-28" style={{ flexGrow: times[i] || avg * 0.6, flexBasis: 0 }}>
+        <div key={s.index} className="min-w-0 sm:min-w-28" style={{ flexGrow: times[i] || avg * 0.6, flexBasis: 0 }}>
           <p className={cx("mb-1.5 truncate text-sm", s.status === "pending" || s.status === "skipped" ? "text-neutral-400" : "text-neutral-700")}>{s.name}</p>
           <div
             className={cx(

@@ -1,3 +1,4 @@
+import { useCan } from "../components/auth";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { GitBranch, Github, Package, Plus, Rocket } from "lucide-react";
@@ -80,6 +81,7 @@ export default function ProjectsPage() {
   const { data } = usePoll(api.projects, 5000);
   const fleet = usePoll(api.containers, 5000);
   const [error, setError] = useState<string | null>(null);
+  const canOperate = useCan("operator");
 
   return (
     <>
@@ -87,9 +89,11 @@ export default function ProjectsPage() {
         title="Projects"
         description="Services deployed to your devices from GitHub or a container registry."
         actions={
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => nav("/projects/new")}>
-            Create project
-          </Button>
+          canOperate && (
+            <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => nav("/projects/new")}>
+              Create project
+            </Button>
+          )
         }
       />
       {error && <p className="mb-3 text-sm text-bad">{error}</p>}
@@ -99,11 +103,13 @@ export default function ProjectsPage() {
         <Card>
           <Empty icon={<Rocket className="size-8" />} title="Deploy your first project">
             Connect a GitHub repository with a Dockerfile, or run any image, on one of your devices.
-            <div className="mt-4">
-              <Button variant="primary" onClick={() => nav("/projects/new")}>
-                Create project
-              </Button>
-            </div>
+            {canOperate && (
+              <div className="mt-4">
+                <Button variant="primary" onClick={() => nav("/projects/new")}>
+                  Create project
+                </Button>
+              </div>
+            )}
           </Empty>
         </Card>
       ) : (

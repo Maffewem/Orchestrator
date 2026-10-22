@@ -50,6 +50,13 @@ const navGroups: { title?: string; items: NavItem[] }[] = [
   },
 ];
 
+const tabBar: NavItem[] = [
+  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
+  { to: "/projects", label: "Projects", icon: Rocket },
+  { to: "/containers", label: "Workers", icon: Boxes },
+  { to: "/devices", label: "Devices", icon: Server },
+];
+
 export function Logo() {
   return (
     <span className="flex items-center gap-2 font-semibold tracking-tight">
@@ -150,11 +157,31 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             </button>
             <Breadcrumbs crumbs={crumbs} />
           </header>
-          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-8 sm:py-8">
+          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
             <Outlet />
           </main>
         </div>
       </div>
+      <nav
+        aria-label="Main"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+      >
+        {tabBar.map(({ to, label, icon: Icon, end }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            className={({ isActive }) => cx("flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px]", isActive ? "font-medium text-primary" : "text-neutral-500")}
+          >
+            <Icon className="size-5" />
+            {label}
+          </NavLink>
+        ))}
+        <button onClick={() => setOpen(true)} className="flex min-h-14 flex-col items-center justify-center gap-0.5 text-[11px] text-neutral-500">
+          <Menu className="size-5" />
+          More
+        </button>
+      </nav>
       {pw && <ChangePassword onClose={() => setPw(false)} />}
     </CrumbContext.Provider>
   );

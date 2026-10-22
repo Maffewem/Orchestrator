@@ -27,7 +27,7 @@ export function Button({
       disabled={props.disabled || loading}
       className={cx(
         "inline-flex items-center justify-center gap-2 rounded-lg font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-        size === "md" ? "h-9 px-3.5 text-sm" : "h-7 px-2.5 text-xs",
+        size === "md" ? "h-11 px-3.5 text-sm sm:h-9" : "h-11 min-w-11 px-3 text-sm sm:h-7 sm:min-w-0 sm:px-2.5 sm:text-xs",
         variant === "primary" && "bg-primary text-white hover:bg-primary-hover",
         variant === "secondary" && "border border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-100",
         variant === "danger" && "border border-red-200 bg-white text-bad hover:bg-red-50",
@@ -97,7 +97,7 @@ export function Tabs({ items }: { items: { to: string; label: string; end?: bool
           end={t.end}
           className={({ isActive }) =>
             cx(
-              "rounded-lg px-3.5 py-1.5 text-sm whitespace-nowrap transition-colors",
+              "rounded-lg px-3.5 py-2.5 text-sm whitespace-nowrap transition-colors sm:py-1.5",
               isActive
                 ? "border border-neutral-200 bg-white font-medium text-neutral-900 shadow-sm"
                 : "border border-transparent text-neutral-600 hover:text-neutral-900",

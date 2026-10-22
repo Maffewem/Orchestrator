@@ -100,7 +100,7 @@ export default function OverviewPage() {
             </Card>
           </Section>
         </div>
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <Section title="Activity" action={<Link to="/activity" className="text-sm text-primary hover:underline">View all</Link>}>
             <Card>
               <EventList events={o.recent_events} devices={devices.data} compact />

@@ -147,7 +147,7 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
   ];
   return (
     <Card>
-      <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-4 sm:px-5">
         {url && (
           <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-medium underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900">
             <Globe className="size-4 text-neutral-500" />
@@ -170,7 +170,7 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
         ) : (
           <>
             <span className="rounded-full border border-neutral-200 px-2.5 py-0.5 font-mono text-sm">{d.spec.image}</span>
-            <span className="min-w-0 flex-1 truncate">Deploy {d.spec.image}</span>
+            <span className="min-w-0 flex-1 basis-full truncate sm:basis-0">Deploy {d.spec.image}</span>
             <span className="text-sm text-neutral-500">
               {d.trigger} · {ago(d.created_at)}
             </span>
@@ -271,7 +271,7 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
           <p className="pt-2 text-neutral-500">{d.status === "queued" ? "Waiting for the device to pick up this deployment…" : "No output yet."}</p>
         ) : (
           lines.map((l, i) => (
-            <div key={i} className={cx("flex gap-6 whitespace-pre", /^(Error|Rollback failed)/.test(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
+            <div key={i} className={cx("flex gap-3 whitespace-pre-wrap break-all sm:gap-6 sm:whitespace-pre sm:break-normal", /^(Error|Rollback failed)/.test(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>
               <span className="shrink-0 text-neutral-500 select-none">{clock(l.time)}</span>
               <span>{l.text}</span>
             </div>

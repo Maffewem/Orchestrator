@@ -108,8 +108,11 @@ func (s *Server) httpsRedirect(next http.Handler) http.Handler {
 		exempt := strings.HasPrefix(p, "/api/agent/") || strings.HasPrefix(p, "/api/github/") ||
 			strings.HasPrefix(p, "/downloads/") || p == "/install.sh" || p == "/api/health"
 		if !exempt && !requestIsHTTPS(r) && s.forceHTTPS(r.Context()) {
-			http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusMovedPermanently)
+			http.Redirect(w, r, s.redirectTarget(r), http.StatusMovedPermanently)
 			return
+		}
+		if r.TLS != nil && s.hstsEnabled() {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
 		}
 		next.ServeHTTP(w, r)
 	})

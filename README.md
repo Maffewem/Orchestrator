@@ -302,6 +302,24 @@ a retention count, be downloaded, deleted, or restored. A restore stages the dat
 Docker's `--restart unless-stopped` brings the server back on it, keeping the old database as
 `<db>.pre-restore`. Worker data is not included; use the Backups page for that.
 
+Server backups can also be copied to destinations: an S3 compatible bucket (AWS, R2, B2, MinIO),
+a folder on the server (bind-mount a NAS share there), or a folder on another device. Folders and
+devices keep the same number of copies as the local retention; expire S3 objects with a bucket
+lifecycle rule.
+
+## Sign-in and HTTPS
+
+- **Sign-in security** sets the session lifetime, the minimum password length and an HTTP to
+  HTTPS redirect for browsers (agents, webhooks and the installer are never redirected).
+- **Single sign-on** supports GitHub (restricted to listed organisations) and OpenID Connect,
+  which covers Cloudflare Access (Zero Trust > Access > Applications > SaaS > OIDC), Google,
+  Authentik, Keycloak and Entra. New users can start pending approval. Roles can follow a group
+  claim. Existing password accounts are never claimed by name. The admin token always works.
+- **Dashboard HTTPS** serves the dashboard on a second port (default `:8443`) with an uploaded
+  certificate or an automatic Let's Encrypt one (TLS-ALPN-01, so internet port 443 must reach it;
+  for example `-p 443:8443`). It applies without a restart. Leave it off when you run your own
+  proxy or tunnel.
+
 ## Security notes
 
 - Dashboard accounts have roles (viewer, operator, admin); the API enforces them per route.

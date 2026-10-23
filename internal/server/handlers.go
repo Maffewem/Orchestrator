@@ -513,6 +513,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"ssl_mode":                   s.sslMode(r.Context()),
 		"security":                   s.securityView(r.Context()),
 		"sso":                        s.ssoView(r.Context()),
+		"https":                      s.httpsView(r.Context()),
 		"github": map[string]any{
 			"connected":      s.githubToken(r.Context()) != "",
 			"webhook_path":   "/api/github/webhook",

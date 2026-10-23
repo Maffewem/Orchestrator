@@ -69,6 +69,7 @@ type Server struct {
 	previewMu    sync.Mutex
 	streams      *streamHub
 	sso          ssoState
+	https        httpsState
 	ssoGitHubURL string            // overrides https://github.com in tests
 	polled       map[string]string // project ID -> last commit SHA the poller acted on
 }
@@ -135,6 +136,7 @@ func (s *Server) Run(ctx context.Context) {
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
+	s.startHTTPS(ctx)
 	go s.afterBoot(ctx)
 	t := time.NewTicker(s.cfg.HeartbeatInterval)
 	defer t.Stop()
@@ -262,6 +264,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/sso", s.handleSetSSO)
+	admin("PUT /api/settings/https", s.handleSetHTTPS)
 	admin("GET /api/server-backups", s.handleListServerBackups)
 	admin("POST /api/server-backups", s.handleCreateServerBackup)
 	admin("PUT /api/server-backups/destinations", s.handleSetBackupDests)

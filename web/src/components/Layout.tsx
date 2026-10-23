@@ -26,6 +26,7 @@ type NavItem = { to: string; label: string; icon: typeof Server; end?: boolean; 
 const settingsSections = [
   ["appearance", "Appearance"],
   ["security", "Sign-in security"],
+  ["https", "Dashboard HTTPS"],
   ["sso", "Single sign-on"],
   ["github", "GitHub"],
   ["cloudflare", "Cloudflare"],

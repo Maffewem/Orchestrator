@@ -1,12 +1,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Archive, Cloud, ShieldCheck, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
+import { Archive, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
 import { api, type Settings } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
 import { copyText } from "../clipboard";
 import { getTheme, setTheme, type ThemeChoice } from "../theme";
+import { HTTPSSettings } from "../components/HTTPSSettings";
+import { SSOSettings } from "../components/SSOSettings";
+import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
 
 export default function SettingsPage() {
@@ -93,11 +96,14 @@ export default function SettingsPage() {
   const keywords: Record<string, string> = {
     appearance: "appearance theme dark light",
     security: "security session lifetime password length https redirect",
+    https: "https tls certificate lets encrypt dashboard hsts",
+    sso: "sso single sign-on oidc cloudflare access google github login",
     github: "github token webhook repositories",
     cloudflare: "cloudflare dns token zone",
     ssl: "ssl https certificates caddy",
     domains: "domains base domain wildcard",
     backups: "backup password encrypt",
+    serverbackup: "server backup restore database schedule download",
     join: "join token devices register",
   };
   const vis = (id: string) => !find.trim() || keywords[id].includes(find.trim().toLowerCase());
@@ -135,6 +141,36 @@ export default function SettingsPage() {
             action={<Badge tone="ok">{s.security.session_hours >= 24 ? `${Math.round(s.security.session_hours / 24)} day sessions` : `${s.security.session_hours} hour sessions`}</Badge>}
           >
             <SecuritySettings value={s.security} onSaved={() => settings.reload()} />
+          </Collapsible>
+        )}
+        {vis("https") && (
+          <Collapsible
+            id="https"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <Lock className="size-4" /> Dashboard HTTPS
+              </span>
+            }
+            subtitle="A certificate for this dashboard, uploaded or issued automatically."
+            action={s.https.listening ? <Badge tone="ok">{s.https.mode === "auto" ? "Automatic" : "Uploaded cert"}</Badge> : <Badge>Plain HTTP</Badge>}
+          >
+            <HTTPSSettings value={s.https} onSaved={() => settings.reload()} />
+          </Collapsible>
+        )}
+        {vis("sso") && (
+          <Collapsible
+            id="sso"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <KeyRound className="size-4" /> Single sign-on
+              </span>
+            }
+            subtitle="Let people sign in with GitHub, Cloudflare Access or another OpenID Connect provider."
+            action={s.sso.github.enabled || s.sso.oidc.enabled ? <Badge tone="ok">On</Badge> : <Badge>Off</Badge>}
+          >
+            <SSOSettings value={s.sso} onSaved={() => settings.reload()} />
           </Collapsible>
         )}
         {vis("github") && (
@@ -365,6 +401,20 @@ export default function SettingsPage() {
             </Help>
           </div>
         </Collapsible>
+        )}
+        {vis("serverbackup") && (
+          <Collapsible
+            id="serverbackup"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <Database className="size-4" /> Server backup
+              </span>
+            }
+            subtitle="Back up Orchestrator itself: users, projects, settings and history."
+          >
+            <ServerBackupsPanel />
+          </Collapsible>
         )}
         {vis("join") && (
         <Collapsible

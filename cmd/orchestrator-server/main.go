@@ -51,6 +51,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if restored, err := store.ApplyPendingRestore(*dbPath); err != nil {
+		log.Error("apply restored database", "err", err)
+		os.Exit(1)
+	} else if restored {
+		log.Info("restored database from a server backup; the previous one is kept as .pre-restore")
+	}
 	st, err := store.Open(*dbPath)
 	if err != nil {
 		log.Error("open database", "err", err)
@@ -67,6 +73,8 @@ func main() {
 		DownloadsDir:      *downloads,
 		PollInterval:      pollInterval(*poll),
 		BackupDir:         backupDir(*backups, *dbPath),
+		DBPath:            *dbPath,
+		Restart:           stop,
 		DockerHost:        env("DOCKER_HOST", ""),
 	})
 	if err != nil {

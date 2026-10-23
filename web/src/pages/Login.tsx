@@ -13,6 +13,19 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [sso, setSso] = useState<{ providers: { id: string; name: string }[]; hide_password: boolean }>({ providers: [], hide_password: false });
+
+  useEffect(() => {
+    // Back from a single sign-on provider: swap the one-time code for a session, or show why not.
+    const q = new URLSearchParams(window.location.search);
+    const code = q.get("sso");
+    const err = q.get("sso_error");
+    if (code || err) window.history.replaceState(null, "", window.location.pathname);
+    if (err) setError(err);
+    if (code) api.ssoExchange(code).then((r) => onLogin(r.token), (e) => setError(e instanceof Error ? e.message : String(e)));
+    api.ssoProviders().then(setSso, () => undefined);
+  }, [onLogin]);
+
   useEffect(() => {
     api.authStatus().then((s) => setSetup(s.setup_required), () => setSetup(false));
   }, []);
@@ -73,16 +86,26 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
           run(async () => done(await api.login(username, password)));
         }}
       >
+        <div className={sso.hide_password ? "hidden" : "space-y-4"}>
         <Field label="Username">
           <input className={inputClass} autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
         </Field>
         <Field label="Password">
           <input className={inputClass} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
+        </div>
         {error && <ErrorNote>{error}</ErrorNote>}
+        <div className={sso.hide_password ? "hidden" : ""}>
         <Button variant="primary" className="w-full" loading={busy} disabled={!username || !password}>
           Sign in
         </Button>
+        </div>
+        {sso.providers.length > 0 && !sso.hide_password && <p className="text-center text-xs text-neutral-400">or</p>}
+        {sso.providers.map((p) => (
+          <a key={p.id} href={`/api/auth/sso/${p.id}/start`} className="flex h-11 w-full items-center justify-center rounded-lg border border-neutral-300 bg-white text-sm font-medium text-neutral-800 hover:bg-neutral-100 sm:h-9">
+            Sign in with {p.name}
+          </a>
+        ))}
         <button type="button" className="w-full text-center text-sm text-neutral-500 hover:text-neutral-900" onClick={() => { setMode("token"); setError(null); }}>
           Use the admin token instead
         </button>

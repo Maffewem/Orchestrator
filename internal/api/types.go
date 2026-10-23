@@ -31,13 +31,14 @@ type HostInfo struct {
 
 // Agent capabilities.
 const (
-	CapBackup   = "backup"    // container.backup and container.restore
-	CapUpdate   = "update"    // agent.update
-	CapProxy    = "proxy"     // proxy.sync
-	CapProxyDNS = "proxy-dns" // proxy.sync with a Cloudflare token (DNS challenge)
-	CapPreview  = "preview"   // container.remove
-	CapStream   = "stream"    // live log following and container shells
-	CapInspect  = "inspect"   // container.inspect, used to adopt existing containers
+	CapBackup    = "backup"    // container.backup and container.restore
+	CapUpdate    = "update"    // agent.update
+	CapProxy     = "proxy"     // proxy.sync
+	CapProxyDNS  = "proxy-dns" // proxy.sync with a Cloudflare token (DNS challenge)
+	CapPreview   = "preview"   // container.remove
+	CapStream    = "stream"    // live log following and container shells
+	CapInspect   = "inspect"   // container.inspect, used to adopt existing containers
+	CapFileStore = "filestore" // file.store, receives server backups
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -130,6 +131,8 @@ const (
 	// ActionInspect reads a container's configuration and returns a ContainerSpec as JSON in the output.
 	// It never changes the container.
 	ActionInspect = "container.inspect"
+	// ActionFileStore downloads the server backup Args["name"] into the folder Args["dir"], keeping the newest Args["keep"].
+	ActionFileStore = "file.store"
 )
 
 // ContainerSpec is a running container's configuration, translated into what a DeploySpec can

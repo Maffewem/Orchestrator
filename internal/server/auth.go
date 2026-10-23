@@ -129,10 +129,12 @@ func routeRole(pattern string) string {
 		"DELETE /api/projects/{id}/domains/{did}":            true,
 	}
 	adminGets := map[string]bool{
-		"GET /api/settings":      true,
-		"GET /api/users":         true,
-		"GET /api/system/update": true,
-		"GET /api/github/repos":  true,
+		"GET /api/settings":                       true,
+		"GET /api/users":                          true,
+		"GET /api/system/update":                  true,
+		"GET /api/github/repos":                   true,
+		"GET /api/server-backups":                 true,
+		"GET /api/server-backups/{name}/download": true,
 	}
 	switch {
 	case pattern == "POST /api/auth/logout" || pattern == "POST /api/auth/password":

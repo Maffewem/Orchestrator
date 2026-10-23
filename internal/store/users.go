@@ -172,3 +172,38 @@ func (s *Store) PurgeSessions(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= ?`, time.Now().Unix())
 	return err
 }
+
+// --- single sign-on ---
+
+// NoPassword marks an account that can only sign in through single sign-on.
+const NoPassword = "sso-only"
+
+// UserByExternal finds the account linked to an identity such as "github:12345".
+func (s *Store) UserByExternal(ctx context.Context, external string) (*User, error) {
+	u, err := scanUser(s.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE external = ? AND external != ''`, external))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return u, err
+}
+
+// LinkExternal ties an existing account to an identity from a sign-in provider.
+func (s *Store) LinkExternal(ctx context.Context, id, external string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE users SET external = ? WHERE id = ?`, external, id)
+	return err
+}
+
+// CreateExternalUser adds an account created by a first single sign-on login.
+func (s *Store) CreateExternalUser(ctx context.Context, username, role, external string, disabled bool) (*User, error) {
+	u := &User{ID: newID("usr_"), Username: username, Role: role, Disabled: disabled, PasswordHash: NoPassword, CreatedAt: time.Now().UTC().Truncate(time.Second)}
+	dis := 0
+	if disabled {
+		dis = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO users(id, username, role, disabled, created_at, password_hash, external) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Username, u.Role, dis, u.CreatedAt.Unix(), u.PasswordHash, external)
+	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
+		return nil, ErrConflict
+	}
+	return u, err
+}

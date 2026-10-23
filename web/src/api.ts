@@ -323,6 +323,8 @@ export interface Settings {
   backup_password_set: boolean;
   cloudflare: { connected: boolean; proxied: boolean };
   ssl_mode: "http" | "dns";
+  sso: SSOView;
+  https: HTTPSView;
   security: { session_hours: number; min_password: number; force_https: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
@@ -499,7 +501,108 @@ export interface BackupPolicy {
   last_run?: string;
 }
 
+export interface ServerBackupPolicy {
+  mode: "off" | "daily" | "weekly";
+  time: string;
+  weekday: number;
+  tz: string;
+  keep: number;
+}
+export interface ServerBackup {
+  name: string;
+  size: number;
+  encrypted: boolean;
+  created_at: string;
+}
+export interface SSOConfig {
+  github: { enabled: boolean; client_id: string; client_secret?: string; orgs: string[]; default_role: string };
+  oidc: { enabled: boolean; name: string; issuer: string; client_id: string; client_secret?: string; domains: string[]; default_role: string; group_claim: string; admin_group: string; operator_group: string };
+  hide_password: boolean;
+}
+export type SSOView = SSOConfig & { github_secret_set: boolean; oidc_secret_set: boolean };
+
+export interface HTTPSView {
+  mode: "off" | "upload" | "auto";
+  host: string;
+  addr: string;
+  hsts: boolean;
+  listening: boolean;
+  error?: string;
+  cert_set: boolean;
+  subject?: string;
+  expires?: string;
+}
+
+export interface BackupDest {
+  id: string;
+  kind: "s3" | "folder" | "device";
+  name: string;
+  enabled: boolean;
+  endpoint?: string;
+  region?: string;
+  bucket?: string;
+  prefix?: string;
+  access_key?: string;
+  secret_key?: string;
+  secret_set?: boolean;
+  path?: string;
+  device_id?: string;
+  last_at?: string;
+  last_error?: string;
+}
+export interface ServerBackups {
+  destinations: BackupDest[];
+  policy: ServerBackupPolicy;
+  next_run?: string;
+  backups: ServerBackup[];
+  password_set: boolean;
+  dir: string;
+}
+
+/** Downloads a server backup exactly as stored (protected ones stay protected). */
+async function downloadServerBackup(name: string) {
+  const res = await fetch(`/api/server-backups/${encodeURIComponent(name)}/download`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (!res.ok) throw new ApiError(res.status, "Could not download the backup");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Restores the server from an uploaded backup file. */
+async function restoreServerUpload(file: File, encrypted: boolean) {
+  const res = await fetch(`/api/server-backups/restore${encrypted ? "?encrypted=1" : ""}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+    body: file,
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, msg);
+  }
+}
+
 export const api = {
+  setBackupDests: (d: BackupDest[]) => request<ServerBackups>("PUT", "/api/server-backups/destinations", d),
+  testBackupDest: (id: string) => request<{ status: string }>("POST", `/api/server-backups/destinations/${encodeURIComponent(id)}/test`),
+  ssoProviders: () => request<{ providers: { id: string; name: string }[]; hide_password: boolean }>("GET", "/api/auth/sso/providers", undefined, null),
+  ssoExchange: (code: string) => request<LoginResult>("POST", "/api/auth/sso/exchange", { code }, null),
+  setSSO: (c: SSOConfig) => request<SSOView>("PUT", "/api/settings/sso", c),
+  setHTTPS: (b: { mode: string; host: string; addr: string; hsts: boolean; cert_pem?: string; key_pem?: string }) => request<HTTPSView>("PUT", "/api/settings/https", b),
+  serverBackups: () => request<ServerBackups>("GET", "/api/server-backups"),
+  createServerBackup: () => request<ServerBackup>("POST", "/api/server-backups"),
+  setServerBackupPolicy: (p: ServerBackupPolicy) => request<ServerBackups>("PUT", "/api/server-backups/policy", p),
+  deleteServerBackup: (name: string) => request<void>("DELETE", `/api/server-backups/${encodeURIComponent(name)}`),
+  restoreServerBackup: (name: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/restore`),
+  downloadServerBackup,
+  restoreServerUpload,
   backupPolicy: (deviceId: string, name: string) =>
     request<BackupPolicy>("GET", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/backup-policy`),
   setBackupPolicy: (deviceId: string, name: string, p: Omit<BackupPolicy, "next_run" | "last_run">) =>

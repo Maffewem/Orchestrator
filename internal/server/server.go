@@ -43,6 +43,10 @@ type Config struct {
 	PollInterval time.Duration
 	// BackupDir holds container backup archives.
 	BackupDir string
+	// DBPath and Restart let a server backup be restored: the database is swapped in at
+	// the next start, so the process must be restarted by whatever supervises it.
+	DBPath  string
+	Restart func()
 	// DockerHost is the engine used for self-updates (default: the local socket).
 	DockerHost string
 }
@@ -62,9 +66,12 @@ type Server struct {
 
 	pollMu sync.Mutex
 	// previewMu serialises preview syncs so a webhook and the poller can't race.
-	previewMu sync.Mutex
-	streams   *streamHub
-	polled    map[string]string // project ID -> last commit SHA the poller acted on
+	previewMu    sync.Mutex
+	streams      *streamHub
+	sso          ssoState
+	https        httpsState
+	ssoGitHubURL string            // overrides https://github.com in tests
+	polled       map[string]string // project ID -> last commit SHA the poller acted on
 }
 
 // New prepares the server. It returns a freshly generated admin token when one had to be
@@ -129,6 +136,7 @@ func (s *Server) Run(ctx context.Context) {
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
+	s.startHTTPS(ctx)
 	go s.afterBoot(ctx)
 	t := time.NewTicker(s.cfg.HeartbeatInterval)
 	defer t.Stop()
@@ -178,6 +186,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/agent/streams", s.agentAuth(s.handleAgentStreamPoll))
 	mux.Handle("POST /api/agent/streams/{id}/output", s.agentAuth(s.handleAgentStreamOutput))
 	mux.Handle("GET /api/agent/streams/{id}/input", s.agentAuth(s.handleAgentStreamInput))
+	mux.Handle("GET /api/agent/server-backups/{name}", s.agentAuth(s.handleAgentServerBackup))
 	mux.Handle("GET /api/agent/update", s.agentAuth(s.handleAgentUpdateInfo))
 
 	// GitHub push webhooks, authenticated by their HMAC signature.
@@ -188,6 +197,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/setup", s.handleSetup)
+	mux.HandleFunc("GET /api/auth/sso/providers", s.handleSSOProviders)
+	mux.HandleFunc("GET /api/auth/sso/{provider}/start", s.handleSSOStart)
+	mux.HandleFunc("GET /api/auth/sso/{provider}/callback", s.handleSSOCallback)
+	mux.HandleFunc("POST /api/auth/sso/exchange", s.handleSSOExchange)
 	mux.HandleFunc("/api/gate/verify", s.handleGateVerify)
 	admin("GET /api/auth/me", s.handleMe)
 	admin("POST /api/auth/logout", s.handleLogout)
@@ -250,6 +263,17 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/cloudflare", s.handleSetCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/security", s.handleSetSecurity)
+	admin("PUT /api/settings/sso", s.handleSetSSO)
+	admin("PUT /api/settings/https", s.handleSetHTTPS)
+	admin("GET /api/server-backups", s.handleListServerBackups)
+	admin("POST /api/server-backups", s.handleCreateServerBackup)
+	admin("PUT /api/server-backups/destinations", s.handleSetBackupDests)
+	admin("POST /api/server-backups/destinations/{id}/test", s.handleTestBackupDest)
+	admin("PUT /api/server-backups/policy", s.handleSetServerBackupPolicy)
+	admin("POST /api/server-backups/restore", s.handleRestoreServerUpload)
+	admin("GET /api/server-backups/{name}/download", s.handleDownloadServerBackup)
+	admin("DELETE /api/server-backups/{name}", s.handleDeleteServerBackup)
+	admin("POST /api/server-backups/{name}/restore", s.handleRestoreServerBackup)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 

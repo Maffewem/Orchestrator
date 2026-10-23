@@ -87,17 +87,17 @@ export function ServerBackupsPanel() {
         {v.next_run && v.policy.mode !== "off" && <p className="text-sm text-neutral-500">Next backup {new Date(v.next_run).toLocaleString()}. Stored in <code>{v.dir}</code>.</p>}
       </div>
 
-      <Destinations dests={v.destinations} onChanged={() => list.reload()} />
+      <Destinations dests={v.destinations ?? []} onChanged={() => list.reload()} />
 
       {msg && (msg.ok ? <p className="text-sm text-ok">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
 
       <div className="overflow-x-auto border-t border-neutral-200 pt-4">
-        {v.backups.length === 0 ? (
+        {(v.backups ?? []).length === 0 ? (
           <p className="text-sm text-neutral-500">No server backups yet.</p>
         ) : (
           <table className="w-full text-sm">
             <tbody>
-              {v.backups.map((b) => (
+              {(v.backups ?? []).map((b) => (
                 <tr key={b.name} className="border-b border-neutral-100 last:border-0">
                   <td className="py-2 pr-3 font-mono text-xs">{b.name}</td>
                   <td className="whitespace-nowrap pr-3 text-neutral-500">{bytes(b.size)} · {ago(b.created_at)}</td>

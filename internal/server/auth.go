@@ -108,6 +108,7 @@ func (s *Server) identify(ctx context.Context, tok string) *identity {
 func routeRole(pattern string) string {
 	operator := map[string]bool{
 		"POST /api/devices/{id}/commands":                    true,
+		"GET /api/commands/{id}":                             true,
 		"POST /api/devices/{id}/containers/{cid}/backup":     true,
 		"PUT /api/devices/{id}/workers/{name}/backup-policy": true,
 		"POST /api/backups/{id}/restore":                     true,
@@ -188,6 +189,14 @@ func (l *limiter) fail(key string) {
 	defer l.mu.Unlock()
 	if l.fails == nil {
 		l.fails = map[string]*failure{}
+	}
+	if len(l.fails) > 10000 { // keys include attacker-chosen names: drop the expired ones
+		now := time.Now()
+		for k, v := range l.fails {
+			if now.After(v.until) {
+				delete(l.fails, k)
+			}
+		}
 	}
 	f := l.fails[key]
 	if f == nil {

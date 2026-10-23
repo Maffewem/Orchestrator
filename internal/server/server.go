@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -286,7 +287,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
 	mux.Handle("/", s.uiHandler())
-	return s.httpsRedirect(mux)
+	return securityHeaders(s.httpsRedirect(mux))
 }
 
 type ctxKey int
@@ -350,6 +351,8 @@ func (s *Server) uiHandler() http.Handler {
 	})
 }
 
+var installHostRE = regexp.MustCompile(`^([A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$`)
+
 //go:embed install.sh
 var installScript string
 
@@ -358,6 +361,12 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	scheme := "http"
 	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
+	}
+	// The host lands inside a double-quoted shell string, so anything but a plain host[:port]
+	// (a forged Host header, say) is refused instead of being run by whoever pipes this to sh.
+	if !installHostRE.MatchString(r.Host) {
+		writeError(w, http.StatusBadRequest, "invalid Host header")
+		return
 	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	io.WriteString(w, strings.ReplaceAll(installScript, "{{SERVER}}", scheme+"://"+r.Host))
@@ -385,4 +394,16 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func (s *Server) internal(w http.ResponseWriter, err error) {
 	s.log.Error("request failed", "err", err)
 	writeError(w, http.StatusInternalServerError, "internal error")
+}
+
+// securityHeaders stops the dashboard being framed (clickjacking) or content-sniffed.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
 }

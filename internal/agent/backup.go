@@ -293,6 +293,9 @@ func (a *Agent) restoreBackup(ctx context.Context, containerID, backupID string)
 				done <- perr
 			}()
 		}
+		if !safeEntry(rest) || (h.Typeflag == tar.TypeLink && !safeEntry(strings.TrimPrefix(h.Linkname, "mounts/"+strconv.Itoa(idx)+"/"))) {
+			return finish(fmt.Errorf("backup contains an unsafe path %q", h.Name))
+		}
 		h.Name = rest
 		if h.Typeflag == tar.TypeLink {
 			h.Linkname = strings.TrimPrefix(strings.TrimPrefix(h.Linkname, "mounts/"+strconv.Itoa(idx)+"/"), "/")
@@ -305,4 +308,17 @@ func (a *Agent) restoreBackup(ctx context.Context, containerID, backupID string)
 		}
 	}
 	return finish(nil)
+}
+
+// safeEntry reports whether a tar entry path stays inside the directory it is extracted to.
+func safeEntry(p string) bool {
+	if strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, part := range strings.Split(p, "/") {
+		if part == ".." {
+			return false
+		}
+	}
+	return true
 }

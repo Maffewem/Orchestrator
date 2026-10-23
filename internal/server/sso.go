@@ -182,6 +182,8 @@ type ssoFlow struct {
 	expires                   time.Time
 }
 
+const maxSSOFlows = 5000
+
 type ssoState struct {
 	mu    sync.Mutex
 	flows map[string]ssoFlow
@@ -211,6 +213,9 @@ func (st *ssoState) putFlow(f ssoFlow) string {
 		if now.After(v.expires) {
 			delete(st.flows, k)
 		}
+	}
+	if len(st.flows) >= maxSSOFlows { // sign-in start is public: don't let it grow without bound
+		return ""
 	}
 	id := randString(24)
 	f.expires = now.Add(10 * time.Minute)
@@ -287,7 +292,12 @@ func (s *Server) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 		ssoFail(w, r, "that sign-in method is not enabled")
 		return
 	}
-	q.Set("state", s.sso.putFlow(flow))
+	state := s.sso.putFlow(flow)
+	if state == "" {
+		ssoFail(w, r, "too many sign-ins in progress. Try again in a few minutes")
+		return
+	}
+	q.Set("state", state)
 	sep := "?"
 	if strings.Contains(base, "?") {
 		sep = "&"

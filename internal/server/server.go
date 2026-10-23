@@ -66,9 +66,11 @@ type Server struct {
 
 	pollMu sync.Mutex
 	// previewMu serialises preview syncs so a webhook and the poller can't race.
-	previewMu sync.Mutex
-	streams   *streamHub
-	polled    map[string]string // project ID -> last commit SHA the poller acted on
+	previewMu    sync.Mutex
+	streams      *streamHub
+	sso          ssoState
+	ssoGitHubURL string            // overrides https://github.com in tests
+	polled       map[string]string // project ID -> last commit SHA the poller acted on
 }
 
 // New prepares the server. It returns a freshly generated admin token when one had to be
@@ -193,6 +195,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/setup", s.handleSetup)
+	mux.HandleFunc("GET /api/auth/sso/providers", s.handleSSOProviders)
+	mux.HandleFunc("GET /api/auth/sso/{provider}/start", s.handleSSOStart)
+	mux.HandleFunc("GET /api/auth/sso/{provider}/callback", s.handleSSOCallback)
+	mux.HandleFunc("POST /api/auth/sso/exchange", s.handleSSOExchange)
 	mux.HandleFunc("/api/gate/verify", s.handleGateVerify)
 	admin("GET /api/auth/me", s.handleMe)
 	admin("POST /api/auth/logout", s.handleLogout)
@@ -255,6 +261,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/cloudflare", s.handleSetCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/security", s.handleSetSecurity)
+	admin("PUT /api/settings/sso", s.handleSetSSO)
 	admin("GET /api/server-backups", s.handleListServerBackups)
 	admin("POST /api/server-backups", s.handleCreateServerBackup)
 	admin("PUT /api/server-backups/destinations", s.handleSetBackupDests)

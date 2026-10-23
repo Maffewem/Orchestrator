@@ -7,6 +7,7 @@ import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, 
 import { usePoll } from "../lib";
 import { copyText } from "../clipboard";
 import { getTheme, setTheme, type ThemeChoice } from "../theme";
+import { SSOSettings } from "../components/SSOSettings";
 import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
 
@@ -94,6 +95,7 @@ export default function SettingsPage() {
   const keywords: Record<string, string> = {
     appearance: "appearance theme dark light",
     security: "security session lifetime password length https redirect",
+    sso: "sso single sign-on oidc cloudflare access google github login",
     github: "github token webhook repositories",
     cloudflare: "cloudflare dns token zone",
     ssl: "ssl https certificates caddy",
@@ -137,6 +139,21 @@ export default function SettingsPage() {
             action={<Badge tone="ok">{s.security.session_hours >= 24 ? `${Math.round(s.security.session_hours / 24)} day sessions` : `${s.security.session_hours} hour sessions`}</Badge>}
           >
             <SecuritySettings value={s.security} onSaved={() => settings.reload()} />
+          </Collapsible>
+        )}
+        {vis("sso") && (
+          <Collapsible
+            id="sso"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <KeyRound className="size-4" /> Single sign-on
+              </span>
+            }
+            subtitle="Let people sign in with GitHub, Cloudflare Access or another OpenID Connect provider."
+            action={s.sso.github.enabled || s.sso.oidc.enabled ? <Badge tone="ok">On</Badge> : <Badge>Off</Badge>}
+          >
+            <SSOSettings value={s.sso} onSaved={() => settings.reload()} />
           </Collapsible>
         )}
         {vis("github") && (

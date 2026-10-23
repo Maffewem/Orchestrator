@@ -323,6 +323,7 @@ export interface Settings {
   backup_password_set: boolean;
   cloudflare: { connected: boolean; proxied: boolean };
   ssl_mode: "http" | "dns";
+  sso: SSOView;
   security: { session_hours: number; min_password: number; force_https: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
@@ -512,6 +513,13 @@ export interface ServerBackup {
   encrypted: boolean;
   created_at: string;
 }
+export interface SSOConfig {
+  github: { enabled: boolean; client_id: string; client_secret?: string; orgs: string[]; default_role: string };
+  oidc: { enabled: boolean; name: string; issuer: string; client_id: string; client_secret?: string; domains: string[]; default_role: string; group_claim: string; admin_group: string; operator_group: string };
+  hide_password: boolean;
+}
+export type SSOView = SSOConfig & { github_secret_set: boolean; oidc_secret_set: boolean };
+
 export interface BackupDest {
   id: string;
   kind: "s3" | "folder" | "device";
@@ -571,6 +579,9 @@ async function restoreServerUpload(file: File, encrypted: boolean) {
 export const api = {
   setBackupDests: (d: BackupDest[]) => request<ServerBackups>("PUT", "/api/server-backups/destinations", d),
   testBackupDest: (id: string) => request<{ status: string }>("POST", `/api/server-backups/destinations/${encodeURIComponent(id)}/test`),
+  ssoProviders: () => request<{ providers: { id: string; name: string }[]; hide_password: boolean }>("GET", "/api/auth/sso/providers", undefined, null),
+  ssoExchange: (code: string) => request<LoginResult>("POST", "/api/auth/sso/exchange", { code }, null),
+  setSSO: (c: SSOConfig) => request<SSOView>("PUT", "/api/settings/sso", c),
   serverBackups: () => request<ServerBackups>("GET", "/api/server-backups"),
   createServerBackup: () => request<ServerBackup>("POST", "/api/server-backups"),
   setServerBackupPolicy: (p: ServerBackupPolicy) => request<ServerBackups>("PUT", "/api/server-backups/policy", p),

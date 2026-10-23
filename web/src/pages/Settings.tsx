@@ -8,6 +8,7 @@ import { usePoll } from "../lib";
 import { copyText } from "../clipboard";
 import { getTheme, setTheme, type ThemeChoice } from "../theme";
 import { HTTPSSettings } from "../components/HTTPSSettings";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { SSOSettings } from "../components/SSOSettings";
 import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
@@ -170,7 +171,7 @@ export default function SettingsPage() {
             subtitle="Let people sign in with GitHub, Cloudflare Access or another OpenID Connect provider."
             action={s.sso.github.enabled || s.sso.oidc.enabled ? <Badge tone="ok">On</Badge> : <Badge>Off</Badge>}
           >
-            <SSOSettings value={s.sso} onSaved={() => settings.reload()} />
+            <ErrorBoundary inline><SSOSettings value={s.sso} onSaved={() => settings.reload()} /></ErrorBoundary>
           </Collapsible>
         )}
         {vis("github") && (

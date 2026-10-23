@@ -11,8 +11,15 @@ const presets: Record<string, { name: string; issuer: string; hint: string }> = 
   cloudflare: { name: "Cloudflare Access", issuer: "", hint: "Zero Trust > Access > Applications > Add > SaaS > OIDC. Copy the issuer URL it shows." },
 };
 
+// The server stores empty lists as null, so fill them in before rendering.
+const normalize = (v: SSOView): SSOView => ({
+  ...v,
+  github: { ...v.github, orgs: v.github?.orgs ?? [] },
+  oidc: { ...v.oidc, domains: v.oidc?.domains ?? [] },
+});
+
 export function SSOSettings({ value, onSaved }: { value: SSOView; onSaved: () => void }) {
-  const [c, setC] = useState(value);
+  const [c, setC] = useState(() => normalize(value));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const redirect = (p: string) => `${window.location.origin}/api/auth/sso/${p}/callback`;

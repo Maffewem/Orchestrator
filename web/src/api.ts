@@ -323,6 +323,7 @@ export interface Settings {
   backup_password_set: boolean;
   cloudflare: { connected: boolean; proxied: boolean };
   ssl_mode: "http" | "dns";
+  security: { session_hours: number; min_password: number; force_https: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
   version: string;
@@ -578,6 +579,7 @@ export const api = {
   setCloudflare: (b: { token?: string; proxied?: boolean }) =>
     request<{ connected: boolean; zones?: string[]; proxied?: boolean }>("PUT", "/api/settings/cloudflare", { token: b.token ?? "", proxied: b.proxied }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
+  setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
   projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
   setProjectUrls: (id: string, u: { production: boolean; preview: boolean }) =>

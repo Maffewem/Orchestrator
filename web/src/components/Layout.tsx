@@ -25,6 +25,7 @@ type NavItem = { to: string; label: string; icon: typeof Server; end?: boolean; 
 // Grouped from most-used to least-used: what is running, where it runs, then administration.
 const settingsSections = [
   ["appearance", "Appearance"],
+  ["security", "Sign-in security"],
   ["github", "GitHub"],
   ["cloudflare", "Cloudflare"],
   ["ssl", "SSL"],

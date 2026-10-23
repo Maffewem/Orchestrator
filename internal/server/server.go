@@ -249,6 +249,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/github", s.handleSetGitHub)
 	admin("PUT /api/settings/cloudflare", s.handleSetCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
+	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 
@@ -261,7 +262,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
 	mux.Handle("/", s.uiHandler())
-	return mux
+	return s.httpsRedirect(mux)
 }
 
 type ctxKey int

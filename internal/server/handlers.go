@@ -65,12 +65,18 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	key := "register|" + clientIP(r)
+	if s.logins.locked(key) {
+		writeError(w, http.StatusTooManyRequests, "too many failed attempts; try again in a minute")
+		return
+	}
 	join, err := s.store.GetSetting(r.Context(), settingJoinToken)
 	if err != nil {
 		s.internal(w, err)
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(req.JoinToken), []byte(join)) != 1 {
+	if join == "" || subtle.ConstantTimeCompare([]byte(req.JoinToken), []byte(join)) != 1 {
+		s.logins.fail(key)
 		writeError(w, http.StatusUnauthorized, "invalid join token")
 		return
 	}

@@ -45,6 +45,22 @@ func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView
 	return v, nil
 }
 
+// forRole hides environment values from viewers: they are secrets (tokens, passwords) that
+// only people who can change or deploy the project need to see.
+func forRole(r *http.Request, v ProjectView) ProjectView {
+	if id := identityFrom(r); id != nil && store.RoleRank(id.Role) >= store.RoleRank(store.RoleOperator) {
+		return v
+	}
+	p := *v.Project
+	p.Runtime.Env = make([]string, len(p.Runtime.Env))
+	for i, e := range v.Project.Runtime.Env {
+		k, _, _ := strings.Cut(e, "=")
+		p.Runtime.Env[i] = k + "="
+	}
+	v.Project = &p
+	return v
+}
+
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	projects, err := s.store.ListProjects(r.Context())
 	if err != nil {
@@ -58,7 +74,7 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 			s.internal(w, err)
 			return
 		}
-		out = append(out, v)
+		out = append(out, forRole(r, v))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -76,6 +92,11 @@ var nodeVersionRe = regexp.MustCompile(`^(lts|[0-9]+(\.[0-9]+){0,2})$`)
 func cleanNode(n *api.NodeSpec) error {
 	for _, f := range []*string{&n.Install, &n.Build, &n.Start, &n.Version, &n.Output} {
 		*f = strings.TrimSpace(*f)
+	}
+	for _, f := range []string{n.Install, n.Build, n.Start, n.Output} {
+		if strings.ContainsAny(f, "\n\r\x00") { // these become lines of a generated Dockerfile
+			return errors.New("build commands must be a single line")
+		}
 	}
 	if n.Version != "" && !nodeVersionRe.MatchString(n.Version) {
 		return errors.New("node version should look like 22, 20.11 or lts")
@@ -228,7 +249,7 @@ func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, v)
+	writeJSON(w, http.StatusOK, forRole(r, v))
 }
 
 func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {

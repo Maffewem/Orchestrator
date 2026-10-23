@@ -240,7 +240,20 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
   const [find, setFind] = useState("");
   const [onlyErrors, setOnlyErrors] = useState(false);
   const live = d.status === "queued" || d.status === "running";
-  const [follow, setFollow] = useState(true);
+  const [follow, setFollowState] = useState(() => {
+    try {
+      return localStorage.getItem("orch.autoscroll") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const setFollow = (on: boolean, remember = false) => {
+    setFollowState(on);
+    if (!remember) return;
+    try {
+      localStorage.setItem("orch.autoscroll", on ? "on" : "off");
+    } catch {}
+  };
   const box = useRef<HTMLDivElement>(null);
   const isError = (t: string) => /^(Error|Rollback failed)/.test(t);
   const needle = find.trim().toLowerCase();
@@ -283,15 +296,13 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
         >
           Errors only
         </button>
-        {live && (
-          <button
-            aria-pressed={follow}
-            onClick={() => setFollow(!follow)}
-            className={cx("h-9 rounded-lg border px-3 text-sm shadow-sm", follow ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100")}
-          >
-            Follow tail
-          </button>
-        )}
+        <button
+          aria-pressed={follow}
+          onClick={() => setFollow(!follow, true)}
+          className={cx("h-9 rounded-lg border px-3 text-sm shadow-sm", follow ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 bg-white hover:bg-neutral-100")}
+        >
+          Auto-scroll {follow ? "on" : "off"}
+        </button>
         <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300 bg-white text-sm shadow-sm">
           <button
             className="inline-flex items-center gap-1.5 px-3 py-1.5 hover:bg-neutral-100"

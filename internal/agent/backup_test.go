@@ -128,3 +128,16 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 		t.Fatalf("container running = %s", got)
 	}
 }
+
+func TestSafeEntry(t *testing.T) {
+	for _, bad := range []string{"../etc/passwd", "a/../../b", "/etc/passwd", ".."} {
+		if safeEntry(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	for _, ok := range []string{"data/db.sqlite", "a..b/c", "./x", "dir/"} {
+		if !safeEntry(ok) {
+			t.Errorf("%q refused", ok)
+		}
+	}
+}

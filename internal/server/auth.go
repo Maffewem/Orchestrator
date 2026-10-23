@@ -66,9 +66,9 @@ func checkPassword(pw, encoded string) bool {
 // dummyHash makes a login for an unknown user cost as much as a real one.
 var dummyHash, _ = hashPassword("not-a-real-password")
 
-func validatePassword(pw string) error {
-	if len(pw) < minPassword {
-		return fmt.Errorf("the password must be at least %d characters", minPassword)
+func (s *Server) validatePassword(ctx context.Context, pw string) error {
+	if n := s.minPasswordLen(ctx); len(pw) < n {
+		return fmt.Errorf("the password must be at least %d characters", n)
 	}
 	return nil
 }
@@ -108,6 +108,7 @@ func (s *Server) identify(ctx context.Context, tok string) *identity {
 func routeRole(pattern string) string {
 	operator := map[string]bool{
 		"POST /api/devices/{id}/commands":                    true,
+		"GET /api/commands/{id}":                             true,
 		"POST /api/devices/{id}/containers/{cid}/backup":     true,
 		"PUT /api/devices/{id}/workers/{name}/backup-policy": true,
 		"POST /api/backups/{id}/restore":                     true,
@@ -129,10 +130,12 @@ func routeRole(pattern string) string {
 		"DELETE /api/projects/{id}/domains/{did}":            true,
 	}
 	adminGets := map[string]bool{
-		"GET /api/settings":      true,
-		"GET /api/users":         true,
-		"GET /api/system/update": true,
-		"GET /api/github/repos":  true,
+		"GET /api/settings":                       true,
+		"GET /api/users":                          true,
+		"GET /api/system/update":                  true,
+		"GET /api/github/repos":                   true,
+		"GET /api/server-backups":                 true,
+		"GET /api/server-backups/{name}/download": true,
 	}
 	switch {
 	case pattern == "POST /api/auth/logout" || pattern == "POST /api/auth/password":
@@ -187,6 +190,14 @@ func (l *limiter) fail(key string) {
 	if l.fails == nil {
 		l.fails = map[string]*failure{}
 	}
+	if len(l.fails) > 10000 { // keys include attacker-chosen names: drop the expired ones
+		now := time.Now()
+		for k, v := range l.fails {
+			if now.After(v.until) {
+				delete(l.fails, k)
+			}
+		}
+	}
 	f := l.fails[key]
 	if f == nil {
 		f = &failure{}
@@ -236,7 +247,7 @@ func (s *Server) verifyLogin(ctx context.Context, r *http.Request, scope, name, 
 
 func (s *Server) newSession(ctx context.Context, u *store.User) (string, error) {
 	tok := store.NewToken()
-	if err := s.store.CreateSession(ctx, store.HashToken(tok), u.ID, sessionTTL); err != nil {
+	if err := s.store.CreateSession(ctx, store.HashToken(tok), u.ID, s.sessionLifetime(ctx)); err != nil {
 		return "", err
 	}
 	return tok, nil
@@ -328,7 +339,7 @@ func (s *Server) createUser(ctx context.Context, username, pw, role string) (*st
 	if store.RoleRank(role) == 0 {
 		return nil, http.StatusBadRequest, "role must be viewer, operator or admin"
 	}
-	if err := validatePassword(pw); err != nil {
+	if err := s.validatePassword(ctx, pw); err != nil {
 		return nil, http.StatusBadRequest, err.Error()
 	}
 	hash, err := hashPassword(pw)
@@ -414,7 +425,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		u.Disabled = *req.Disabled
 	}
 	if req.Password != nil {
-		if err := validatePassword(*req.Password); err != nil {
+		if err := s.validatePassword(r.Context(), *req.Password); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -509,7 +520,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		_ = msg
 		return
 	}
-	if err := validatePassword(req.New); err != nil {
+	if err := s.validatePassword(r.Context(), req.New); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -526,6 +537,6 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Other sessions end; this one carries on.
 	keep := store.HashToken(bearer(r))
 	s.store.DeleteUserSessions(r.Context(), u.ID)
-	s.store.CreateSession(r.Context(), keep, u.ID, sessionTTL)
+	s.store.CreateSession(r.Context(), keep, u.ID, s.sessionLifetime(r.Context()))
 	w.WriteHeader(http.StatusNoContent)
 }

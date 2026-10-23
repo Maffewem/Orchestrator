@@ -65,12 +65,18 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	key := "register|" + clientIP(r)
+	if s.logins.locked(key) {
+		writeError(w, http.StatusTooManyRequests, "too many failed attempts; try again in a minute")
+		return
+	}
 	join, err := s.store.GetSetting(r.Context(), settingJoinToken)
 	if err != nil {
 		s.internal(w, err)
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(req.JoinToken), []byte(join)) != 1 {
+	if join == "" || subtle.ConstantTimeCompare([]byte(req.JoinToken), []byte(join)) != 1 {
+		s.logins.fail(key)
 		writeError(w, http.StatusUnauthorized, "invalid join token")
 		return
 	}
@@ -511,6 +517,9 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"backup_password_set":        s.backupPassword(r.Context()) != "",
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),
+		"security":                   s.securityView(r.Context()),
+		"sso":                        s.ssoView(r.Context()),
+		"https":                      s.httpsView(r.Context()),
 		"github": map[string]any{
 			"connected":      s.githubToken(r.Context()) != "",
 			"webhook_path":   "/api/github/webhook",

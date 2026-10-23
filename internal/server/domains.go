@@ -35,6 +35,10 @@ var hostRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2
 
 func validHostname(h string) bool { return len(h) <= 253 && hostRE.MatchString(h) }
 
+// routePathRE is the paths a route may match. They are written into the Caddyfile, so
+// whitespace, quotes, braces and comment characters are all refused.
+var routePathRE = regexp.MustCompile(`^/[A-Za-z0-9._~!$&()*+,;=:@%/-]*$`)
+
 var slugRE = regexp.MustCompile(`[^a-z0-9]+`)
 
 // slug turns a project name into a DNS label.
@@ -244,7 +248,7 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 	kind, path := store.DomainCustom, ""
 	if req.Type == store.DomainRoute {
 		kind, path = store.DomainRoute, strings.TrimSpace(req.Path)
-		if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, " {}\n") {
+		if !routePathRE.MatchString(path) {
 			writeError(w, http.StatusBadRequest, "a route path must start with / , for example /api/*")
 			return
 		}
@@ -423,6 +427,7 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 	if n == 0 && used == "" && !force {
 		return nil // nothing to serve and no proxy to empty
 	}
+	s.syncDNS(ctx, d, hosts) // DNS does not depend on the agent being new enough to run Caddy
 	if !hasCap(d, api.CapProxy) {
 		s.event(ctx, d.ID, "warning", "proxy.sync", errAgentTooOld(d, "domains").Error())
 		return errAgentTooOld(d, "domains")
@@ -432,7 +437,6 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 		return err
 	}
 	s.store.SetSetting(ctx, settingProxyUsed+deviceID, "1")
-	s.syncDNS(ctx, d, hosts)
 	return nil
 }
 

@@ -227,3 +227,29 @@ func TestProtectedWorker(t *testing.T) {
 		t.Fatalf("expected a fail-closed site:\n%s", got)
 	}
 }
+
+func TestSecuritySettings(t *testing.T) {
+	h := newHarness(t)
+	var admin session
+	h.do("POST", "/api/auth/setup", "", map[string]string{"admin_token": adminToken, "username": "matt", "password": "correct horse"}, &admin)
+
+	if code := h.do("PUT", "/api/settings/security", admin.Token, map[string]any{"session_hours": 8, "min_password": 14}, nil); code != http.StatusOK {
+		t.Fatalf("save: %d", code)
+	}
+	if code := h.do("PUT", "/api/settings/security", admin.Token, map[string]any{"session_hours": 0, "min_password": 14}, nil); code != http.StatusBadRequest {
+		t.Fatalf("bad lifetime: %d", code)
+	}
+	if code := h.do("POST", "/api/users", admin.Token, map[string]string{"username": "ops", "password": "only-12-chars", "role": "viewer"}, nil); code != http.StatusBadRequest {
+		t.Fatalf("password shorter than the new minimum: %d", code)
+	}
+	if code := h.do("POST", "/api/users", admin.Token, map[string]string{"username": "ops", "password": "long-enough-pass", "role": "viewer"}, nil); code != http.StatusCreated {
+		t.Fatalf("long password: %d", code)
+	}
+	if got := h.srv.sessionLifetime(t.Context()).Hours(); got != 8 {
+		t.Fatalf("session lifetime = %v hours", got)
+	}
+	// Turning the redirect on from a plain HTTP request is refused.
+	if code := h.do("PUT", "/api/settings/security", admin.Token, map[string]any{"session_hours": 8, "min_password": 14, "force_https": true}, nil); code != http.StatusConflict {
+		t.Fatalf("redirect over http: %d", code)
+	}
+}

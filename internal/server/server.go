@@ -182,6 +182,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/agent/streams", s.agentAuth(s.handleAgentStreamPoll))
 	mux.Handle("POST /api/agent/streams/{id}/output", s.agentAuth(s.handleAgentStreamOutput))
 	mux.Handle("GET /api/agent/streams/{id}/input", s.agentAuth(s.handleAgentStreamInput))
+	mux.Handle("GET /api/agent/server-backups/{name}", s.agentAuth(s.handleAgentServerBackup))
 	mux.Handle("GET /api/agent/update", s.agentAuth(s.handleAgentUpdateInfo))
 
 	// GitHub push webhooks, authenticated by their HMAC signature.
@@ -256,6 +257,8 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("GET /api/server-backups", s.handleListServerBackups)
 	admin("POST /api/server-backups", s.handleCreateServerBackup)
+	admin("PUT /api/server-backups/destinations", s.handleSetBackupDests)
+	admin("POST /api/server-backups/destinations/{id}/test", s.handleTestBackupDest)
 	admin("PUT /api/server-backups/policy", s.handleSetServerBackupPolicy)
 	admin("POST /api/server-backups/restore", s.handleRestoreServerUpload)
 	admin("GET /api/server-backups/{name}/download", s.handleDownloadServerBackup)

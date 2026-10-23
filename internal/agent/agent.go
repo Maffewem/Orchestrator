@@ -250,6 +250,8 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 			b, err = json.Marshal(spec)
 			output = string(b)
 		}
+	case api.ActionFileStore:
+		err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
 	case api.ActionProxySync:
 		err = a.syncProxy(cctx, c.Args["caddyfile"], c.Args["cloudflare_token"])
 	case api.ActionBackup, api.ActionRestore:

@@ -512,7 +512,25 @@ export interface ServerBackup {
   encrypted: boolean;
   created_at: string;
 }
+export interface BackupDest {
+  id: string;
+  kind: "s3" | "folder" | "device";
+  name: string;
+  enabled: boolean;
+  endpoint?: string;
+  region?: string;
+  bucket?: string;
+  prefix?: string;
+  access_key?: string;
+  secret_key?: string;
+  secret_set?: boolean;
+  path?: string;
+  device_id?: string;
+  last_at?: string;
+  last_error?: string;
+}
 export interface ServerBackups {
+  destinations: BackupDest[];
   policy: ServerBackupPolicy;
   next_run?: string;
   backups: ServerBackup[];
@@ -551,6 +569,8 @@ async function restoreServerUpload(file: File, encrypted: boolean) {
 }
 
 export const api = {
+  setBackupDests: (d: BackupDest[]) => request<ServerBackups>("PUT", "/api/server-backups/destinations", d),
+  testBackupDest: (id: string) => request<{ status: string }>("POST", `/api/server-backups/destinations/${encodeURIComponent(id)}/test`),
   serverBackups: () => request<ServerBackups>("GET", "/api/server-backups"),
   createServerBackup: () => request<ServerBackup>("POST", "/api/server-backups"),
   setServerBackupPolicy: (p: ServerBackupPolicy) => request<ServerBackups>("PUT", "/api/server-backups/policy", p),

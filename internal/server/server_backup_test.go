@@ -3,9 +3,12 @@ package server
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,5 +100,69 @@ func TestServerBackupAndRestore(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("garbage restore: %d", resp.StatusCode)
+	}
+}
+
+func TestServerBackupDestinations(t *testing.T) {
+	dir := t.TempDir()
+	st, _ := store.Open(":memory:")
+	defer st.Close()
+	srv, _, _ := New(context.Background(), st, Config{AdminToken: adminToken, HeartbeatInterval: time.Second, BackupDir: dir})
+	h := &harness{t: t, srv: srv, st: st}
+	h.ts = newTestServer(t, srv)
+
+	var got struct{ path, auth string }
+	s3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			got.path, got.auth = r.URL.Path, r.Header.Get("Authorization")
+			io.Copy(io.Discard, r.Body)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer s3.Close()
+	folder := filepath.Join(dir, "nas")
+
+	dests := []BackupDest{
+		{Kind: "s3", Name: "bucket", Enabled: true, Endpoint: s3.URL, Bucket: "bk", Prefix: "orch", AccessKey: "AK", SecretKey: "SK"},
+		{Kind: "folder", Name: "nas", Enabled: true, Path: folder},
+	}
+	var view serverBackupsView
+	if code := h.do("PUT", "/api/server-backups/destinations", adminToken, dests, &view); code != http.StatusOK {
+		t.Fatalf("save: %d", code)
+	}
+	if len(view.Destinations) != 2 || view.Destinations[0].SecretKey != "" || !view.Destinations[0].SecretSet {
+		t.Fatalf("secret leaked or lost: %+v", view.Destinations)
+	}
+	if code := h.do("POST", "/api/server-backups/destinations/"+view.Destinations[0].ID+"/test", adminToken, nil, nil); code != http.StatusOK {
+		t.Fatalf("test s3: %d", code)
+	}
+	if code := h.do("PUT", "/api/server-backups/destinations", adminToken, []BackupDest{{Kind: "folder", Enabled: true, Path: "relative"}}, nil); code != http.StatusBadRequest {
+		t.Fatalf("relative folder accepted: %d", code)
+	}
+	// Saving again without the secret keeps it.
+	view.Destinations[0].Prefix = "orch2"
+	var again []BackupDest
+	for _, d := range view.Destinations {
+		again = append(again, d.BackupDest)
+	}
+	h.do("PUT", "/api/server-backups/destinations", adminToken, again, nil)
+	if k := srv.backupDests(context.Background())[0].SecretKey; k != "SK" {
+		t.Fatalf("secret not kept: %q", k)
+	}
+
+	var b serverBackup
+	h.do("POST", "/api/server-backups", adminToken, nil, &b)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(folder, b.Name)); err == nil && strings.HasSuffix(got.path, b.Name) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("copy missing: path=%q", got.path)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.HasPrefix(got.path, "/bk/orch2/") || !strings.Contains(got.auth, "Credential=AK/") {
+		t.Fatalf("s3 request: %+v", got)
 	}
 }

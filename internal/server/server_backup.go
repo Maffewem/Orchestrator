@@ -174,23 +174,26 @@ func (s *Server) serverBackupTick(ctx context.Context, now time.Time) {
 		return
 	}
 	s.store.SetSetting(ctx, settingServerBackupLastRun, now.UTC().Format(time.RFC3339))
-	if _, err := s.createServerBackup(ctx); err != nil {
+	b, err := s.createServerBackup(ctx)
+	if err != nil {
 		s.event(ctx, "", "error", "serverbackup.failed", "Scheduled server backup failed: "+err.Error())
 		return
 	}
 	s.pruneServerBackups(pol.Keep)
+	go s.replicateServerBackup(b.Name, pol.Keep)
 }
 
 type serverBackupsView struct {
-	Policy      ServerBackupPolicy `json:"policy"`
-	NextRun     *time.Time         `json:"next_run,omitempty"`
-	Backups     []serverBackup     `json:"backups"`
-	PasswordSet bool               `json:"password_set"`
-	Dir         string             `json:"dir"`
+	Policy       ServerBackupPolicy `json:"policy"`
+	NextRun      *time.Time         `json:"next_run,omitempty"`
+	Backups      []serverBackup     `json:"backups"`
+	PasswordSet  bool               `json:"password_set"`
+	Dir          string             `json:"dir"`
+	Destinations []destView         `json:"destinations"`
 }
 
 func (s *Server) serverBackupsView(ctx context.Context) serverBackupsView {
-	v := serverBackupsView{Policy: s.serverBackupPolicy(ctx), Backups: s.listServerBackups(), PasswordSet: s.backupPassword(ctx) != "", Dir: s.serverBackupDir()}
+	v := serverBackupsView{Policy: s.serverBackupPolicy(ctx), Backups: s.listServerBackups(), PasswordSet: s.backupPassword(ctx) != "", Dir: s.serverBackupDir(), Destinations: s.destViews(ctx)}
 	if next, ok := v.Policy.schedule().nextSlot(time.Now()); ok {
 		v.NextRun = &next
 	}
@@ -208,6 +211,7 @@ func (s *Server) handleCreateServerBackup(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.event(r.Context(), "", "info", "serverbackup.created", "Server backup "+b.Name+" created")
+	go s.replicateServerBackup(b.Name, s.serverBackupPolicy(context.Background()).Keep)
 	writeJSON(w, http.StatusCreated, b)
 }
 

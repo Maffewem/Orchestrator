@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Archive, Cloud, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
-import { api } from "../api";
+import { Archive, Cloud, ShieldCheck, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
+import { api, type Settings } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
@@ -92,6 +92,7 @@ export default function SettingsPage() {
 
   const keywords: Record<string, string> = {
     appearance: "appearance theme dark light",
+    security: "security session lifetime password length https redirect",
     github: "github token webhook repositories",
     cloudflare: "cloudflare dns token zone",
     ssl: "ssl https certificates caddy",
@@ -119,6 +120,21 @@ export default function SettingsPage() {
             subtitle="Light, dark, or follow this device."
           >
             <AppearanceChoice />
+          </Collapsible>
+        )}
+        {vis("security") && (
+          <Collapsible
+            id="security"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="size-4" /> Sign-in security
+              </span>
+            }
+            subtitle="Session lifetime, password length and the HTTPS redirect."
+            action={<Badge tone="ok">{s.security.session_hours >= 24 ? `${Math.round(s.security.session_hours / 24)} day sessions` : `${s.security.session_hours} hour sessions`}</Badge>}
+          >
+            <SecuritySettings value={s.security} onSaved={() => settings.reload()} />
           </Collapsible>
         )}
         {vis("github") && (
@@ -508,6 +524,52 @@ function AppearanceChoice() {
         </label>
       ))}
       <p className="text-sm text-neutral-500">Saved in this browser, so each device can use its own.</p>
+    </div>
+  );
+}
+
+const lifetimes: [number, string][] = [[1, "1 hour"], [8, "8 hours"], [24, "1 day"], [168, "7 days"], [336, "14 days"], [720, "30 days"], [2160, "90 days"]];
+
+function SecuritySettings({ value, onSaved }: { value: Settings["security"]; onSaved: () => void }) {
+  const [hours, setHours] = useState(value.session_hours);
+  const [minLen, setMinLen] = useState(value.min_password);
+  const [force, setForce] = useState(value.force_https);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const save = async () => {
+    setMsg(null);
+    try {
+      await api.setSecurity({ session_hours: hours, min_password: minLen, force_https: force });
+      setMsg({ ok: true, text: "Saved. New sign-ins use these settings." });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  const options = lifetimes.some(([h]) => h === hours) ? lifetimes : [...lifetimes, [hours, `${hours} hours`] as [number, string]];
+  return (
+    <div className="space-y-4 p-5">
+      <Field label="Session lifetime" hint="People must sign in again after this long. Existing sessions keep their old expiry.">
+        <select className={`${inputClass} max-w-xs`} value={hours} onChange={(e) => setHours(Number(e.target.value))}>
+          {options.map(([h, l]) => (
+            <option key={h} value={h}>{l}</option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Minimum password length" hint="Applies to new and changed passwords.">
+        <input className={`${inputClass} max-w-[8rem]`} type="number" min={8} max={64} value={minLen} onChange={(e) => setMinLen(Number(e.target.value))} />
+      </Field>
+      <label className="flex cursor-pointer items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-1" checked={force} onChange={(e) => setForce(e.target.checked)} />
+        <span>
+          <span className="font-medium">Redirect HTTP to HTTPS</span>
+          <br />
+          <span className="text-neutral-500">Browsers on plain HTTP are sent to the HTTPS address. Agents, webhooks and the installer are not redirected. Turn it on while you are viewing the dashboard over HTTPS, for example behind a reverse proxy or tunnel.</span>
+        </span>
+      </label>
+      <div className="flex items-center gap-3">
+        <Button onClick={save}>Save</Button>
+        {msg && (msg.ok ? <span className="text-sm text-ok">{msg.text}</span> : <ErrorNote>{msg.text}</ErrorNote>)}
+      </div>
     </div>
   );
 }

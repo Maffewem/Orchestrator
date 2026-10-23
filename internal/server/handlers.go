@@ -511,6 +511,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"backup_password_set":        s.backupPassword(r.Context()) != "",
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),
+		"security":                   s.securityView(r.Context()),
 		"github": map[string]any{
 			"connected":      s.githubToken(r.Context()) != "",
 			"webhook_path":   "/api/github/webhook",

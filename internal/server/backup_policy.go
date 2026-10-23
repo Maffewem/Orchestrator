@@ -140,6 +140,7 @@ func (s *Server) backupLoop(ctx context.Context) {
 
 // backupTick starts the scheduled backups that have come due.
 func (s *Server) backupTick(ctx context.Context, now time.Time) {
+	s.serverBackupTick(ctx, now)
 	rows, err := s.store.ListBackupPolicies(ctx)
 	if err != nil {
 		s.log.Error("backup policies", "err", err)

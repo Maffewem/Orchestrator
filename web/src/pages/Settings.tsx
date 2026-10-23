@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Archive, Cloud, ShieldCheck, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
+import { Archive, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
 import { api, type Settings } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
 import { copyText } from "../clipboard";
 import { getTheme, setTheme, type ThemeChoice } from "../theme";
+import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
 
 export default function SettingsPage() {
@@ -98,6 +99,7 @@ export default function SettingsPage() {
     ssl: "ssl https certificates caddy",
     domains: "domains base domain wildcard",
     backups: "backup password encrypt",
+    serverbackup: "server backup restore database schedule download",
     join: "join token devices register",
   };
   const vis = (id: string) => !find.trim() || keywords[id].includes(find.trim().toLowerCase());
@@ -365,6 +367,20 @@ export default function SettingsPage() {
             </Help>
           </div>
         </Collapsible>
+        )}
+        {vis("serverbackup") && (
+          <Collapsible
+            id="serverbackup"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <Database className="size-4" /> Server backup
+              </span>
+            }
+            subtitle="Back up Orchestrator itself: users, projects, settings and history."
+          >
+            <ServerBackupsPanel />
+          </Collapsible>
         )}
         {vis("join") && (
         <Collapsible

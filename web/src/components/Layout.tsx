@@ -31,6 +31,7 @@ const settingsSections = [
   ["ssl", "SSL"],
   ["domains", "Domains"],
   ["backups", "Backup password"],
+  ["serverbackup", "Server backup"],
   ["join", "Join token"],
 ] as const;
 

@@ -499,7 +499,65 @@ export interface BackupPolicy {
   last_run?: string;
 }
 
+export interface ServerBackupPolicy {
+  mode: "off" | "daily" | "weekly";
+  time: string;
+  weekday: number;
+  tz: string;
+  keep: number;
+}
+export interface ServerBackup {
+  name: string;
+  size: number;
+  encrypted: boolean;
+  created_at: string;
+}
+export interface ServerBackups {
+  policy: ServerBackupPolicy;
+  next_run?: string;
+  backups: ServerBackup[];
+  password_set: boolean;
+  dir: string;
+}
+
+/** Downloads a server backup exactly as stored (protected ones stay protected). */
+async function downloadServerBackup(name: string) {
+  const res = await fetch(`/api/server-backups/${encodeURIComponent(name)}/download`, { headers: { Authorization: `Bearer ${getToken()}` } });
+  if (!res.ok) throw new ApiError(res.status, "Could not download the backup");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Restores the server from an uploaded backup file. */
+async function restoreServerUpload(file: File, encrypted: boolean) {
+  const res = await fetch(`/api/server-backups/restore${encrypted ? "?encrypted=1" : ""}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}` },
+    body: file,
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, msg);
+  }
+}
+
 export const api = {
+  serverBackups: () => request<ServerBackups>("GET", "/api/server-backups"),
+  createServerBackup: () => request<ServerBackup>("POST", "/api/server-backups"),
+  setServerBackupPolicy: (p: ServerBackupPolicy) => request<ServerBackups>("PUT", "/api/server-backups/policy", p),
+  deleteServerBackup: (name: string) => request<void>("DELETE", `/api/server-backups/${encodeURIComponent(name)}`),
+  restoreServerBackup: (name: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/restore`),
+  downloadServerBackup,
+  restoreServerUpload,
   backupPolicy: (deviceId: string, name: string) =>
     request<BackupPolicy>("GET", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/backup-policy`),
   setBackupPolicy: (deviceId: string, name: string, p: Omit<BackupPolicy, "next_run" | "last_run">) =>

@@ -293,6 +293,15 @@ The agent uses `POST /api/agent/register`, `/heartbeat`, `/commands/{id}/result`
 `/deployments/{id}/steps/{n}`, plus `/backups/{id}` to upload or fetch a backup archive. GitHub calls `POST /api/github/webhook`, which is verified
 with HMAC-SHA256.
 
+## Server backup
+
+Settings > Server backup snapshots Orchestrator's own database (users, projects, settings,
+devices, history) into `<backups dir>/server`. Files are encrypted with the backup password when
+one is set (`orchestrator-server decrypt-backup` reads them). Backups can run daily or weekly with
+a retention count, be downloaded, deleted, or restored. A restore stages the database and exits;
+Docker's `--restart unless-stopped` brings the server back on it, keeping the old database as
+`<db>.pre-restore`. Worker data is not included; use the Backups page for that.
+
 ## Security notes
 
 - Dashboard accounts have roles (viewer, operator, admin); the API enforces them per route.

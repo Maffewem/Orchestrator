@@ -43,6 +43,10 @@ type Config struct {
 	PollInterval time.Duration
 	// BackupDir holds container backup archives.
 	BackupDir string
+	// DBPath and Restart let a server backup be restored: the database is swapped in at
+	// the next start, so the process must be restarted by whatever supervises it.
+	DBPath  string
+	Restart func()
 	// DockerHost is the engine used for self-updates (default: the local socket).
 	DockerHost string
 }
@@ -250,6 +254,13 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/cloudflare", s.handleSetCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/security", s.handleSetSecurity)
+	admin("GET /api/server-backups", s.handleListServerBackups)
+	admin("POST /api/server-backups", s.handleCreateServerBackup)
+	admin("PUT /api/server-backups/policy", s.handleSetServerBackupPolicy)
+	admin("POST /api/server-backups/restore", s.handleRestoreServerUpload)
+	admin("GET /api/server-backups/{name}/download", s.handleDownloadServerBackup)
+	admin("DELETE /api/server-backups/{name}", s.handleDeleteServerBackup)
+	admin("POST /api/server-backups/{name}/restore", s.handleRestoreServerBackup)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 

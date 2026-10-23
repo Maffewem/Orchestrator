@@ -37,8 +37,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
+	ts := newTestServer(t, srv)
 	return &harness{t: t, srv: srv, ts: ts, st: st}
 }
 
@@ -367,4 +366,11 @@ func TestCleanNodeAndSpec(t *testing.T) {
 	if got := api.StepsFor(spec); len(got) != 6 || got[2] != api.StepInstalling {
 		t.Fatalf("steps %v", got)
 	}
+}
+
+func newTestServer(t *testing.T, srv *Server) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
 }

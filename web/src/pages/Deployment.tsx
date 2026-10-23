@@ -254,24 +254,27 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
       localStorage.setItem("orch.autoscroll", on ? "on" : "off");
     } catch {}
   };
-  const end = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   const isError = (t: string) => /^(Error|Rollback failed)/.test(t);
   const needle = find.trim().toLowerCase();
   const shown = lines.filter((l) => (!onlyErrors || isError(l.text)) && (!needle || l.text.toLowerCase().includes(needle)));
 
   // Keep the newest line in view while the deployment runs, until the reader scrolls up.
   useEffect(() => {
-    if (live && follow) end.current?.scrollIntoView({ block: "end" });
+    const el = box.current;
+    if (live && follow && el) el.scrollTop = el.scrollHeight;
   }, [lines.length, live, follow]);
   useEffect(() => {
     if (!live) return;
+    const el = box.current;
+    if (!el) return;
     const up = (e: WheelEvent) => e.deltaY < 0 && setFollow(false);
     const touch = () => setFollow(false);
-    window.addEventListener("wheel", up, { passive: true });
-    window.addEventListener("touchmove", touch, { passive: true });
+    el.addEventListener("wheel", up, { passive: true });
+    el.addEventListener("touchmove", touch, { passive: true });
     return () => {
-      window.removeEventListener("wheel", up);
-      window.removeEventListener("touchmove", touch);
+      el.removeEventListener("wheel", up);
+      el.removeEventListener("touchmove", touch);
     };
   }, [live]);
 
@@ -326,7 +329,7 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
           </button>
         </div>
       </div>
-      <div className="-mt-6 overflow-x-auto px-4 pb-8 font-mono text-[13px] leading-7 sm:px-8">
+      <div ref={box} className="mt-2 max-h-[70vh] overflow-auto px-4 pb-4 font-mono text-[13px] leading-7 sm:px-8">
         {lines.length === 0 ? (
           <p className="pt-2 text-neutral-500">{d.status === "queued" ? "Waiting for the device to pick up this deployment…" : "No output yet."}</p>
         ) : (
@@ -338,7 +341,6 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
           ))
         )}
         {lines.length > 0 && shown.length === 0 && <p className="pt-2 text-neutral-500">No lines match.</p>}
-        <div ref={end} />
       </div>
     </div>
   );

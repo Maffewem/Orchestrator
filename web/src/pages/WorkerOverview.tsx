@@ -140,7 +140,7 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
               {publishedPorts.length ? publishedPorts.map((x) => <p key={x} className="font-mono text-xs">{x}</p>) : <p>No published ports.</p>}
             </Node>
             <Node title="Env vars" count={env.length}>
-              {env.length ? env.map((k) => <p key={k} className="font-mono text-xs">{k}</p>) : <p>None set.</p>}
+              {env.length ? env.map((k) => <p key={k} className="break-all font-mono text-xs">{k}</p>) : <p>None set.</p>}
               {projectId && <Link to={`/projects/${projectId}/settings`} className="inline-block pt-1 text-primary hover:underline">Edit variables</Link>}
             </Node>
           </div>
@@ -266,7 +266,7 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
 }
 
 function Arrow() {
-  return <div className="hidden items-center self-center lg:flex" aria-hidden><div className="h-px flex-1 bg-neutral-400" /><div className="size-0 border-y-4 border-l-[6px] border-y-transparent border-l-neutral-400" /></div>;
+  return <div className="hidden items-center self-start pt-6 lg:flex" aria-hidden><div className="h-px flex-1 bg-neutral-400" /><div className="size-0 border-y-4 border-l-[6px] border-y-transparent border-l-neutral-400" /></div>;
 }
 
 function Row({ k, v }: { k: string; v: ReactNode }) {

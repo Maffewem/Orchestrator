@@ -100,10 +100,10 @@ function ConfirmModal({ p }: { p: Pending }) {
           )}
           <div className="min-w-0">
             <h2 id="confirm-title" className="font-semibold">{p.title}</h2>
-            {p.message && <p className="mt-1 whitespace-pre-line text-sm text-neutral-600">{p.message}</p>}
+            {p.message && <p className="mt-1 whitespace-pre-line [overflow-wrap:anywhere] text-sm text-neutral-600">{p.message}</p>}
             {p.option && (
-              <label className="mt-3 flex items-center gap-2 text-sm">
-                <input type="checkbox" className="size-4 accent-primary" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
+              <label className="mt-3 flex items-start gap-2 text-sm [overflow-wrap:anywhere]">
+                <input type="checkbox" className="mt-0.5 size-4 shrink-0 accent-primary" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
                 {p.option.label}
               </label>
             )}

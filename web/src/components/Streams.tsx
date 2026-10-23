@@ -151,7 +151,13 @@ export function Shell({ deviceId, container, name, onClose }: { deviceId: string
     };
     term.onData((d) => send({ data: d }));
     term.onResize(({ cols, rows }) => send({ cols, rows }));
-    const ro = new ResizeObserver(() => fit.fit());
+    const ro = new ResizeObserver(() => {
+      try {
+        fit.fit();
+      } catch {
+        /* host not laid out yet */
+      }
+    });
     ro.observe(host.current);
 
     (async () => {
@@ -192,7 +198,9 @@ export function Shell({ deviceId, container, name, onClose }: { deviceId: string
           </button>
         </div>
         {error && <p className="bg-red-950 px-4 py-2 text-sm text-red-200">{error}</p>}
-        <div ref={host} className="h-[60vh] p-2" />
+        <div className="p-2">
+          <div ref={host} className="h-[calc(min(60vh,100dvh-9rem))]" />
+        </div>
       </div>
     </div>
   );

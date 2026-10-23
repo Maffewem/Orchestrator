@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useCan } from "../components/auth";
+import { Shell } from "../components/Streams";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router";
-import { ArrowUpRight, CloudUpload, Loader2, PackagePlus, Rocket, Trash2 } from "lucide-react";
+import { ArrowUpRight, CloudUpload, Loader2, PackagePlus, Rocket, SquareTerminal, Trash2 } from "lucide-react";
 import { api, ApiError, type Device, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
@@ -27,6 +29,8 @@ export default function ProjectPage() {
   const p = project.data;
   const device = usePoll(() => (p ? api.device(p.device_id) : Promise.resolve(null)), 10000, [p?.device_id]);
   const [deploying, setDeploying] = useState(false);
+  const [shell, setShell] = useState(false);
+  const isAdmin = useCan("admin");
   const [error, setError] = useState<string | null>(null);
   const worker = device.data?.containers.find((c) => c.name === (p?.runtime.container || p?.name));
   useCrumbs([{ label: "Projects", to: "/projects" }, { label: p?.name ?? "…" }]);
@@ -84,6 +88,11 @@ export default function ProjectPage() {
           {worker && (
             <PowerControls deviceId={p.device_id} containerId={worker.id} state={worker.state} onDone={device.reload} onError={setError} />
           )}
+          {worker && worker.state === "running" && isAdmin && (
+            <Button icon={<SquareTerminal className="size-4" />} onClick={() => setShell(true)}>
+              Shell
+            </Button>
+          )}
           <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
             New deployment
           </Button>
@@ -96,6 +105,7 @@ export default function ProjectPage() {
           )}
         </div>
       </div>
+      {shell && worker && <Shell deviceId={p.device_id} container={worker.id} name={worker.name} onClose={() => setShell(false)} />}
       {error && (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>

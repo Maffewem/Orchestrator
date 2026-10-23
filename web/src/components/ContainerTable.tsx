@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Archive, FileText, PackagePlus, Play, RotateCw, Trash2, Square, SquareTerminal } from "lucide-react";
+import { Archive, FileText, PackagePlus, Play, MoreHorizontal, RotateCw, Trash2, Square, SquareTerminal } from "lucide-react";
 import { api, type Container, type FleetContainer } from "../api";
 import { Button, Empty, StatusDot, Table, Td } from "./ui";
 import { cx } from "../lib";
@@ -59,21 +59,6 @@ export default function ContainerTable({
   const canOperate = useCan("operator");
   const [sort, setSort] = useState<{ key: "name" | "device" | "image" | "status"; dir: 1 | -1 }>({ key: "name", dir: 1 });
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [compact, setCompact] = useState(() => {
-    try {
-      return localStorage.getItem("orchestrator.compactRows") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const setDensity = (v: boolean) => {
-    setCompact(v);
-    try {
-      localStorage.setItem("orchestrator.compactRows", v ? "1" : "0");
-    } catch {
-      /* private window: keep the choice for this visit only */
-    }
-  };
   const keyOf = (c: Container | FleetContainer) => ("device_id" in c ? c.device_id : deviceId!) + "/" + c.id;
   const sorted = useMemo(() => {
     const val = (c: Container | FleetContainer) => (sort.key === "name" ? c.name : sort.key === "device" ? ("device_name" in c ? c.device_name : "") : sort.key === "image" ? c.image : c.state);
@@ -205,34 +190,45 @@ export default function ContainerTable({
           <Button size="sm" variant="ghost" title="Start" loading={busy === c.id + "container.start"} icon={<Play className="size-3.5" />} onClick={() => run(dev, c, "container.start")} />
         ))}
         {canOperate && <Button size="sm" variant="ghost" title="Restart" loading={busy === c.id + "container.restart"} icon={<RotateCw className="size-3.5" />} onClick={() => run(dev, c, "container.restart")} />}
-        {canOperate && <Button size="sm" variant="ghost" title="Back up" loading={busy === c.id + "backup"} icon={<Archive className="size-3.5" />} onClick={() => backup(dev, c)} />}
         {canOperate && <Button size="sm" variant="ghost" title="Logs" icon={<FileText className="size-3.5" />} onClick={() => setLogs({ deviceId: dev, c })} />}
-        {isAdmin && adoptable(c) && (
-          <Button size="sm" variant="ghost" title="Adopt as a project" icon={<PackagePlus className="size-3.5" />} onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })}>
-            Adopt
-          </Button>
-        )}
-        {isAdmin && adoptable(c) && (
-          <Button
-            size="sm"
-            variant="ghost"
-            title="Remove container"
-            loading={busy === c.id + "container.remove"}
-            icon={<Trash2 className="size-3.5 text-bad" />}
-            onClick={async () => {
-              const vols = c.volumes ?? [];
-              const del = await confirmWithOption({
-                title: `Remove ${c.name}?`,
-                message: `The container is stopped and deleted from the device.${vols.length ? " Its volumes are kept unless you tick the box below." : ""}`,
-                confirmLabel: "Remove",
-                danger: true,
-                option: vols.length ? { label: `Also delete its volumes (permanent): ${vols.join(", ")}`, checked: false } : undefined,
-              });
-              if (del !== null) run(dev, c, "container.remove", del && vols.length ? { volumes: "delete" } : undefined);
-            }}
-          />
-        )}
         {isAdmin && running && !system && <Button size="sm" variant="ghost" title="Shell" icon={<SquareTerminal className="size-3.5" />} onClick={() => setShell({ deviceId: dev, c })} />}
+        {(canOperate || (isAdmin && adoptable(c))) && (
+          <details className="relative" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) e.currentTarget.open = false; }}>
+            <summary className="flex size-7 cursor-pointer list-none items-center justify-center rounded-lg text-neutral-600 hover:bg-neutral-100 [&::-webkit-details-marker]:hidden" title="More actions" aria-label="More actions">
+              <MoreHorizontal className="size-4" />
+            </summary>
+            <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-neutral-200 bg-white p-1 text-sm shadow-lg" onClick={(e) => { (e.currentTarget.parentElement as HTMLDetailsElement).open = false; }}>
+              {canOperate && (
+                <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-neutral-100" onClick={() => backup(dev, c)}>
+                  <Archive className="size-3.5" /> Back up
+                </button>
+              )}
+              {isAdmin && adoptable(c) && (
+                <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-neutral-100" onClick={() => setAdopting({ deviceId: dev, deviceName: "device_name" in c ? c.device_name : "this device", id: c.id })}>
+                  <PackagePlus className="size-3.5" /> Adopt as a project
+                </button>
+              )}
+              {isAdmin && adoptable(c) && (
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-bad hover:bg-red-50"
+                  onClick={async () => {
+                    const vols = c.volumes ?? [];
+                    const del = await confirmWithOption({
+                      title: `Remove ${c.name}?`,
+                      message: `The container is stopped and deleted from the device.${vols.length ? " Its volumes are kept unless you tick the box below." : ""}`,
+                      confirmLabel: "Remove",
+                      danger: true,
+                      option: vols.length ? { label: `Also delete its volumes (permanent): ${vols.join(", ")}`, checked: false } : undefined,
+                    });
+                    if (del !== null) run(dev, c, "container.remove", del && vols.length ? { volumes: "delete" } : undefined);
+                  }}
+                >
+                  <Trash2 className="size-3.5" /> Remove
+                </button>
+              )}
+            </div>
+          </details>
+        )}
       </>
     );
   };
@@ -253,16 +249,10 @@ export default function ContainerTable({
         ) : (
           <span className="text-neutral-500">{canOperate ? "Select rows to act on several workers at once." : ""}</span>
         )}
-        <span className="flex-1" />
-        <span className="text-neutral-500">Rows</span>
-        <div className="inline-flex overflow-hidden rounded-lg border border-neutral-300">
-          <button aria-pressed={!compact} className={cx("px-2.5 py-1 text-xs", !compact && "bg-neutral-900 text-white")} onClick={() => setDensity(false)}>Comfortable</button>
-          <button aria-pressed={compact} className={cx("border-l border-neutral-300 px-2.5 py-1 text-xs", compact && "bg-neutral-900 text-white")} onClick={() => setDensity(true)}>Compact</button>
-        </div>
       </div>
       <div className="hidden md:block">
         <Table
-          compact={compact}
+          compact
           head={[
             canOperate ? (
               <input
@@ -301,7 +291,7 @@ export default function ContainerTable({
                 <Td className="font-mono text-xs text-neutral-600">{ports(c) || "—"}</Td>
                 <Td className="text-xs whitespace-nowrap">{running && endpointLinks(c)}</Td>
                 <Td>
-                  <div className="flex max-w-40 flex-wrap justify-end gap-1 lg:max-w-60">{actionButtons(c, dev)}</div>
+                  <div className="flex items-center justify-end gap-0.5 whitespace-nowrap">{actionButtons(c, dev)}</div>
                 </Td>
               </tr>
             );

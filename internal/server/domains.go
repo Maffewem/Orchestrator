@@ -423,6 +423,7 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 	if n == 0 && used == "" && !force {
 		return nil // nothing to serve and no proxy to empty
 	}
+	s.syncDNS(ctx, d, hosts) // DNS does not depend on the agent being new enough to run Caddy
 	if !hasCap(d, api.CapProxy) {
 		s.event(ctx, d.ID, "warning", "proxy.sync", errAgentTooOld(d, "domains").Error())
 		return errAgentTooOld(d, "domains")
@@ -432,7 +433,6 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 		return err
 	}
 	s.store.SetSetting(ctx, settingProxyUsed+deviceID, "1")
-	s.syncDNS(ctx, d, hosts)
 	return nil
 }
 

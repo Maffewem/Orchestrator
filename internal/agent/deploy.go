@@ -109,6 +109,9 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		return fmt.Errorf("docker engine unavailable: %s", info.Error)
 	}
 	st.logf("Docker engine %s ready", info.Version)
+	if err := a.checkPorts(ctx, st, spec); err != nil {
+		return err
+	}
 
 	reuse := spec.Build != nil && spec.Reuse && a.docker.hasImage(ctx, spec.Image)
 	switch {
@@ -142,6 +145,10 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	}
 
 	st.begin(ctx, api.StepIndex(spec, api.StepDeploy))
+	// The build can take minutes, so look again before touching the running version.
+	if err := a.checkPorts(ctx, st, spec); err != nil {
+		return err
+	}
 	previous, err := a.docker.ContainerByName(ctx, spec.Service)
 	if err != nil {
 		return err
@@ -167,7 +174,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	if err := a.docker.Start(ctx, id); err != nil {
 		a.discard(ctx, id)
 		a.restore(ctx, st, previous, spec.Service)
-		return fmt.Errorf("start container: %w", err)
+		return fmt.Errorf("start container: %w", portStartError(err))
 	}
 	st.logf("Started container %.12s", id)
 
@@ -218,4 +225,25 @@ func (a *Agent) restore(ctx context.Context, st *steps, previous, name string) {
 		return
 	}
 	st.logf("Rolled back: previous version is running again")
+}
+
+// checkPorts fails the deployment early when a requested host port is taken.
+func (a *Agent) checkPorts(ctx context.Context, st *steps, spec api.DeploySpec) error {
+	if len(spec.Ports) == 0 {
+		return nil
+	}
+	cs, err := a.docker.Containers(ctx)
+	if err != nil {
+		st.logf("Warning: could not check for port conflicts: %v", err)
+		return nil
+	}
+	bad := portConflicts(spec, cs, portBusy)
+	if len(bad) == 0 {
+		st.logf("Host ports are free")
+		return nil
+	}
+	for _, b := range bad {
+		st.logf("Error: %s", b)
+	}
+	return fmt.Errorf("port conflict: %s", bad[0])
 }

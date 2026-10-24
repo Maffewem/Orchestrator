@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -335,9 +336,21 @@ func (s *Server) uiHandler() http.Handler {
 		if p != "" {
 			if f, err := s.cfg.UI.Open(p); err == nil {
 				f.Close()
+				if strings.HasPrefix(p, "assets/") {
+					// Vite hashes these names, so a given URL never changes content.
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
 				files.ServeHTTP(w, r)
 				return
 			}
+		}
+		// A missing asset must 404, not fall back to the HTML shell: a stale index.html asking
+		// for a removed hashed file would otherwise get HTML back as its stylesheet or script.
+		if strings.HasPrefix(p, "assets/") || path.Ext(p) != "" {
+			http.NotFound(w, r)
+			return
 		}
 		// Client-side routes all render the SPA shell.
 		index, err := fs.ReadFile(s.cfg.UI, "index.html")

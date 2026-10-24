@@ -50,9 +50,15 @@ func (a *Agent) composeCmd(ctx context.Context, name string, args ...string) (*e
 		return nil, errors.New("the docker CLI is required on this device to run Compose stacks")
 	}
 	dir := a.stackDir(name)
-	full := append([]string{"compose", "-p", name, "-f", filepath.Join(dir, "compose.yml"), "--env-file", filepath.Join(dir, ".env")}, args...)
-	cmd := exec.CommandContext(ctx, cli, full...)
+	pre := []string{"compose", "-p", name, "-f", filepath.Join(dir, "compose.yml"), "--env-file", filepath.Join(dir, ".env")}
+	cmd := exec.CommandContext(ctx, cli)
 	cmd.Dir = dir
+	// A stack from a repository runs inside its checkout, so build: contexts and ./paths resolve there.
+	if root, err := os.ReadFile(filepath.Join(dir, "projdir")); err == nil && len(root) > 0 {
+		pre = append(pre, "--project-directory", string(root))
+		cmd.Dir = string(root)
+	}
+	cmd.Args = append(append([]string{cli}, pre...), args...)
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+a.docker.host)
 	return cmd, nil
 }
@@ -80,6 +86,21 @@ func (a *Agent) deployCompose(ctx context.Context, st *steps, deploymentID strin
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	if spec.Compose.Remote != "" {
+		st.begin(ctx, api.StepIndex(spec, api.StepCloning))
+		_, ref, _ := parseRemote(spec.Compose.Remote)
+		st.logf("Checking out commit %.7s", ref)
+		// The checkout persists between deployments so relative bind mounts keep their data.
+		root, err := clone(ctx, st, spec.Compose.Remote, filepath.Join(dir, "repo"))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, "projdir"), []byte(root), 0o600); err != nil {
+			return err
+		}
+	} else {
+		os.Remove(filepath.Join(dir, "projdir"))
+	}
 	if err := os.WriteFile(filepath.Join(dir, "compose.yml"), []byte(spec.Compose.YAML), 0o600); err != nil {
 		return err
 	}
@@ -105,7 +126,11 @@ func (a *Agent) deployCompose(ctx context.Context, st *steps, deploymentID strin
 	}
 
 	st.begin(ctx, api.StepIndex(spec, api.StepDeploy))
-	if cmd, err = a.composeCmd(ctx, spec.Service, "up", "-d", "--remove-orphans"); err != nil {
+	up := []string{"up", "-d", "--remove-orphans"}
+	if spec.Compose.Remote != "" {
+		up = append(up, "--build") // services with build: are built from the checkout
+	}
+	if cmd, err = a.composeCmd(ctx, spec.Service, up...); err != nil {
 		return err
 	}
 	if err := runStream(cmd, func(l string) { st.logf("%s", l) }); err != nil {
@@ -165,6 +190,19 @@ func firstName(names []string) string {
 	return names[0]
 }
 
+// forgetStack deletes a removed stack's generated files. A repository checkout may hold data in
+// relative bind mounts, so it goes only when the volumes were deleted too.
+func (a *Agent) forgetStack(name string, withData bool) {
+	dir := a.stackDir(name)
+	if withData {
+		os.RemoveAll(dir)
+		return
+	}
+	for _, f := range []string{"compose.yml", ".env", "projdir"} {
+		os.Remove(filepath.Join(dir, f))
+	}
+}
+
 // stackAction starts, stops or removes every container of a stack. Start and stop go through
 // the Engine API so they work even if the compose file is gone; down uses the compose CLI when
 // the stack's files are still on the device (it also removes networks) and otherwise removes the containers.
@@ -182,7 +220,7 @@ func (a *Agent) stackAction(ctx context.Context, action, name, volumes string) (
 			if err == nil {
 				var lines []string
 				if err = runStream(cmd, func(l string) { lines = append(lines, l) }); err == nil {
-					os.RemoveAll(a.stackDir(name))
+					a.forgetStack(name, volumes == "delete")
 					return strings.Join(lines, "\n"), nil
 				}
 				return strings.Join(lines, "\n"), err
@@ -208,7 +246,7 @@ func (a *Agent) stackAction(ctx context.Context, action, name, volumes string) (
 		}
 	}
 	if action == api.ActionStackDown {
-		os.RemoveAll(a.stackDir(name))
+		a.forgetStack(name, volumes == "delete")
 	}
 	return "", errors.Join(errs...)
 }

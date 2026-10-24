@@ -43,6 +43,14 @@ type Source struct {
 	Image string `json:"image,omitempty"`
 	// Compose source: the docker-compose YAML. ${VAR} references are filled from the project's environment.
 	Compose string `json:"compose,omitempty"`
+	// ComposeFile is the path of the compose file in Repo (compose source from GitHub); empty means docker-compose.yml.
+	ComposeFile string `json:"compose_file,omitempty"`
+}
+
+// FromRepo reports whether the source is a GitHub repository: a built project, or a Compose
+// stack whose compose file lives in a repository. Pushes to its branch redeploy it.
+func (s Source) FromRepo() bool {
+	return s.Type == SourceGitHub || (s.Type == SourceCompose && s.Repo != "")
 }
 
 // Watch is a pair of path globs, relative to the repository root. A build is wanted when a
@@ -182,7 +190,7 @@ func (s *Store) ProjectsForPush(ctx context.Context, repo, branch string) ([]*Pr
 	out := []*Project{}
 	for _, p := range all {
 		src := p.Source
-		if src.Type == SourceGitHub && src.AutoDeploy && strings.EqualFold(src.Repo, repo) && src.Branch == branch {
+		if src.FromRepo() && src.AutoDeploy && strings.EqualFold(src.Repo, repo) && src.Branch == branch {
 			out = append(out, p)
 		}
 	}

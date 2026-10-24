@@ -23,10 +23,10 @@ func (s *Server) pollRepos(ctx context.Context) {
 	heads := map[key]*store.Commit{}
 	for _, p := range projects {
 		src := p.Source
-		if src.Type != store.SourceGitHub {
+		if !src.FromRepo() {
 			continue
 		}
-		if s.previewSettings(ctx, p.ID).Enabled {
+		if src.Type == store.SourceGitHub && s.previewSettings(ctx, p.ID).Enabled {
 			s.syncPreviews(ctx, p)
 		}
 		if !src.AutoDeploy {

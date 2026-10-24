@@ -226,6 +226,10 @@ type DeploySpec struct {
 type ComposeSpec struct {
 	YAML string   `json:"yaml"`
 	Env  []string `json:"env,omitempty"` // KEY=value
+	// Remote, when set, is a git context (https://host/owner/repo.git#<sha>) the agent checks out
+	// next to the stack, so services with build: and relative paths work. It may embed credentials,
+	// so agents must never log it. YAML is still the compose file, as fetched at that commit.
+	Remote string `json:"remote,omitempty"`
 }
 
 // BuildSpec asks the agent to build the image on the device from a git context
@@ -257,6 +261,8 @@ type NodeSpec struct {
 // control plane both derive step indexes from this list.
 func StepsFor(spec DeploySpec) []string {
 	switch {
+	case spec.Compose != nil && spec.Compose.Remote != "":
+		return []string{StepInit, StepCloning, StepPulling, StepDeploy, StepVerify}
 	case spec.Compose != nil:
 		return []string{StepInit, StepPulling, StepDeploy, StepVerify}
 	case IsNode(spec):

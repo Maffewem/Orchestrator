@@ -89,7 +89,8 @@ export default function EnvEditor({ value, onChange }: { value: string; onChange
 
       {raw ? (
         <textarea
-          className={cx(inputClass, "min-h-48 resize-y font-mono")}
+          className={cx(inputClass, "min-h-48 w-full max-w-full resize whitespace-pre font-mono text-xs")}
+          wrap="off"
           rows={12}
           placeholder={"KEY=value\n# paste a whole .env file here, or drop one on this box"}
           value={value}

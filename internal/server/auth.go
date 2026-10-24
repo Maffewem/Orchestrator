@@ -229,7 +229,9 @@ func clientIP(r *http.Request) string {
 // (who all arrive from the device's address) from locking people out of the dashboard. It returns the user or an error message.
 func (s *Server) verifyLogin(ctx context.Context, r *http.Request, scope, name, pw string) (*store.User, string) {
 	key := scope + "|" + strings.ToLower(name) + "|" + clientIP(r)
-	if s.logins.locked(key) {
+	// A second, address-wide key stops one client spraying passwords across many usernames.
+	ipKey := scope + "|*|" + clientIP(r)
+	if s.logins.locked(key) || s.logins.locked(ipKey) {
 		return nil, "too many failed attempts; try again in a minute"
 	}
 	u, err := s.store.UserByName(ctx, strings.ToLower(strings.TrimSpace(name)))
@@ -240,6 +242,7 @@ func (s *Server) verifyLogin(ctx context.Context, r *http.Request, scope, name, 
 	ok := checkPassword(pw, hash)
 	if err != nil || !ok || u.Disabled {
 		s.logins.fail(key)
+		s.logins.fail(ipKey)
 		return nil, "wrong username or password"
 	}
 	s.logins.reset(key)

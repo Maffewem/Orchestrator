@@ -475,7 +475,7 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 	}
 	names := map[string]string{}
 	adopted := map[string]*store.Project{} // device|container name -> project, until the first redeploy labels the container
-	stacks := map[string]*store.Project{} // device|compose project name -> project
+	stacks := map[string]*store.Project{}  // device|compose project name -> project
 	for _, p := range projects {
 		names[p.ID] = p.Name
 		if p.Source.Type == store.SourceCompose {

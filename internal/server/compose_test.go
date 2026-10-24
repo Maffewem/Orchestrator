@@ -210,3 +210,54 @@ func TestComposeStackFromGitHub(t *testing.T) {
 		t.Fatalf("push projects: %d", len(ps))
 	}
 }
+
+func TestProjectTunnelRoutes(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi-4")
+	caps := []string{api.CapTunnel, api.CapCompose}
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{
+		Host: api.HostInfo{Capabilities: caps},
+		Containers: []api.Container{{ID: "c1", Name: "claudeui-web-1", State: "running", ComposeProject: "claudeui",
+			Ports: []api.Port{{PrivatePort: 3000, PublicPort: 3010, Type: "tcp"}, {PrivatePort: 53, PublicPort: 5353, Type: "udp"}}}},
+	}, nil)
+	var p ProjectView
+	h.do("POST", "/api/projects", adminToken, map[string]any{
+		"name": "claudeui", "device_id": reg.DeviceID,
+		"source": map[string]any{"type": "compose", "compose": claudeUIStack},
+	}, &p)
+	path := "/api/projects/" + p.ID + "/tunnel"
+	routes := map[string]any{"routes": []map[string]any{{"hostname": "chat.example.com", "port": 3010}}}
+	if code := h.do("PUT", path, adminToken, routes, nil); code != http.StatusConflict {
+		t.Fatalf("no tunnel yet: %d", code)
+	}
+	tok := base64.StdEncoding.EncodeToString([]byte(`{"a":"acct","t":"tun-1","s":"x"}`))
+	h.do("PUT", "/api/devices/"+reg.DeviceID+"/tunnel", adminToken, map[string]any{"token": tok}, nil)
+	// A route set on the device page must survive the project saving its own.
+	h.do("PUT", "/api/devices/"+reg.DeviceID+"/tunnel/routes", adminToken,
+		map[string]any{"routes": []map[string]string{{"hostname": "other.example.com", "service": "http://localhost:9000"}}}, nil)
+	var v projectTunnelView
+	if code := h.do("PUT", path, adminToken, routes, &v); code != http.StatusOK {
+		t.Fatalf("set: %d", code)
+	}
+	if len(v.Routes) != 1 || v.Routes[0].Service != "http://localhost:3010" || v.Routes[0].Project != p.ID {
+		t.Fatalf("project routes: %+v", v.Routes)
+	}
+	if len(v.Ports) != 1 || v.Ports[0] != 3010 {
+		t.Fatalf("ports (tcp only, from the stack's containers): %v", v.Ports)
+	}
+	var dev tunnelView
+	h.do("GET", "/api/devices/"+reg.DeviceID+"/tunnel", adminToken, nil, &dev)
+	if len(dev.Routes) != 2 {
+		t.Fatalf("device routes: %+v", dev.Routes)
+	}
+	routes["routes"] = []map[string]any{{"hostname": "other.example.com", "port": 3010}}
+	if code := h.do("PUT", path, adminToken, routes, nil); code != http.StatusBadRequest {
+		t.Fatalf("hostname owned elsewhere: %d", code)
+	}
+	routes["routes"] = []map[string]any{}
+	h.do("PUT", path, adminToken, routes, &v)
+	h.do("GET", "/api/devices/"+reg.DeviceID+"/tunnel", adminToken, nil, &dev)
+	if len(v.Routes) != 0 || len(dev.Routes) != 1 {
+		t.Fatalf("after clearing: %+v / %+v", v.Routes, dev.Routes)
+	}
+}

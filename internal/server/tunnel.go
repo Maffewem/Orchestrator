@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
@@ -25,6 +27,8 @@ type tunnelRoute struct {
 	Hostname string `json:"hostname"`
 	// Service is a URL such as http://localhost:3000, or "project:<name>" for that project's first published port.
 	Service string `json:"service"`
+	// Project is the ID of the project that owns the route when it was set from the project's own tab.
+	Project string `json:"project,omitempty"`
 }
 
 type tunnelConfig struct {
@@ -202,24 +206,23 @@ func (s *Server) handleSetTunnelRoutes(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "set up the tunnel on this device first")
 		return
 	}
-	seen := map[string]bool{}
-	for i := range req.Routes {
-		rt := &req.Routes[i]
-		rt.Hostname, rt.Service = strings.ToLower(strings.TrimSpace(rt.Hostname)), strings.TrimSpace(rt.Service)
-		if !validHostname(rt.Hostname) || seen[rt.Hostname] {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("%q is not a valid, unique hostname", rt.Hostname))
-			return
-		}
-		seen[rt.Hostname] = true
-		if !tunnelServiceRe.MatchString(rt.Service) && !strings.HasPrefix(rt.Service, "project:") {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("service %q should look like http://localhost:3000 or project:<name>", rt.Service))
-			return
-		}
+	if err := cleanRoutes(req.Routes); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	cfg.Routes = req.Routes
-	if err := s.saveTunnelConfig(ctx, d.ID, &cfg); err != nil {
+	view, err := s.saveRoutes(ctx, d, cfg)
+	if err != nil {
 		s.internal(w, err)
 		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+// saveRoutes stores cfg and, when Cloudflare is connected, applies its routes.
+func (s *Server) saveRoutes(ctx context.Context, d *store.Device, cfg tunnelConfig) (tunnelView, error) {
+	if err := s.saveTunnelConfig(ctx, d.ID, &cfg); err != nil {
+		return tunnelView{}, err
 	}
 	view := s.tunnelView(ctx, d)
 	if tok := s.cloudflareToken(ctx); tok != "" {
@@ -227,7 +230,7 @@ func (s *Server) handleSetTunnelRoutes(w http.ResponseWriter, r *http.Request) {
 	} else if len(cfg.Routes) > 0 {
 		view.Warnings = []string{"Cloudflare isn't connected in Settings, so these routes were saved but not applied. Add the public hostnames in Cloudflare Zero Trust, or connect a token with Cloudflare Tunnel > Edit."}
 	}
-	writeJSON(w, http.StatusOK, view)
+	return view, nil
 }
 
 // applyTunnelRoutes pushes ingress rules to Cloudflare and points each hostname at the tunnel.
@@ -290,4 +293,140 @@ func (s *Server) cfUpsertTunnelCNAME(ctx context.Context, tok, host, target stri
 		}
 	}
 	return s.cfCall(ctx, tok, http.MethodPost, "/zones/"+z.ID+"/dns_records", want, nil)
+}
+
+// cleanRoutes normalises hostnames and services in place and rejects duplicates and bad values.
+func cleanRoutes(routes []tunnelRoute) error {
+	seen := map[string]bool{}
+	for i := range routes {
+		rt := &routes[i]
+		rt.Hostname, rt.Service = strings.ToLower(strings.TrimSpace(rt.Hostname)), strings.TrimSpace(rt.Service)
+		if !validHostname(rt.Hostname) || seen[rt.Hostname] {
+			return fmt.Errorf("%q is not a valid, unique hostname", rt.Hostname)
+		}
+		seen[rt.Hostname] = true
+		if !tunnelServiceRe.MatchString(rt.Service) && !strings.HasPrefix(rt.Service, "project:") {
+			return fmt.Errorf("service %q should look like http://localhost:3000 or project:<name>", rt.Service)
+		}
+	}
+	return nil
+}
+
+// projectPorts are the TCP host ports a project publishes on its device: from its settings and
+// from its running containers, which is how the ports of a Compose stack's services are found.
+func projectPorts(p *store.Project, d *store.Device) []int {
+	seen := map[int]bool{}
+	var out []int
+	add := func(n int) {
+		if n > 0 && n < 65536 && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	for _, m := range p.Runtime.Ports {
+		if h, _, ok := strings.Cut(m, ":"); ok && !strings.HasSuffix(m, "/udp") {
+			n, _ := strconv.Atoi(h)
+			add(n)
+		}
+	}
+	for _, c := range d.Containers {
+		mine := c.Labels["orchestrator.project"] == p.ID || (p.Source.Type == store.SourceCompose && c.ComposeProject == p.Name)
+		if !mine {
+			continue
+		}
+		for _, pt := range c.Ports {
+			if pt.Type == "tcp" {
+				add(pt.PublicPort)
+			}
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+type projectTunnelView struct {
+	tunnelView
+	Ports []int `json:"ports"`
+	// Routes holds only this project's routes; the device page lists all of them.
+	Device string `json:"device_id"`
+}
+
+func (s *Server) projectTunnel(ctx context.Context, p *store.Project, d *store.Device) projectTunnelView {
+	v := s.tunnelView(ctx, d)
+	mine := []tunnelRoute{}
+	for _, rt := range v.Routes {
+		if rt.Project == p.ID {
+			mine = append(mine, rt)
+		}
+	}
+	v.Routes = mine
+	return projectTunnelView{tunnelView: v, Ports: projectPorts(p, d), Device: d.ID}
+}
+
+func (s *Server) handleGetProjectTunnel(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.lookupProject(w, r)
+	if !ok {
+		return
+	}
+	d, err := s.store.GetDevice(r.Context(), p.DeviceID)
+	if err != nil {
+		writeError(w, http.StatusConflict, "the project's device no longer exists")
+		return
+	}
+	writeJSON(w, http.StatusOK, s.projectTunnel(r.Context(), p, d))
+}
+
+// handleSetProjectTunnel replaces the routes this project owns on its device's tunnel and leaves the rest alone.
+func (s *Server) handleSetProjectTunnel(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.lookupProject(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Routes []struct {
+			Hostname string `json:"hostname"`
+			Port     int    `json:"port"`
+		} `json:"routes"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	ctx := r.Context()
+	d, err := s.store.GetDevice(ctx, p.DeviceID)
+	if err != nil {
+		writeError(w, http.StatusConflict, "the project's device no longer exists")
+		return
+	}
+	cfg, has := s.tunnelConfig(ctx, d.ID)
+	if !has {
+		writeError(w, http.StatusConflict, "set up the Cloudflare Tunnel on the project's device first")
+		return
+	}
+	var mine []tunnelRoute
+	for _, in := range req.Routes {
+		if in.Port < 1 || in.Port > 65535 {
+			writeError(w, http.StatusBadRequest, "choose a port for each hostname")
+			return
+		}
+		mine = append(mine, tunnelRoute{Hostname: in.Hostname, Service: "http://localhost:" + strconv.Itoa(in.Port), Project: p.ID})
+	}
+	all := mine
+	for _, rt := range cfg.Routes {
+		if rt.Project != p.ID {
+			all = append(all, rt)
+		}
+	}
+	if err := cleanRoutes(all); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	cfg.Routes = all
+	v, err := s.saveRoutes(ctx, d, cfg)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	out := s.projectTunnel(ctx, p, d)
+	out.Warnings = v.Warnings
+	writeJSON(w, http.StatusOK, out)
 }

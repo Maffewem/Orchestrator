@@ -195,6 +195,8 @@ export interface TunnelRoute {
   hostname: string;
   /** A URL such as http://localhost:3000, or project:<name>. */
   service: string;
+  /** Set when the route belongs to a project; kept as is when the device page saves routes. */
+  project?: string;
 }
 
 export interface TunnelView {
@@ -205,6 +207,12 @@ export interface TunnelView {
   routes: TunnelRoute[];
   can_route: boolean;
   warnings?: string[];
+}
+
+export interface ProjectTunnelView extends TunnelView {
+  device_id: string;
+  /** TCP host ports the project publishes, including a stack's services. */
+  ports: number[];
 }
 
 export interface Deployment {
@@ -662,6 +670,9 @@ export const api = {
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),
   setTunnelRoutes: (id: string, routes: TunnelRoute[]) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/routes`, { routes }),
+  projectTunnel: (id: string) => request<ProjectTunnelView>("GET", `/api/projects/${id}/tunnel`),
+  setProjectTunnel: (id: string, routes: { hostname: string; port: number }[]) =>
+    request<ProjectTunnelView>("PUT", `/api/projects/${id}/tunnel`, { routes }),
   stackAction: (projectId: string, action: "start" | "stop" | "down", volumes = false) =>
     request<Command>("POST", `/api/projects/${projectId}/stack`, { action, volumes }),
   enableProxy: (id: string) => request<void>("POST", `/api/devices/${id}/proxy`),

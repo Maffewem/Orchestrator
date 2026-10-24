@@ -244,6 +244,8 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/devices/{id}/tunnel", s.handleGetTunnel)
 	admin("PUT /api/devices/{id}/tunnel", s.handleSetTunnel)
 	admin("PUT /api/devices/{id}/tunnel/routes", s.handleSetTunnelRoutes)
+	admin("GET /api/projects/{id}/tunnel", s.handleGetProjectTunnel)
+	admin("PUT /api/projects/{id}/tunnel", s.handleSetProjectTunnel)
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
 	admin("GET /api/projects/{id}/deployments", s.handleListDeployments)
 	admin("GET /api/deployments", s.handleListDeployments)

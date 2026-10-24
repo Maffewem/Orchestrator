@@ -253,3 +253,13 @@ func TestSecuritySettings(t *testing.T) {
 		t.Fatalf("redirect over http: %d", code)
 	}
 }
+
+func TestLoginAddressWideThrottle(t *testing.T) {
+	var l limiter
+	for i := 0; i < maxFailures; i++ {
+		l.fail("login|*|1.2.3.4")
+	}
+	if !l.locked("login|*|1.2.3.4") {
+		t.Fatal("address-wide key should lock after repeated failures")
+	}
+}

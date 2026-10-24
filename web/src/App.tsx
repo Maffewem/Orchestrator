@@ -47,15 +47,28 @@ export default function App() {
           setMeError(null);
         },
         (e) => {
-          if (cancelled || e instanceof ApiError && e.status === 401) return;
+          if (cancelled) return;
+          // The server refused this identity: drop the token and go to sign-in rather than
+          // leave a dashboard open that we can't vouch for.
+          if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+            setToken(null);
+            setTok(null);
+            return;
+          }
           if (++tries < 3) setTimeout(load, 1000 * tries);
           else setMeError(e instanceof Error ? e.message : "Could not load your account");
         },
       );
     };
     load();
+    // Re-verify when the tab regains focus so a revoked or expired session closes the dashboard.
+    const recheck = () => {
+      if (document.visibilityState === "visible") api.me().then(setMe, () => {});
+    };
+    document.addEventListener("visibilitychange", recheck);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", recheck);
     };
   }, [token, attempt]);
 

@@ -1,7 +1,7 @@
 import { useCan } from "../components/auth";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { GitBranch, Github, Package, Plus, Rocket } from "lucide-react";
+import { GitBranch, Github, Layers, Package, Plus, Rocket } from "lucide-react";
 import { api, type Deployment, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, Empty, Loading, PageHeader, StatusDot, StatusIcon, deploymentLabel } from "../components/ui";
@@ -19,6 +19,14 @@ export function SourceLabel({ p }: { p: Project }) {
       </span>
     );
   }
+  if (p.source.type === "compose") {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <Layers className="size-3.5 shrink-0" />
+        <span className="truncate">Compose stack</span>
+      </span>
+    );
+  }
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <Package className="size-3.5 shrink-0" />
@@ -28,7 +36,7 @@ export function SourceLabel({ p }: { p: Project }) {
 }
 
 export function CommitChip({ d }: { d: Deployment }) {
-  if (!d.commit) return <span className="rounded-md border border-neutral-200 px-1.5 py-0.5 font-mono text-xs">{d.spec.image}</span>;
+  if (!d.commit) return <span className="rounded-md border border-neutral-200 px-1.5 py-0.5 font-mono text-xs">{d.spec.compose ? "compose stack" : d.spec.image}</span>;
   return (
     <span className="inline-flex shrink-0 items-center overflow-hidden rounded-md border border-neutral-200 text-xs">
       <span className="px-1.5 py-0.5">{d.commit.branch}</span>
@@ -39,7 +47,7 @@ export function CommitChip({ d }: { d: Deployment }) {
 
 export function deploymentTitle(d: Deployment) {
   if (d.commit) return d.commit.message.split("\n")[0];
-  return `Deploy ${d.spec.image}`;
+  return d.spec.compose ? `Deploy stack ${d.spec.service}` : `Deploy ${d.spec.image}`;
 }
 
 const triggerLabel = { manual: "Manual", push: "Push", retry: "Retry", poll: "New commit", rollback: "Rollback" };

@@ -168,6 +168,14 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 				}
 			}
 		}
+	case store.SourceCompose:
+		src.Compose = strings.ReplaceAll(src.Compose, "\r\n", "\n")
+		if err := checkComposeFile(src.Compose); err != nil {
+			return err
+		}
+		src.Repo, src.Branch, src.Context, src.Dockerfile, src.AutoDeploy, src.Node, src.Image = "", "", "", "", false, nil, ""
+		src.Watch, src.Preview = store.Watch{}, nil
+		in.Runtime.Ports, in.Runtime.Volumes, in.Runtime.Command, in.Runtime.Labels, in.Runtime.Network = nil, nil, nil, nil, ""
 	case store.SourceImage:
 		if src.Image = strings.TrimSpace(src.Image); src.Image == "" {
 			return errors.New("image is required")
@@ -175,7 +183,7 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 		src.Repo, src.Branch, src.Context, src.Dockerfile, src.AutoDeploy, src.Node = "", "", "", "", false, nil
 		src.Watch, src.Preview = store.Watch{}, nil
 	default:
-		return errors.New("source type must be github or image")
+		return errors.New("source type must be github, image or compose")
 	}
 	in.Runtime.Ports = cleanLabels(in.Runtime.Ports)
 	for _, p := range in.Runtime.Ports {
@@ -300,11 +308,18 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case err != nil:
 			// The device is gone, so there is no container left to remove.
+		case p.Source.Type == store.SourceCompose && !hasCap(d, api.CapCompose):
+			writeError(w, http.StatusConflict, "this device's agent is too old to remove stacks; update it from the Updates page first")
+			return
 		case !hasCap(d, api.CapPreview):
 			writeError(w, http.StatusConflict, "this device's agent is too old to remove containers; update it from the Updates page first")
 			return
 		default:
-			if _, err := s.store.CreateCommand(r.Context(), d.ID, api.ActionRemove, serviceOf(p), nil); err != nil {
+			action, target := api.ActionRemove, serviceOf(p)
+			if p.Source.Type == store.SourceCompose {
+				action, target = api.ActionStackDown, p.Name
+			}
+			if _, err := s.store.CreateCommand(r.Context(), d.ID, action, target, nil); err != nil {
 				s.internal(w, err)
 				return
 			}
@@ -331,8 +346,12 @@ func (s *Server) deploy(ctx context.Context, p *store.Project, commit *store.Com
 
 // deployWith is deploy with a chance to adjust the spec before it is queued.
 func (s *Server) deployWith(ctx context.Context, p *store.Project, commit *store.Commit, trigger string, tweak func(*api.DeploySpec)) (*store.Deployment, error) {
-	if _, err := s.store.GetDevice(ctx, p.DeviceID); err != nil {
+	dev, err := s.store.GetDevice(ctx, p.DeviceID)
+	if err != nil {
 		return nil, errors.New("the project's device no longer exists")
+	}
+	if p.Source.Type == store.SourceCompose && !hasCap(dev, api.CapCompose) {
+		return nil, errors.New("this device's agent is too old for stacks; update it from the Updates page first")
 	}
 	if p.Source.Type != store.SourceGitHub {
 		commit = nil

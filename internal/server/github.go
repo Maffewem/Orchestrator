@@ -265,6 +265,16 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 			return spec, errors.New("project has no image")
 		}
 		spec.Image = p.Source.Image
+	case store.SourceCompose:
+		if strings.TrimSpace(p.Source.Compose) == "" {
+			return spec, errors.New("project has no compose file")
+		}
+		if err := checkComposeVars(p.Source.Compose, p.Runtime.Env); err != nil {
+			return spec, err
+		}
+		spec.Compose = &api.ComposeSpec{YAML: p.Source.Compose, Env: p.Runtime.Env}
+		spec.Service = p.Name
+		spec.Ports, spec.Env, spec.Volumes, spec.Command, spec.Network, spec.Labels = nil, nil, nil, nil, "", nil
 	case store.SourceGitHub:
 		if commit == nil || commit.SHA == "" {
 			return spec, errors.New("no commit to build")

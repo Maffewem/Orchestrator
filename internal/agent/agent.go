@@ -252,6 +252,12 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		}
 	case api.ActionFileStore:
 		err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
+	case api.ActionStackStart, api.ActionStackStop, api.ActionStackDown:
+		sctx, scancel := context.WithTimeout(ctx, 10*time.Minute)
+		output, err = a.stackAction(sctx, c.Action, c.Target, c.Args["volumes"])
+		scancel()
+	case api.ActionTunnelSync:
+		err = a.syncTunnel(cctx, c.Args["token"])
 	case api.ActionProxySync:
 		err = a.syncProxy(cctx, c.Args["caddyfile"], c.Args["cloudflare_token"])
 	case api.ActionBackup, api.ActionRestore:

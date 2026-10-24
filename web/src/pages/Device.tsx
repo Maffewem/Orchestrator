@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Route, Routes, useNavigate, useParams } from "react-router";
 import { Trash2 } from "lucide-react";
-import { api, type Device } from "../api";
+import { api, type Device, type TunnelRoute, type TunnelView } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
@@ -131,6 +131,118 @@ function ProxyCard({ d }: { d: Device }) {
   );
 }
 
+/**
+ * One Cloudflare Tunnel per device (a cloudflared container). Any worker on the device can be
+ * published through it, so it is set up here rather than per project.
+ */
+function TunnelCard({ d }: { d: Device }) {
+  const isAdmin = useCan("admin");
+  const tunnel = usePoll(() => api.tunnel(d.id), 5000, [d.id]);
+  const t = tunnel.data;
+  const projects = usePoll(api.projects, 0);
+  const [token, setToken] = useState("");
+  const [routes, setRoutes] = useState<TunnelRoute[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const shown = routes ?? t?.routes ?? [];
+  const mine = (projects.data ?? []).filter((p) => p.device_id === d.id && p.source.type !== "compose");
+  const act = async (fn: () => Promise<TunnelView>, after?: () => void) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const v = await fn();
+      setWarnings(v.warnings ?? []);
+      after?.();
+      tunnel.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader title="Cloudflare Tunnel" subtitle="Publish workers on this device through Cloudflare without opening ports." />
+      <div className="space-y-3 p-5 text-sm">
+        {!t ? (
+          <p className="text-neutral-500">Loading…</p>
+        ) : !t.supported ? (
+          <p className="text-neutral-500">This agent is too old to run a tunnel. Update it from the Updates page.</p>
+        ) : (
+          <>
+            <p className="flex items-center gap-2">
+              <Badge>{t.enabled ? (t.state ?? "starting") : "off"}</Badge>
+              {t.tunnel_id && <span className="font-mono text-xs text-neutral-500">{t.tunnel_id}</span>}
+            </p>
+            {!t.enabled && (
+              <p className="text-neutral-500">
+                Create a tunnel in Cloudflare Zero Trust (Networks, Tunnels), then paste its token or the whole connector command here. Orchestrator runs cloudflared on this device.
+              </p>
+            )}
+            {isAdmin && (
+              <div className="flex gap-2">
+                <input
+                  className={inputClass}
+                  type="password"
+                  autoComplete="off"
+                  placeholder={t.enabled ? "Paste a new token to replace the current one" : "Tunnel token"}
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                />
+                <Button variant="primary" disabled={busy || !token.trim() || d.status !== "online"} onClick={() => act(() => api.setTunnel(d.id, token), () => setToken(""))}>
+                  {t.enabled ? "Replace" : "Enable"}
+                </Button>
+                {t.enabled && (
+                  <Button disabled={busy} onClick={() => act(() => api.setTunnel(d.id, ""))}>
+                    Remove
+                  </Button>
+                )}
+              </div>
+            )}
+            {t.enabled && (
+              <div className="space-y-2 border-t border-neutral-200 pt-3">
+                <p className="font-medium">Public hostnames</p>
+                <p className="text-xs text-neutral-500">
+                  {t.can_route
+                    ? "Applied to the tunnel through the Cloudflare API connected in Settings, which also creates the DNS records."
+                    : "Connect Cloudflare in Settings to apply these from here (token needs Account > Cloudflare Tunnel > Edit). Until then add the same hostnames in the Cloudflare dashboard."}
+                </p>
+                {shown.map((r, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input className={inputClass} placeholder="app.example.com" value={r.hostname} disabled={!isAdmin} onChange={(e) => setRoutes(shown.map((x, j) => (j === i ? { ...x, hostname: e.target.value } : x)))} />
+                    <input className={inputClass} list={`svc-${d.id}`} placeholder="http://localhost:3000" value={r.service} disabled={!isAdmin} onChange={(e) => setRoutes(shown.map((x, j) => (j === i ? { ...x, service: e.target.value } : x)))} />
+                    {isAdmin && <Button onClick={() => setRoutes(shown.filter((_, j) => j !== i))}>×</Button>}
+                  </div>
+                ))}
+                <datalist id={`svc-${d.id}`}>
+                  {mine.map((p) => (
+                    <option key={p.id} value={`project:${p.name}`} />
+                  ))}
+                </datalist>
+                {isAdmin && (
+                  <div className="flex gap-2">
+                    <Button onClick={() => setRoutes([...shown, { hostname: "", service: "" }])}>Add hostname</Button>
+                    {routes && (
+                      <Button variant="primary" disabled={busy} onClick={() => act(() => api.setTunnelRoutes(d.id, shown.filter((r) => r.hostname.trim())), () => setRoutes(null))}>
+                        Save and apply
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {warnings.map((w) => (
+          <p key={w} className="text-xs text-amber-700">{w}</p>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 /** Server Manager-style properties, health and performance for one device. */
 function DeviceOverview({ d }: { d: Device }) {
   const samples = usePoll(() => api.deviceMetrics(d.id), 5000, [d.id]);
@@ -205,6 +317,7 @@ function DeviceOverview({ d }: { d: Device }) {
           </dl>
         </Card>
         <ProxyCard d={d} />
+        <TunnelCard d={d} />
         {d.labels.length > 0 && (
           <Card>
             <CardHeader title="Roles" />

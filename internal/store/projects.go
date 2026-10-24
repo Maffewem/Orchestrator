@@ -17,6 +17,8 @@ var ErrConflict = errors.New("conflict")
 const (
 	SourceGitHub = "github"
 	SourceImage  = "image"
+	// SourceCompose is a Docker Compose stack; its YAML is stored with the project.
+	SourceCompose = "compose"
 )
 
 // Source is where a project's container image comes from.
@@ -39,6 +41,8 @@ type Source struct {
 	Preview *PreviewBuild `json:"preview,omitempty"`
 	// Image source: a registry reference such as nginx:1.27.
 	Image string `json:"image,omitempty"`
+	// Compose source: the docker-compose YAML. ${VAR} references are filled from the project's environment.
+	Compose string `json:"compose,omitempty"`
 }
 
 // Watch is a pair of path globs, relative to the repository root. A build is wanted when a

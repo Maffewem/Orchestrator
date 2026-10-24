@@ -112,7 +112,7 @@ export interface PreviewBuild {
 }
 
 export interface Source {
-  type: "github" | "image";
+  type: "github" | "image" | "compose";
   repo?: string;
   branch?: string;
   context?: string;
@@ -123,6 +123,8 @@ export interface Source {
   exclude?: string[];
   preview?: PreviewBuild;
   image?: string;
+  /** Compose source: the docker-compose YAML. */
+  compose?: string;
 }
 
 export interface Runtime {
@@ -184,6 +186,23 @@ export interface DeploySpec {
   env?: string[];
   restart?: string;
   build?: { remote: string; dockerfile?: string };
+  compose?: { yaml: string; env?: string[] };
+}
+
+export interface TunnelRoute {
+  hostname: string;
+  /** A URL such as http://localhost:3000, or project:<name>. */
+  service: string;
+}
+
+export interface TunnelView {
+  supported: boolean;
+  enabled: boolean;
+  state?: string;
+  tunnel_id?: string;
+  routes: TunnelRoute[];
+  can_route: boolean;
+  warnings?: string[];
 }
 
 export interface Deployment {
@@ -638,6 +657,11 @@ export const api = {
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
   updateDevice: (id: string, patch: { name?: string; labels?: string[] }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
+  tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
+  setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),
+  setTunnelRoutes: (id: string, routes: TunnelRoute[]) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/routes`, { routes }),
+  stackAction: (projectId: string, action: "start" | "stop" | "down", volumes = false) =>
+    request<Command>("POST", `/api/projects/${projectId}/stack`, { action, volumes }),
   enableProxy: (id: string) => request<void>("POST", `/api/devices/${id}/proxy`),
   deleteDevice: (id: string) => request<void>("DELETE", `/api/devices/${id}`),
   containers: () => request<FleetContainer[]>("GET", "/api/containers"),

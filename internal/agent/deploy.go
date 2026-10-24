@@ -96,6 +96,9 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	st := a.newSteps(ctx, deploymentID)
 	defer func() { st.finish(context.WithoutCancel(ctx), err) }()
 
+	if spec.Compose != nil {
+		return a.deployCompose(ctx, st, deploymentID, spec)
+	}
 	st.begin(ctx, api.StepIndex(spec, api.StepInit))
 	st.logf("Initializing deployment %s on %s", deploymentID, a.hostInfo().Hostname)
 	st.logf("Service: %s", spec.Service)

@@ -454,6 +454,8 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	d, err := s.deployWith(r.Context(), p, old.Commit, store.TriggerRollback, func(spec *api.DeploySpec) {
 		if p.Source.Type == store.SourceImage {
 			spec.Image = old.Spec.Image
+		} else if p.Source.Type == store.SourceCompose {
+			spec.Compose = old.Spec.Compose
 		} else {
 			spec.Reuse = true
 		}

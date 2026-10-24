@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Box, Github, Globe, Package, Server } from "lucide-react";
+import { Box, Github, Globe, Layers, Package, Server } from "lucide-react";
 import { api, type NodeBuild, type PreviewBuild, type Project, type ProjectInput, type Source } from "../api";
 import EnvEditor from "../components/EnvEditor";
 import { Button, ChipInput, ErrorNote, Field, Toggle, inputClass } from "../components/ui";
@@ -97,10 +97,11 @@ export default function ProjectForm({
     <form onSubmit={submit} className="space-y-8">
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Source</legend>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           {[
             { type: "github" as const, icon: Github, title: "GitHub repository", sub: "Build a Dockerfile or Node.js project on the device, redeploy on push" },
             { type: "image" as const, icon: Package, title: "Container image", sub: "Pull an image from Docker Hub or any registry" },
+            { type: "compose" as const, icon: Layers, title: "Compose stack", sub: "Paste a docker-compose file that runs several services together" },
           ].map((o) => (
             <button
               type="button"
@@ -297,6 +298,20 @@ export default function ProjectForm({
               )}
             </div>
           </div>
+        ) : source.type === "compose" ? (
+          <Field
+            label="docker-compose.yml"
+            hint="Use ${VAR} or ${VAR:?message} for values you set under Environment variables below, such as ${TUNNEL_TOKEN:?needed}. Relative bind mounts (./data) are not supported; use named volumes."
+          >
+            <textarea
+              className={cx(inputClass, "font-mono text-xs")}
+              rows={16}
+              spellCheck={false}
+              placeholder={"services:\n  app:\n    image: nginx:latest\n    ports: [\"8080:80\"]"}
+              value={source.compose ?? ""}
+              onChange={(e) => set({ compose: e.target.value })}
+            />
+          </Field>
         ) : (
           <Field label="Image" hint="For example nginx:1.27, ghcr.io/owner/app:latest or pihole/pihole.">
             <input className={inputClass} placeholder="nginx:latest" value={source.image} onChange={(e) => set({ image: e.target.value })} />
@@ -307,7 +322,7 @@ export default function ProjectForm({
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Project</legend>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Project name" hint="Lowercase letters, digits and dashes. Also used as the container name.">
+          <Field label="Project name" hint={source.type === "compose" ? "Lowercase letters, digits and dashes. Also the Compose project name." : "Lowercase letters, digits and dashes. Also used as the container name."}>
             <input className={inputClass} placeholder="my-service" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="Device">
@@ -325,7 +340,8 @@ export default function ProjectForm({
       </fieldset>
 
       <fieldset className="space-y-4">
-        <legend className="mb-3 text-base font-semibold">Runtime</legend>
+        <legend className="mb-3 text-base font-semibold">{source.type === "compose" ? "Environment" : "Runtime"}</legend>
+        {source.type !== "compose" && (<>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Ports" hint={node ? "host:container. Empty: 8080:80 for a static site, 3000:3000 for a Node server (it gets PORT set to the container port)." : "One per line: host:container, e.g. 8080:80 or 53:53/udp."}>
             <textarea className={cx(inputClass, "font-mono")} rows={3} value={ports} onChange={(e) => setPorts(e.target.value)} />
@@ -342,7 +358,8 @@ export default function ProjectForm({
         <Field label="Volumes" hint="One per line: name:/path for a named volume, /host/path:/path for a folder, add :ro for read-only. Existing data stays when the container is recreated.">
           <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
         </Field>
-        <Field as="div" label="Environment variables" hint={node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
+        </>)}
+        <Field as="div" label="Environment variables" hint={source.type === "compose" ? "Fills the ${VAR} references in the compose file. They are not passed to the containers unless the file lists them under environment." : node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
           <EnvEditor value={env} onChange={setEnv} />
         </Field>
       </fieldset>

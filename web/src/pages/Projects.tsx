@@ -19,6 +19,16 @@ export function SourceLabel({ p }: { p: Project }) {
       </span>
     );
   }
+  if (p.source.type === "compose" && p.source.repo) {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <Github className="size-3.5 shrink-0" />
+        <span className="truncate">{p.source.repo}</span>
+        <GitBranch className="ml-1 size-3.5 shrink-0" />
+        <span className="truncate">{p.source.branch}</span>
+      </span>
+    );
+  }
   if (p.source.type === "compose") {
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5">

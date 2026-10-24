@@ -125,6 +125,8 @@ export interface Source {
   image?: string;
   /** Compose source: the docker-compose YAML. */
   compose?: string;
+  /** Compose source from GitHub: path of the compose file in repo. */
+  compose_file?: string;
 }
 
 export interface Runtime {

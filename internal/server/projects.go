@@ -169,12 +169,32 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			}
 		}
 	case store.SourceCompose:
-		src.Compose = strings.ReplaceAll(src.Compose, "\r\n", "\n")
-		if err := checkComposeFile(src.Compose); err != nil {
-			return err
+		if src.Repo = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(src.Repo), githubRemote), ".git"); src.Repo != "" {
+			if !repoRe.MatchString(src.Repo) {
+				return errors.New("repository must look like owner/name")
+			}
+			if src.Branch = strings.TrimSpace(src.Branch); src.Branch == "" {
+				src.Branch = "main"
+			}
+			src.ComposeFile = strings.Trim(strings.TrimSpace(src.ComposeFile), "/")
+			if src.ComposeFile == "" {
+				src.ComposeFile = "docker-compose.yml"
+			}
+			if strings.Contains(src.ComposeFile, "..") {
+				return errors.New("the compose file path must stay inside the repository")
+			}
+			if err := cleanWatch(&src.Watch); err != nil {
+				return err
+			}
+			src.Compose = ""
+		} else {
+			src.Compose = strings.ReplaceAll(src.Compose, "\r\n", "\n")
+			if err := checkComposeFile(src.Compose); err != nil {
+				return err
+			}
+			src.Branch, src.ComposeFile, src.AutoDeploy, src.Watch = "", "", false, store.Watch{}
 		}
-		src.Repo, src.Branch, src.Context, src.Dockerfile, src.AutoDeploy, src.Node, src.Image = "", "", "", "", false, nil, ""
-		src.Watch, src.Preview = store.Watch{}, nil
+		src.Context, src.Dockerfile, src.Node, src.Image, src.Preview = "", "", nil, "", nil
 		in.Runtime.Ports, in.Runtime.Volumes, in.Runtime.Command, in.Runtime.Labels, in.Runtime.Network = nil, nil, nil, nil, ""
 	case store.SourceImage:
 		if src.Image = strings.TrimSpace(src.Image); src.Image == "" {
@@ -353,8 +373,24 @@ func (s *Server) deployWith(ctx context.Context, p *store.Project, commit *store
 	if p.Source.Type == store.SourceCompose && !hasCap(dev, api.CapCompose) {
 		return nil, errors.New("this device's agent is too old for stacks; update it from the Updates page first")
 	}
-	if p.Source.Type != store.SourceGitHub {
+	if !p.Source.FromRepo() {
 		commit = nil
+	}
+	if p.Source.Type == store.SourceCompose && p.Source.Repo != "" {
+		// The compose file is read at the commit being deployed, so a push changes the stack.
+		if commit == nil {
+			return nil, errors.New("no commit to read the compose file from")
+		}
+		yaml, err := s.repoFile(ctx, p.Source.Repo, p.Source.ComposeFile, commit.SHA)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkComposeFile(yaml); err != nil {
+			return nil, fmt.Errorf("%s: %w", p.Source.ComposeFile, err)
+		}
+		cp := *p
+		cp.Source.Compose = yaml
+		p = &cp
 	}
 	spec, err := specFor(p, commit)
 	if err != nil {
@@ -387,7 +423,7 @@ func (s *Server) handleDeployProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var commit *store.Commit
-	if p.Source.Type == store.SourceGitHub {
+	if p.Source.FromRepo() {
 		var err error
 		if commit, err = s.latestCommit(r.Context(), p.Source.Repo, p.Source.Branch); err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())

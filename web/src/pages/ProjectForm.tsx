@@ -299,7 +299,48 @@ export default function ProjectForm({
             </div>
           </div>
         ) : source.type === "compose" ? (
-          <Field
+          <div className="space-y-4">
+            <div className="inline-flex rounded-lg bg-neutral-100 p-0.5 text-sm" role="tablist">
+              {([false, true] as const).map((fromRepo) => (
+                <button
+                  type="button"
+                  role="tab"
+                  key={String(fromRepo)}
+                  aria-selected={!!source.repo === fromRepo}
+                  onClick={() => set(fromRepo ? { repo: source.repo || " ", branch: source.branch || "main", compose_file: source.compose_file || "docker-compose.yml", auto_deploy: true } : { repo: "", auto_deploy: false })}
+                  className={cx("rounded-md px-3 py-1 font-medium transition-colors", !!source.repo === fromRepo ? "bg-white shadow-sm" : "text-neutral-500 hover:text-neutral-800")}
+                >
+                  {fromRepo ? "From GitHub" : "Paste YAML"}
+                </button>
+              ))}
+            </div>
+            {source.repo ? (
+              <>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label="Repository" hint="Public repos work as-is. Connect GitHub in Settings for private repos.">
+                    <input className={inputClass} placeholder="owner/repository" value={source.repo.trim()} onChange={(e) => set({ repo: e.target.value || " " })} />
+                  </Field>
+                  <Field label="Branch">
+                    <input className={inputClass} value={source.branch ?? ""} onChange={(e) => set({ branch: e.target.value })} />
+                  </Field>
+                  <Field label="Compose file" hint="Path in the repository.">
+                    <input className={inputClass} placeholder="docker-compose.yml" value={source.compose_file ?? ""} onChange={(e) => set({ compose_file: e.target.value })} />
+                  </Field>
+                </div>
+                <Panel>
+                  <ToggleRow
+                    title="Redeploy on push"
+                    sub="Read the compose file again and update the stack whenever the branch changes. Services with build: are built from a checkout of the repository on the device (needs git)."
+                    checked={source.auto_deploy}
+                    onChange={(on) => set({ auto_deploy: on })}
+                  />
+                </Panel>
+                <Field as="div" label="Only for changes to" hint="Include or exclude paths; empty means any change redeploys.">
+                  <ChipInput value={source.include ?? []} onChange={(v) => set({ include: v })} placeholder="* (all files)" />
+                </Field>
+              </>
+            ) : null}
+          {!source.repo && (<Field
             label="docker-compose.yml"
             hint="Use ${VAR} or ${VAR:?message} for values you set under Environment variables below, such as ${TUNNEL_TOKEN:?needed}. Relative bind mounts (./data) are not supported; use named volumes."
           >
@@ -311,7 +352,8 @@ export default function ProjectForm({
               value={source.compose ?? ""}
               onChange={(e) => set({ compose: e.target.value })}
             />
-          </Field>
+          </Field>)}
+          </div>
         ) : (
           <Field label="Image" hint="For example nginx:1.27, ghcr.io/owner/app:latest or pihole/pihole.">
             <input className={inputClass} placeholder="nginx:latest" value={source.image} onChange={(e) => set({ image: e.target.value })} />

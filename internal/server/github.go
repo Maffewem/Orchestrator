@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -273,6 +274,12 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 			return spec, err
 		}
 		spec.Compose = &api.ComposeSpec{YAML: p.Source.Compose, Env: p.Runtime.Env}
+		if p.Source.Repo != "" {
+			if commit == nil || commit.SHA == "" {
+				return spec, errors.New("no commit to deploy")
+			}
+			spec.Compose.Remote = githubRemote + p.Source.Repo + ".git#" + commit.SHA
+		}
 		spec.Service = p.Name
 		spec.Ports, spec.Env, spec.Volumes, spec.Command, spec.Network, spec.Labels = nil, nil, nil, nil, "", nil
 	case store.SourceGitHub:
@@ -304,15 +311,52 @@ func withCredentials(cmds []api.Command, token string) {
 	}
 	for i := range cmds {
 		c := &cmds[i]
-		if c.Deploy == nil || c.Deploy.Build == nil || !strings.HasPrefix(c.Deploy.Build.Remote, githubRemote) {
+		if c.Deploy == nil {
 			continue
 		}
 		spec := *c.Deploy
-		build := *spec.Build
-		build.Remote = "https://x-access-token:" + url.PathEscape(token) + "@github.com/" + strings.TrimPrefix(build.Remote, githubRemote)
-		spec.Build = &build
+		switch {
+		case spec.Build != nil && strings.HasPrefix(spec.Build.Remote, githubRemote):
+			build := *spec.Build
+			build.Remote = withToken(build.Remote, token)
+			spec.Build = &build
+		case spec.Compose != nil && strings.HasPrefix(spec.Compose.Remote, githubRemote):
+			cs := *spec.Compose
+			cs.Remote = withToken(cs.Remote, token)
+			spec.Compose = &cs
+		default:
+			continue
+		}
 		c.Deploy = &spec
 	}
+}
+
+func withToken(remote, token string) string {
+	return "https://x-access-token:" + url.PathEscape(token) + "@github.com/" + strings.TrimPrefix(remote, githubRemote)
+}
+
+// repoFile reads one file of a repository at a commit through the contents API.
+func (s *Server) repoFile(ctx context.Context, repo, file, ref string) (string, error) {
+	var out struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	parts := strings.Split(file, "/")
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	path := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, strings.Join(parts, "/"), url.QueryEscape(ref))
+	if err := s.githubGet(ctx, path, &out); err != nil {
+		return "", fmt.Errorf("reading %s from %s: %w", file, repo, err)
+	}
+	if out.Encoding != "base64" {
+		return "", fmt.Errorf("%s is not a file", file)
+	}
+	b, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(out.Content, "\n", ""))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // serviceOf is the name of the container a project runs as: the project name, unless the

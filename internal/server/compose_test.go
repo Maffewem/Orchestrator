@@ -1,8 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -143,5 +146,67 @@ func TestTunnelSetup(t *testing.T) {
 	}
 	if code := h.do("PUT", path, adminToken, map[string]any{"token": ""}, &v); code != http.StatusOK || v.Enabled {
 		t.Fatalf("disable: %d %+v", code, v)
+	}
+}
+
+func TestComposeStackFromGitHub(t *testing.T) {
+	yaml := "services:\n  app:\n    build: .\n    image: app\n"
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/repos/Maffewem/Stack/commits/"):
+			json.NewEncoder(w).Encode(map[string]any{"sha": "abc1234def", "commit": map[string]any{"message": "update", "author": map[string]any{"name": "m"}}})
+		case r.URL.Path == "/repos/Maffewem/Stack/contents/deploy/compose.yml" && r.URL.Query().Get("ref") == "abc1234def":
+			json.NewEncoder(w).Encode(map[string]any{"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(yaml))})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gh.Close()
+	h := newHarness(t)
+	h.srv.githubAPI = gh.URL
+	reg := h.register("pi-4")
+	var resp api.HeartbeatResponse
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Capabilities: []string{api.CapCompose}}}, &resp)
+	var p ProjectView
+	body := map[string]any{
+		"name": "stack", "device_id": reg.DeviceID,
+		"source": map[string]any{"type": "compose", "repo": "Maffewem/Stack", "branch": "main", "compose_file": "/deploy/compose.yml", "auto_deploy": true, "compose": "ignored"},
+	}
+	if code := h.do("POST", "/api/projects", adminToken, body, &p); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	if p.Source.Compose != "" || p.Source.ComposeFile != "deploy/compose.yml" {
+		t.Fatalf("source: %+v", p.Source)
+	}
+	var dep struct{ Steps []struct{ Name string } }
+	if code := h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, &dep); code != http.StatusAccepted {
+		t.Fatalf("deploy: %d", code)
+	}
+	h.srv.githubToken(context.Background())
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Capabilities: []string{api.CapCompose}}}, &resp)
+	if len(resp.Commands) != 1 {
+		t.Fatalf("commands: %+v", resp.Commands)
+	}
+	c := resp.Commands[0].Deploy.Compose
+	if c == nil || c.YAML != yaml || c.Remote != "https://github.com/Maffewem/Stack.git#abc1234def" {
+		t.Fatalf("compose spec: %+v", c)
+	}
+	var names []string
+	for _, s := range dep.Steps {
+		names = append(names, s.Name)
+	}
+	if strings.Join(names, ",") != "Initializing,Cloning,Pulling image,Deploying,Verifying" {
+		t.Fatalf("steps: %v", names)
+	}
+	// Credentials are added on the way out, never stored.
+	cmds := []api.Command{{Deploy: &api.DeploySpec{Compose: &api.ComposeSpec{Remote: c.Remote}}}}
+	withCredentials(cmds, "tok")
+	if !strings.Contains(cmds[0].Deploy.Compose.Remote, "x-access-token:tok@github.com/Maffewem/Stack.git#abc1234def") || strings.Contains(c.Remote, "tok") {
+		t.Fatalf("credentials: %s", cmds[0].Deploy.Compose.Remote)
+	}
+	// Pushes to the branch find the project.
+	ps, _ := h.srv.store.ProjectsForPush(context.Background(), "Maffewem/Stack", "main")
+	if len(ps) != 1 {
+		t.Fatalf("push projects: %d", len(ps))
 	}
 }

@@ -117,6 +117,7 @@ func routeRole(pattern string) string {
 		"POST /api/projects":                                 true,
 		"PATCH /api/projects/{id}":                           true,
 		"POST /api/projects/{id}/deployments":                true,
+		"POST /api/projects/{id}/stack":                      true,
 		"POST /api/deployments/{id}/retry":                   true,
 		"PUT /api/projects/{id}/domains/urls":                true,
 		"POST /api/projects/{id}/domains":                    true,

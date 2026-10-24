@@ -39,6 +39,8 @@ const (
 	CapStream    = "stream"    // live log following and container shells
 	CapInspect   = "inspect"   // container.inspect, used to adopt existing containers
 	CapFileStore = "filestore" // file.store, receives server backups
+	CapCompose   = "compose"   // deploy of a Compose stack, and stack.start/stop/down
+	CapTunnel    = "tunnel"    // tunnel.sync, runs cloudflared
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -133,6 +135,13 @@ const (
 	ActionInspect = "container.inspect"
 	// ActionFileStore downloads the server backup Args["name"] into the folder Args["dir"], keeping the newest Args["keep"].
 	ActionFileStore = "file.store"
+	// ActionStackStart, ActionStackStop and ActionStackDown act on every container of the Compose
+	// stack named Target. Down removes the containers and networks; Args["volumes"] == "delete" also removes its volumes.
+	ActionStackStart = "stack.start"
+	ActionStackStop  = "stack.stop"
+	ActionStackDown  = "stack.down"
+	// ActionTunnelSync runs (or, with an empty Args["token"], removes) the device's cloudflared container.
+	ActionTunnelSync = "tunnel.sync"
 )
 
 // ContainerSpec is a running container's configuration, translated into what a DeploySpec can
@@ -207,8 +216,16 @@ type DeploySpec struct {
 	Volumes []string `json:"volumes,omitempty"`
 	// Network is a network name or "host"; empty is Docker's default bridge.
 	Network string `json:"network,omitempty"`
+	// Compose, when set, makes this a Compose stack: Service is the stack (project) name and Image is unused.
+	Compose *ComposeSpec `json:"compose,omitempty"`
 	// Reuse lets the agent skip the build when Image already exists on the device (rollbacks).
 	Reuse bool `json:"reuse,omitempty"`
+}
+
+// ComposeSpec is a Docker Compose file and the values its ${VAR} references are filled from.
+type ComposeSpec struct {
+	YAML string   `json:"yaml"`
+	Env  []string `json:"env,omitempty"` // KEY=value
 }
 
 // BuildSpec asks the agent to build the image on the device from a git context
@@ -240,6 +257,8 @@ type NodeSpec struct {
 // control plane both derive step indexes from this list.
 func StepsFor(spec DeploySpec) []string {
 	switch {
+	case spec.Compose != nil:
+		return []string{StepInit, StepPulling, StepDeploy, StepVerify}
 	case IsNode(spec):
 		return []string{StepInit, StepCloning, StepInstalling, StepBuilding, StepDeploy, StepVerify}
 	case spec.Build != nil:

@@ -190,6 +190,19 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.event(r.Context(), d.ID, "error", "proxy.sync", fmt.Sprintf("Domain proxy on %s failed: %s", d.Name, res.Error))
 		}
+	case api.ActionTunnelSync:
+		if res.OK {
+			s.event(r.Context(), d.ID, "info", "tunnel.sync", "Cloudflare Tunnel on "+d.Name+" updated")
+		} else {
+			s.event(r.Context(), d.ID, "error", "tunnel.sync", fmt.Sprintf("Cloudflare Tunnel on %s failed: %s", d.Name, res.Error))
+		}
+	case api.ActionStackStart, api.ActionStackStop, api.ActionStackDown:
+		verb := strings.TrimPrefix(c.Action, "stack.")
+		if res.OK {
+			s.event(r.Context(), d.ID, "info", c.Action, fmt.Sprintf("Stack %s: %s succeeded", c.Target, verb))
+		} else {
+			s.event(r.Context(), d.ID, "error", c.Action, fmt.Sprintf("Stack %s: %s failed: %s", c.Target, verb, res.Error))
+		}
 	case api.ActionRemove:
 		if !res.OK {
 			s.event(r.Context(), d.ID, "error", "container.remove", fmt.Sprintf("Removing %s failed: %s", c.Target, res.Error))
@@ -462,8 +475,12 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 	}
 	names := map[string]string{}
 	adopted := map[string]*store.Project{} // device|container name -> project, until the first redeploy labels the container
+	stacks := map[string]*store.Project{} // device|compose project name -> project
 	for _, p := range projects {
 		names[p.ID] = p.Name
+		if p.Source.Type == store.SourceCompose {
+			stacks[p.DeviceID+"|"+p.Name] = p
+		}
 		if p.Runtime.Adopted {
 			adopted[p.DeviceID+"|"+serviceOf(p)] = p
 		}
@@ -479,6 +496,8 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 			fc := fleetContainer{Container: c, DeviceID: d.ID, DeviceName: d.Name, DeviceStatus: status, DeviceAddresses: addrs}
 			if id := c.Labels["orchestrator.project"]; names[id] != "" {
 				fc.ProjectID, fc.ProjectName = id, names[id]
+			} else if p := stacks[d.ID+"|"+c.ComposeProject]; p != nil && c.ComposeProject != "" {
+				fc.ProjectID, fc.ProjectName = p.ID, p.Name
 			} else if p := adopted[d.ID+"|"+c.Name]; p != nil && c.Labels["orchestrator.project"] == "" {
 				fc.ProjectID, fc.ProjectName = p.ID, p.Name
 			}

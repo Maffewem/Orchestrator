@@ -293,6 +293,12 @@ The agent uses `POST /api/agent/register`, `/heartbeat`, `/commands/{id}/result`
 `/deployments/{id}/steps/{n}`, plus `/backups/{id}` to upload or fetch a backup archive. GitHub calls `POST /api/github/webhook`, which is verified
 with HMAC-SHA256.
 
+## Compose stacks and Cloudflare Tunnel
+
+**Stacks.** Create a project with the *Compose stack* source and paste a `docker-compose.yml`. The `${VAR}` and `${VAR:?message}` references are filled from the project's environment variables (a missing required one is reported before anything is queued). Deploying runs `docker compose pull` and `up -d` on the device under the project name, with the usual step timeline and logs; Start, Stop and Remove act on the whole stack. Needs the docker CLI with the compose plugin on the device (the agent image includes it) and an up-to-date agent (`compose` capability). Relative bind mounts (`./data`) are not supported; use named volumes. Compose recreates only changed services, so there is no blue/green swap or automatic rollback.
+
+**Tunnel.** On a device page, paste a Cloudflare Tunnel token (or the whole connector command) to run `cloudflared` there on the host network, as the `orchestrator-tunnel` container. Any worker or stack on the device can then be published through it. With Cloudflare connected in Settings (token needs *Account > Cloudflare Tunnel > Edit*), the *Public hostnames* list is pushed to the tunnel's ingress and CNAME records are created; otherwise add the hostnames in the Cloudflare dashboard. A service is a URL like `http://localhost:3000` or `project:<name>`.
+
 ## Server backup
 
 Settings > Server backup snapshots Orchestrator's own database (users, projects, settings,

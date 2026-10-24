@@ -139,7 +139,8 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
   const c = d.commit;
   const settings: [string, string][] = [
     ["Service", d.spec.service],
-    ["Image", d.spec.image],
+    ...(d.spec.compose ? [] : ([["Image", d.spec.image]] as [string, string][])),
+    ...(d.spec.compose ? ([["Compose file", `${d.spec.compose.yaml.split("\n").length} lines`]] as [string, string][]) : []),
     ...(d.spec.build ? ([["Build context", d.spec.build.remote.replace(/^https:\/\/github\.com\//, "")], ["Dockerfile", d.spec.build.dockerfile || "Dockerfile"]] as [string, string][]) : []),
     ["Ports", d.spec.ports?.join(", ") || "None"],
     ["Environment", d.spec.env?.length ? d.spec.env.map((e) => e.split("=")[0]).join(", ") : "None"],
@@ -169,8 +170,8 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
           </>
         ) : (
           <>
-            <span className="rounded-full border border-neutral-200 px-2.5 py-0.5 font-mono text-sm">{d.spec.image}</span>
-            <span className="min-w-0 flex-1 basis-full truncate sm:basis-0">Deploy {d.spec.image}</span>
+            <span className="rounded-full border border-neutral-200 px-2.5 py-0.5 font-mono text-sm">{d.spec.compose ? "compose stack" : d.spec.image}</span>
+            <span className="min-w-0 flex-1 basis-full truncate sm:basis-0">Deploy {d.spec.compose ? `stack ${d.spec.service}` : d.spec.image}</span>
             <span className="text-sm text-neutral-500">
               {d.trigger} · {ago(d.created_at)}
             </span>

@@ -22,6 +22,41 @@ export function visitUrl(p: Project, device?: Device | null): string | null {
   return `http://${host}:${mapping.split(":")[0]}`;
 }
 
+/** Start, stop and remove all containers of a Compose stack. Redeploying brings a removed stack back. */
+function StackControls({ p, onError }: { p: Project; onError: (e: string | null) => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const run = async (action: "start" | "stop" | "down") => {
+    let volumes = false;
+    if (action === "down") {
+      const res = await confirmWithOption({
+        title: `Remove stack ${p.name}?`,
+        message: "Its containers and networks are removed. The project stays, and New deployment brings the stack back.",
+        confirmLabel: "Remove stack",
+        danger: true,
+        option: { label: "Also delete its volumes (data is lost)", checked: false },
+      });
+      if (res === null) return;
+      volumes = res;
+    }
+    setBusy(action);
+    onError(null);
+    try {
+      await api.stackAction(p.id, action, volumes);
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <>
+      <Button onClick={() => run("start")} loading={busy === "start"}>Start</Button>
+      <Button onClick={() => run("stop")} loading={busy === "stop"}>Stop</Button>
+      <Button onClick={() => run("down")} loading={busy === "down"} icon={<Trash2 className="size-4" />}>Remove</Button>
+    </>
+  );
+}
+
 export default function ProjectPage() {
   const { id = "" } = useParams();
   const nav = useNavigate();
@@ -70,7 +105,7 @@ export default function ProjectPage() {
             { to: base, label: "Overview", end: true },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/metrics`, label: "Metrics" },
-            { to: `${base}/domains`, label: "Domains" },
+            ...(p.source.type !== "compose" ? [{ to: `${base}/domains`, label: "Domains" }] : []),
             ...(p.source.type === "github" ? [{ to: `${base}/previews`, label: "Previews" }] : []),
             { to: `${base}/settings`, label: "Settings" },
           ]}
@@ -85,6 +120,7 @@ export default function ProjectPage() {
               Deployment in progress ›
             </Link>
           )}
+          {p.source.type === "compose" && <StackControls p={p} onError={setError} />}
           {worker && (
             <PowerControls deviceId={p.device_id} containerId={worker.id} state={worker.state} onDone={device.reload} onError={setError} />
           )}

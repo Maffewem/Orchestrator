@@ -44,7 +44,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 		CPUs:         runtime.NumCPU(),
 		AgentVersion: Version,
 		InContainer:  InContainer(),
-		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore},
+		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapCompose, api.CapTunnel},
 		Server:       strings.TrimRight(a.cfg.Server, "/"),
 	}
 	if a.cfg.HostRoot != "" {

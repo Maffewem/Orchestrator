@@ -409,8 +409,8 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
             ))}
           </select>
         </Field>
-        <Toggle checked={withData} onChange={setWithData} label="Copy volumes and data" />
-        <Toggle checked={stopSource} onChange={setStopSource} label="Stop the old container afterwards" />
+        <div className="flex items-center gap-3 text-sm"><Toggle checked={withData} onChange={setWithData} label="Copy volumes and data" />Copy volumes and data</div>
+        <div className="flex items-center gap-3 text-sm"><Toggle checked={stopSource} onChange={setStopSource} label="Stop the old container afterwards" />Stop the old container afterwards</div>
         <Button
           disabled={!target || running}
           icon={running ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
@@ -430,7 +430,7 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
             <div className="mb-1 font-sans text-sm">
               {m.from} to {m.to}: {m.status === "failed" ? "failed" : m.status === "done" ? "done" : m.step}
             </div>
-            {m.log.map((l, i) => (
+            {(m.log ?? []).map((l, i) => (
               <div key={i}>{l}</div>
             ))}
           </div>

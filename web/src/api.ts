@@ -448,6 +448,15 @@ async function fetchStreamOutput(id: string, from: number, signal: AbortSignal):
   return { data, next: j.next, closed: !!j.closed, error: j.error };
 }
 
+export interface Migration {
+  status: "running" | "done" | "failed";
+  step: string;
+  error?: string;
+  from: string;
+  to: string;
+  log: string[];
+}
+
 export interface Backup {
   id: string;
   device_id: string;
@@ -678,6 +687,9 @@ export const api = {
   updateProject: (id: string, p: Partial<ProjectInput>) => request<Project>("PATCH", `/api/projects/${id}`, p),
   deleteProject: (id: string, removeContainer = false) =>
     request<void>("DELETE", `/api/projects/${id}${removeContainer ? "?remove_container=1" : ""}`),
+  migrateProject: (id: string, body: { device_id: string; with_data: boolean; stop_source: boolean }) =>
+    request<Migration>("POST", `/api/projects/${id}/migrate`, body),
+  migration: (id: string) => request<Migration>("GET", `/api/projects/${id}/migration`),
   deployProject: (id: string, confirm = false) => request<Deployment>("POST", `/api/projects/${id}/deployments${confirm ? "?confirm=1" : ""}`),
   adopt: (deviceId: string, containers: { id: string; name?: string }[], dryRun: boolean) =>
     request<AdoptItem[]>("POST", `/api/devices/${deviceId}/adopt`, { containers, dry_run: dryRun }),

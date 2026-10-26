@@ -62,6 +62,8 @@ type Server struct {
 	cloudflareAPI string
 	metrics       *metricsHistory
 	logins        limiter
+	mig           migrations
+	migratePoll   time.Duration // test hook; 2s when zero
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState
@@ -245,6 +247,8 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/devices/{id}/tunnel", s.handleSetTunnel)
 	admin("PUT /api/devices/{id}/tunnel/routes", s.handleSetTunnelRoutes)
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
+	admin("POST /api/projects/{id}/migrate", s.handleMigrateProject)
+	admin("GET /api/projects/{id}/migration", s.handleGetMigration)
 	admin("GET /api/projects/{id}/deployments", s.handleListDeployments)
 	admin("GET /api/deployments", s.handleListDeployments)
 	admin("GET /api/deployments/{id}", s.handleGetDeployment)

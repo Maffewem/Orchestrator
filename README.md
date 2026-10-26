@@ -273,6 +273,7 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `POST /api/devices/{id}/containers/{cid}/backup` | back up a container |
 | `GET /api/backups`, `GET /api/backups/{id}/download`, `DELETE /api/backups/{id}` | backups |
 | `POST /api/backups/{id}/restore` | restore a backup into its container |
+| `POST /api/projects/{id}/migrate` | move a project to another device (`device_id`, `with_data`, `stop_source`); `GET /api/projects/{id}/migration` is its progress |
 | `PUT /api/settings/backup-password` | set or remove the backup password |
 | `GET /api/system/update`, `POST /api/system/update/check`, `POST /api/system/update/apply` | update status, check, update the server |
 | `PUT /api/system/update/schedule`, `POST /api/system/update/agents` | update schedule, update agents |

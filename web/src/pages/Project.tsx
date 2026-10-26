@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCan } from "../components/auth";
 import { Shell } from "../components/Streams";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router";
 import { ArrowUpRight, CloudUpload, Loader2, PackagePlus, Rocket, SquareTerminal, Trash2 } from "lucide-react";
-import { api, ApiError, type Device, type Project } from "../api";
+import { api, ApiError, type Device, type Migration, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
-import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
+import { Button, Card, CardHeader, Empty, Field, Toggle, inputClass, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
 import DomainsPanel from "../components/Domains";
 import PreviewsPanel from "../components/Previews";
@@ -338,6 +338,7 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
           }}
         />
       </Card>
+      <MigrateCard p={p} onDone={onSaved} />
       <Card className="border-red-200">
         <CardHeader title="Delete project" subtitle="Removes the project and its deployment history. You can also remove its container from the device." />
         <div className="p-5">
@@ -362,5 +363,79 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+/** Moves the project to another device: data is backed up, copied across and verified before the old container is touched. */
+function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
+  const devices = usePoll(api.devices, 0);
+  const [target, setTarget] = useState("");
+  const [withData, setWithData] = useState(true);
+  const [stopSource, setStopSource] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [m, setM] = useState<Migration | null>(null);
+  const running = m?.status === "running";
+
+  useEffect(() => {
+    api.migration(p.id).then(setM).catch(() => {});
+  }, [p.id]);
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(async () => {
+      try {
+        const next = await api.migration(p.id);
+        setM(next);
+        if (next.status !== "running") onDone();
+      } catch {}
+    }, 2000);
+    return () => clearInterval(t);
+  }, [running, p.id, onDone]);
+
+  if (p.source.type === "compose") return null;
+  const others = devices.data?.filter((d) => d.id !== p.device_id) ?? [];
+  return (
+    <Card>
+      <CardHeader title="Move to another device" subtitle="Backs up the data, deploys on the new device, copies the data across and checks it runs before anything is stopped." />
+      <div className="space-y-4 p-5">
+        {error && <ErrorNote>{error}</ErrorNote>}
+        <Field label="Move to">
+          <select className={inputClass} value={target} onChange={(e) => setTarget(e.target.value)} disabled={running}>
+            <option value="">Choose a device</option>
+            {others.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name} ({d.host.arch}
+                {d.status === "offline" ? ", offline" : ""})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Toggle checked={withData} onChange={setWithData} label="Copy volumes and data" />
+        <Toggle checked={stopSource} onChange={setStopSource} label="Stop the old container afterwards" />
+        <Button
+          disabled={!target || running}
+          icon={running ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
+          onClick={async () => {
+            setError(null);
+            try {
+              setM(await api.migrateProject(p.id, { device_id: target, with_data: withData, stop_source: stopSource }));
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        >
+          Move project
+        </Button>
+        {m && (
+          <div className="rounded-md bg-slate-50 p-3 font-mono text-xs dark:bg-slate-900">
+            <div className="mb-1 font-sans text-sm">
+              {m.from} to {m.to}: {m.status === "failed" ? "failed" : m.status === "done" ? "done" : m.step}
+            </div>
+            {m.log.map((l, i) => (
+              <div key={i}>{l}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

@@ -509,13 +509,52 @@ func (s *Store) CompleteCommand(ctx context.Context, deviceID, id string, res ap
 		status = api.CommandFailed
 	}
 	row := s.db.QueryRowContext(ctx,
-		`UPDATE commands SET status = ?, output = ?, error = ?, updated_at = ? WHERE id = ? AND device_id = ? RETURNING `+commandCols,
-		status, res.Output, res.Error, time.Now().Unix(), id, deviceID)
+		`UPDATE commands SET status = ?, output = ?, error = ?, updated_at = ? WHERE id = ? AND device_id = ? AND status != ? RETURNING `+commandCols,
+		status, res.Output, res.Error, time.Now().Unix(), id, deviceID, api.CommandCancelled)
 	c, err := scanCommand(row)
 	if errors.Is(err, sql.ErrNoRows) {
+		var n int
+		s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM commands WHERE id = ? AND device_id = ? AND status = ?`, id, deviceID, api.CommandCancelled).Scan(&n)
+		if n > 0 {
+			return nil, ErrCancelled
+		}
 		return nil, ErrNotFound
 	}
 	return c, err
+}
+
+// ErrCancelled is returned when an agent reports the result of a command that was cancelled.
+var ErrCancelled = errors.New("command was cancelled")
+
+// CancelCommand cancels a command that has not finished; it reports whether it was still open.
+func (s *Store) CancelCommand(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE commands SET status = ?, error = 'cancelled', updated_at = ? WHERE id = ? AND status IN (?, ?)`,
+		api.CommandCancelled, time.Now().Unix(), id, api.CommandPending, api.CommandDispatched)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// RecentlyCancelled lists a device's commands cancelled since the cutoff.
+func (s *Store) RecentlyCancelled(ctx context.Context, deviceID string, since time.Time) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM commands WHERE device_id = ? AND status = ? AND updated_at >= ?`,
+		deviceID, api.CommandCancelled, since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // ExpireCommands fails commands that were never picked up (pending before pendingCutoff) or

@@ -110,6 +110,8 @@ type HeartbeatRequest struct {
 type HeartbeatResponse struct {
 	Commands        []Command `json:"commands"`
 	IntervalSeconds int       `json:"interval_seconds"`
+	// Cancel lists ids of recently cancelled commands, so an agent can abort one it is running.
+	Cancel []string `json:"cancel,omitempty"`
 }
 
 // Command actions understood by the agent.
@@ -188,6 +190,8 @@ const (
 	CommandDispatched = "dispatched"
 	CommandSucceeded  = "succeeded"
 	CommandFailed     = "failed"
+	// CommandCancelled is a command the user gave up on; a running agent is told to abort it.
+	CommandCancelled = "cancelled"
 )
 
 // CommandResult is what the agent reports after running a command.

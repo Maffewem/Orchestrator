@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText } from "../clipboard";
 import { Link, useNavigate, useParams } from "react-router";
-import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, Github, Globe, RotateCw, Server, Undo2, XCircle } from "lucide-react";
 import { api, type Deployment, type Step } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, ErrorNote, Loading, StatusIcon } from "../components/ui";
@@ -73,6 +73,23 @@ export default function DeploymentPage() {
         </h1>
         <div className="flex items-center gap-4">
           <span className="text-neutral-500 tabular-nums">{d.status === "queued" ? "Waiting for device…" : duration(total)}</span>
+          {can && (d.status === "queued" || d.status === "running") && (
+            <Button
+              variant="danger"
+              icon={<XCircle className="size-4" />}
+              onClick={async () => {
+                if (!(await confirmDialog({ title: "Cancel this deployment?", message: "It is marked failed and the device is told to stop. The current version keeps running unless the swap had already started, in which case it is rolled back.", confirmLabel: "Cancel deployment", danger: true }))) return;
+                try {
+                  await api.cancelDeployment(d.id);
+                  await dep.reload();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : String(e));
+                }
+              }}
+            >
+              Cancel deployment
+            </Button>
+          )}
           <Button
             icon={<RotateCw className="size-4" />}
             loading={retrying}

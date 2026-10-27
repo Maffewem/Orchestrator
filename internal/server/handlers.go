@@ -120,7 +120,9 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withCredentials(cmds, s.githubToken(ctx))
+	cancel, _ := s.store.RecentlyCancelled(ctx, d.ID, time.Now().Add(-15*time.Minute))
 	writeJSON(w, http.StatusOK, api.HeartbeatResponse{
+		Cancel:          cancel,
 		Commands:        cmds,
 		IntervalSeconds: int(s.cfg.HeartbeatInterval / time.Second),
 	})
@@ -162,7 +164,10 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := s.store.CompleteCommand(r.Context(), d.ID, r.PathValue("id"), res)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrCancelled) {
+		w.WriteHeader(http.StatusNoContent) // the user already gave up on it
+		return
+	} else if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no such command")
 		return
 	} else if err != nil {

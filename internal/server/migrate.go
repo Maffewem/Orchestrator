@@ -139,7 +139,7 @@ func (s *Server) handleMigrateProject(w http.ResponseWriter, r *http.Request) {
 	if src != nil {
 		from = src.Name
 	}
-	v := &MigrationView{Status: migRunning, Step: "Starting", From: from, To: dst.Name, Started: time.Now().UTC()}
+	v := &MigrationView{Status: migRunning, Step: "Starting", From: from, To: dst.Name, Started: time.Now().UTC(), Log: []string{}}
 	s.mig.byProject[p.ID] = v
 	first := *v // the goroutine below mutates v, so the response gets a copy
 	s.mig.mu.Unlock()

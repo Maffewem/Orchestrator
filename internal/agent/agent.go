@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
@@ -50,6 +51,11 @@ type Agent struct {
 	interval time.Duration
 	work     chan api.Command
 	restart  bool // set by an update: exit after reporting
+
+	cancelMu  sync.Mutex
+	cancelled map[string]bool // command ids the user gave up on
+	running   string          // id of the command being run
+	abort     context.CancelFunc
 
 	lastCPUTotal, lastCPUIdle uint64
 }
@@ -174,6 +180,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	if res.IntervalSeconds > 0 {
 		a.interval = time.Duration(res.IntervalSeconds) * time.Second
 	}
+	a.cancelCommands(res.Cancel)
 	for _, c := range res.Commands {
 		select {
 		case a.work <- c:
@@ -191,8 +198,14 @@ func (a *Agent) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case c := <-a.work:
+			rctx, ok := a.begin(ctx, c.ID)
+			if !ok {
+				a.log.Info("skipping cancelled command", "id", c.ID)
+				continue
+			}
 			a.log.Info("running command", "id", c.ID, "action", c.Action)
-			res := a.execute(ctx, c)
+			res := a.execute(rctx, c)
+			a.end()
 			a.report(ctx, c.ID, res)
 			if a.restart {
 				// The new binary is in place; systemd (Restart=always) starts it.
@@ -323,4 +336,45 @@ func (a *Agent) post(ctx context.Context, path, token string, body, out any) err
 		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
+}
+
+// begin returns the context a command runs in, or false when it was cancelled before it started.
+func (a *Agent) begin(ctx context.Context, id string) (context.Context, bool) {
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	if a.cancelled[id] {
+		return nil, false
+	}
+	rctx, cancel := context.WithCancel(ctx)
+	a.running, a.abort = id, cancel
+	return rctx, true
+}
+
+func (a *Agent) end() {
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	if a.abort != nil {
+		a.abort()
+	}
+	a.running, a.abort = "", nil
+}
+
+// cancelCommands aborts the running command if the control plane lists it as cancelled, and
+// remembers the ids so queued commands are skipped.
+func (a *Agent) cancelCommands(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	a.cancelMu.Lock()
+	defer a.cancelMu.Unlock()
+	if a.cancelled == nil {
+		a.cancelled = map[string]bool{}
+	}
+	for _, id := range ids {
+		a.cancelled[id] = true
+		if id == a.running && a.abort != nil {
+			a.log.Info("cancelling command", "id", id)
+			a.abort()
+		}
+	}
 }

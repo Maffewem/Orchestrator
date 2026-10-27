@@ -697,6 +697,7 @@ export const api = {
   deployments: (q: { device?: string; limit?: number } = {}) =>
     request<Deployment[]>("GET", `/api/deployments?limit=${q.limit ?? 50}${q.device ? `&device=${q.device}` : ""}`),
   deployment: (id: string) => request<Deployment>("GET", `/api/deployments/${id}`),
+  cancelDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/cancel`),
   retryDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/retry`),
   rollbackDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/rollback`),
   projectPreviews: (id: string) => request<PreviewsView>("GET", `/api/projects/${id}/previews`),

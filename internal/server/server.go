@@ -253,6 +253,7 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/deployments", s.handleListDeployments)
 	admin("GET /api/deployments/{id}", s.handleGetDeployment)
 	admin("POST /api/deployments/{id}/retry", s.handleRetryDeployment)
+	admin("POST /api/deployments/{id}/cancel", s.handleCancelDeployment)
 	admin("GET /api/github/repos", s.handleListGitHubRepos)
 	admin("GET /api/projects/{id}/domains", s.handleGetDomains)
 	admin("PUT /api/projects/{id}/domains/urls", s.handleSetURLs)

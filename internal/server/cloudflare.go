@@ -141,6 +141,9 @@ func (s *Server) syncDNS(ctx context.Context, d *store.Device, hosts []string) {
 		return
 	}
 	proxied := s.cloudflareProxied(ctx)
+	if isPrivateIP(ips[0]) {
+		proxied = false // Cloudflare can't reach a private address: this record only works on the LAN
+	}
 	zones := map[string]*cfZone{}
 	for _, h := range hosts {
 		z, seen := zones[zoneOf(h)]

@@ -195,6 +195,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := addColumn(db, "domains", "access", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	if err := addColumn(db, "backups", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)

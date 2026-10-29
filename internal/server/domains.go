@@ -63,6 +63,8 @@ func zoneOf(host string) string {
 type urlPrefs struct {
 	Production bool `json:"production"`
 	Preview    bool `json:"preview"`
+	// Tunnel serves the production URL through the device's Cloudflare Tunnel instead of its proxy and an A record.
+	Tunnel bool `json:"tunnel"`
 }
 
 func (s *Server) urlPrefs(ctx context.Context, projectID string) urlPrefs {
@@ -95,7 +97,8 @@ type domainRow struct {
 	Type     string      `json:"type"`
 	Path     string      `json:"path,omitempty"`
 	Zone     string      `json:"zone"`
-	Status   string      `json:"status"` // active | pending | mismatch
+	Access   string      `json:"access,omitempty"` // "" or tunnel
+	Status   string      `json:"status"`           // active | lan | tunnel | pending | mismatch
 	Detail   string      `json:"detail"`
 	Records  []dnsRecord `json:"records"`
 }
@@ -106,6 +109,7 @@ type urlRow struct {
 	Status   string      `json:"status,omitempty"`
 	Detail   string      `json:"detail,omitempty"`
 	Records  []dnsRecord `json:"records,omitempty"`
+	Tunnel   bool        `json:"tunnel,omitempty"`
 }
 
 type domainsView struct {
@@ -118,6 +122,10 @@ type domainsView struct {
 	Protected  bool        `json:"protected"`
 	DNS        string      `json:"dns"` // manual | cloudflare
 	SSL        string      `json:"ssl"` // http | dns
+	// LANOnly is true when every address the device reports is private, so public DNS can't reach it.
+	LANOnly bool `json:"lan_only"`
+	// TunnelReady is true when the device runs a Cloudflare Tunnel that hostnames can be routed through.
+	TunnelReady bool `json:"tunnel_ready"`
 }
 
 // ipv4s returns the IPv4 addresses a device reported.
@@ -129,6 +137,24 @@ func ipv4s(d *store.Device) []string {
 		}
 	}
 	return out
+}
+
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// isPrivateIP is true for LAN, loopback, link-local and Tailscale/CGNAT addresses: ones a public
+// DNS record can't usefully point at, and Cloudflare's proxy can't reach.
+func isPrivateIP(s string) bool {
+	ip := net.ParseIP(s)
+	return ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || cgnat.Contains(ip))
+}
+
+func allPrivate(ips []string) bool {
+	for _, ip := range ips {
+		if !isPrivateIP(ip) {
+			return false
+		}
+	}
+	return len(ips) > 0
 }
 
 // dnsStatus compares what host resolves to with the device's addresses.
@@ -143,6 +169,9 @@ func dnsStatus(ctx context.Context, host string, want []string) (status, detail 
 	for _, g := range got {
 		for _, w := range want {
 			if g == w {
+				if allPrivate(want) {
+					return "lan", "DNS points at this device's private address, so the name only works on your network. Route it through the Cloudflare Tunnel to reach it from outside.", recs
+				}
 				return "active", "DNS points at this device.", recs
 			}
 		}
@@ -157,7 +186,20 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 	}
 	base := s.baseDomain(ctx)
 	want := ipv4s(d)
-	v := &domainsView{BaseDomain: base, Domains: []domainRow{}, Addresses: want}
+	v := &domainsView{BaseDomain: base, Domains: []domainRow{}, Addresses: want, LANOnly: allPrivate(want)}
+	tcfg, hasTunnel := s.tunnelConfig(ctx, p.DeviceID)
+	v.TunnelReady = hasTunnel
+	tunnelID := ""
+	if hasTunnel {
+		if t, err := parseTunnelToken(tcfg.Token); err == nil {
+			tunnelID = t.Tunnel
+		}
+	}
+	tunnelRow := func(host string) (string, string, []dnsRecord) {
+		return "tunnel", "Served through this device's Cloudflare Tunnel, so no A record or open port is needed. " +
+				map[bool]string{true: "The CNAME is created for you.", false: "Create this CNAME in your DNS (Cloudflare isn't connected, so it can't be added for you)."}[s.cloudflareToken(ctx) != ""],
+			[]dnsRecord{{Type: "CNAME", Name: host, Value: tunnelID + ".cfargotunnel.com"}}
+	}
 	switch {
 	case !hasCap(d, api.CapProxy):
 		v.Proxy = "agent_too_old"
@@ -172,8 +214,10 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 	prefs := s.urlPrefs(ctx, p.ID)
 	if base != "" {
 		host := slug(p.Name) + "." + base
-		row := &urlRow{Hostname: host, Enabled: prefs.Production}
-		if prefs.Production {
+		row := &urlRow{Hostname: host, Enabled: prefs.Production, Tunnel: prefs.Tunnel}
+		if prefs.Production && prefs.Tunnel {
+			row.Status, row.Detail, row.Records = tunnelRow(host)
+		} else if prefs.Production {
 			row.Status, row.Detail, row.Records = dnsStatus(ctx, host, want)
 		}
 		v.Production = row
@@ -184,8 +228,14 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 		return nil, err
 	}
 	for _, dm := range list {
-		st, detail, recs := dnsStatus(ctx, dm.Hostname, want)
-		v.Domains = append(v.Domains, domainRow{ID: dm.ID, Hostname: dm.Hostname, Type: dm.Kind, Path: dm.Path,
+		var st, detail string
+		var recs []dnsRecord
+		if dm.Access == "tunnel" {
+			st, detail, recs = tunnelRow(dm.Hostname)
+		} else {
+			st, detail, recs = dnsStatus(ctx, dm.Hostname, want)
+		}
+		v.Domains = append(v.Domains, domainRow{ID: dm.ID, Hostname: dm.Hostname, Type: dm.Kind, Path: dm.Path, Access: dm.Access,
 			Zone: zoneOf(dm.Hostname), Status: st, Detail: detail, Records: recs})
 	}
 	return v, nil
@@ -217,11 +267,18 @@ func (s *Server) handleSetURLs(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	if req.Tunnel && req.Production {
+		if err := s.checkTunnelable(r.Context(), p); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
 	b, _ := json.Marshal(req)
 	if err := s.store.SetSetting(r.Context(), settingURLPrefs+p.ID, string(b)); err != nil {
 		s.internal(w, err)
 		return
 	}
+	s.reconcileTunnelHosts(r.Context(), p)
 	s.syncProxy(r.Context(), p.DeviceID)
 	s.handleGetDomains(w, r)
 }
@@ -235,9 +292,24 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 		Hostname string `json:"hostname"`
 		Type     string `json:"type"`
 		Path     string `json:"path"`
+		Access   string `json:"access"` // "" or tunnel
 	}
 	if !decode(w, r, &req) {
 		return
+	}
+	if req.Access != "" && req.Access != "tunnel" {
+		writeError(w, http.StatusBadRequest, "access must be empty or tunnel")
+		return
+	}
+	if req.Access == "tunnel" {
+		if req.Type == store.DomainRoute {
+			writeError(w, http.StatusBadRequest, "a route with a path can't go through the tunnel; add the whole hostname instead")
+			return
+		}
+		if err := s.checkTunnelable(r.Context(), p); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
 	}
 	host := strings.ToLower(strings.TrimSpace(req.Hostname))
 	host = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://"), "/")
@@ -253,7 +325,7 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err := s.store.CreateDomain(r.Context(), p.ID, host, kind, path); errors.Is(err, store.ErrConflict) {
+	if _, err := s.store.CreateDomain(r.Context(), p.ID, host, kind, path, req.Access); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, host+path+" is already in use")
 		return
 	} else if err != nil {
@@ -261,6 +333,7 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.event(r.Context(), p.DeviceID, "info", "domain.added", fmt.Sprintf("%s%s added to %s", host, path, p.Name))
+	s.reconcileTunnelHosts(r.Context(), p)
 	s.syncProxy(r.Context(), p.DeviceID)
 	s.writeDomains(w, r, http.StatusCreated)
 }
@@ -279,8 +352,49 @@ func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	s.reconcileTunnelHosts(r.Context(), p)
 	s.syncProxy(r.Context(), p.DeviceID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSetDomainAccess switches a hostname between the device proxy (DNS to the device) and the Cloudflare Tunnel.
+func (s *Server) handleSetDomainAccess(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.lookupProject(w, r)
+	if !ok {
+		return
+	}
+	dm, err := s.store.GetDomain(r.Context(), r.PathValue("did"))
+	if err != nil || dm.ProjectID != p.ID {
+		writeError(w, http.StatusNotFound, "no such domain")
+		return
+	}
+	var req struct {
+		Access string `json:"access"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Access != "" && req.Access != "tunnel" {
+		writeError(w, http.StatusBadRequest, "access must be empty or tunnel")
+		return
+	}
+	if req.Access == "tunnel" {
+		if dm.Kind == store.DomainRoute {
+			writeError(w, http.StatusBadRequest, "a route with a path can't go through the tunnel")
+			return
+		}
+		if err := s.checkTunnelable(r.Context(), p); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
+	if err := s.store.SetDomainAccess(r.Context(), dm.ID, req.Access); err != nil {
+		s.internal(w, err)
+		return
+	}
+	s.reconcileTunnelHosts(r.Context(), p)
+	s.syncProxy(r.Context(), p.DeviceID)
+	s.writeDomains(w, r, http.StatusOK)
 }
 
 func (s *Server) handleSetBaseDomain(w http.ResponseWriter, r *http.Request) {
@@ -411,8 +525,17 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 			continue
 		}
 		projects = append(projects, p)
-		doms[p.ID], _ = s.store.ListDomains(ctx, p.ID)
-		prefs[p.ID] = s.urlPrefs(ctx, p.ID)
+		list, _ := s.store.ListDomains(ctx, p.ID)
+		for _, dm := range list {
+			if dm.Access != "tunnel" { // tunnel hostnames bypass the proxy and DNS
+				doms[p.ID] = append(doms[p.ID], dm)
+			}
+		}
+		pf := s.urlPrefs(ctx, p.ID)
+		if pf.Tunnel {
+			pf.Production = false
+		}
+		prefs[p.ID] = pf
 		protected[p.ID] = s.projectProtected(ctx, p.ID)
 		previews[p.ID], _ = s.store.ListPreviews(ctx, p.ID)
 	}

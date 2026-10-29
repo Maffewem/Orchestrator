@@ -318,7 +318,8 @@ export interface DomainRow {
   type: "domain" | "route";
   path?: string;
   zone: string;
-  status: "active" | "pending" | "mismatch";
+  status: "active" | "lan" | "tunnel" | "pending" | "mismatch";
+  access?: "tunnel";
   detail: string;
   records: DnsRecord[];
 }
@@ -329,9 +330,12 @@ export interface UrlRow {
   status?: DomainRow["status"];
   detail?: string;
   records?: DnsRecord[];
+  tunnel?: boolean;
 }
 
 export interface DomainsView {
+  lan_only: boolean;
+  tunnel_ready: boolean;
   base_domain: string;
   production: UrlRow | null;
   preview: UrlRow | null;
@@ -728,10 +732,11 @@ export const api = {
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
   projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
-  setProjectUrls: (id: string, u: { production: boolean; preview: boolean }) =>
+  setProjectUrls: (id: string, u: { production: boolean; preview: boolean; tunnel?: boolean }) =>
     request<DomainsView>("PUT", `/api/projects/${id}/domains/urls`, u),
-  addDomain: (id: string, d: { hostname: string; type: "domain" | "route"; path?: string }) =>
+  addDomain: (id: string, d: { hostname: string; type: "domain" | "route"; path?: string; access?: "tunnel" }) =>
     request<DomainsView>("POST", `/api/projects/${id}/domains`, d),
+  setDomainAccess: (id: string, did: string, access: "" | "tunnel") => request<DomainsView>("PATCH", `/api/projects/${id}/domains/${did}`, { access }),
   deleteDomain: (id: string, did: string) => request<void>("DELETE", `/api/projects/${id}/domains/${did}`),
   setBackupPassword: (password: string) => request<{ backup_password_set: boolean }>("PUT", "/api/settings/backup-password", { password }),
   setBaseDomain: (base_domain: string) => request<{ base_domain: string }>("PUT", "/api/settings/domain", { base_domain }),

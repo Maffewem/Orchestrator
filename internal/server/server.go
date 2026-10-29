@@ -269,6 +269,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/projects/{id}/domains/urls", s.handleSetURLs)
 	admin("POST /api/projects/{id}/domains", s.handleAddDomain)
 	admin("DELETE /api/projects/{id}/domains/{did}", s.handleDeleteDomain)
+	admin("PATCH /api/projects/{id}/domains/{did}", s.handleSetDomainAccess)
 	admin("POST /api/deployments/{id}/rollback", s.handleRollback)
 	admin("GET /api/projects/{id}/previews", s.handleListPreviews)
 	admin("PUT /api/projects/{id}/previews/settings", s.handleSetPreviewSettings)

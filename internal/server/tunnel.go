@@ -26,6 +26,8 @@ type tunnelRoute struct {
 	Hostname string `json:"hostname"`
 	// Service is a URL such as http://localhost:3000, or "project:<name>" for that project's first published port.
 	Service string `json:"service"`
+	// Managed routes are kept in step with a project's domains (see reconcileTunnelHosts) rather than edited by hand.
+	Managed bool `json:"managed,omitempty"`
 }
 
 type tunnelConfig struct {
@@ -389,4 +391,86 @@ func (s *Server) moveTunnelRoutes(ctx context.Context, p *store.Project, oldDev 
 		}
 	}
 	return append([]string{fmt.Sprintf("Moved %d tunnel route(s) to %s", len(moving), dst.Name)}, warns...)
+}
+
+// checkTunnelable says why a project's hostnames can't go through its device's tunnel.
+func (s *Server) checkTunnelable(ctx context.Context, p *store.Project) error {
+	if _, ok := s.tunnelConfig(ctx, p.DeviceID); !ok {
+		return errors.New("set up a Cloudflare Tunnel on this project's device first (Device > Settings)")
+	}
+	if upstreamPort(p) == "" {
+		return errors.New("the project publishes no port for the tunnel to send traffic to")
+	}
+	if s.projectProtected(ctx, p.ID) {
+		return errors.New("login protection is served by the device proxy, which the tunnel bypasses: turn off \"Require login\" first")
+	}
+	return nil
+}
+
+// reconcileTunnelHosts makes the device tunnel's managed routes match the project: its custom domains
+// set to "tunnel" and, if switched on, its production URL. Other routes are left alone.
+func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) {
+	cfg, ok := s.tunnelConfig(ctx, p.DeviceID)
+	if !ok {
+		return
+	}
+	want := map[string]bool{}
+	if pf := s.urlPrefs(ctx, p.ID); pf.Production && pf.Tunnel {
+		if base := s.baseDomain(ctx); base != "" {
+			want[slug(p.Name)+"."+base] = true
+		}
+	}
+	if list, err := s.store.ListDomains(ctx, p.ID); err == nil {
+		for _, dm := range list {
+			if dm.Access == "tunnel" && dm.Kind == store.DomainCustom {
+				want[dm.Hostname] = true
+			}
+		}
+	}
+	svc := "project:" + p.Name
+	var routes []tunnelRoute
+	have := map[string]bool{}
+	for _, rt := range cfg.Routes {
+		if rt.Managed && rt.Service == svc {
+			if !want[rt.Hostname] {
+				continue
+			}
+			have[rt.Hostname] = true
+		} else if want[rt.Hostname] {
+			have[rt.Hostname] = true // already routed by hand
+		}
+		routes = append(routes, rt)
+	}
+	for h := range want {
+		if !have[h] {
+			routes = append(routes, tunnelRoute{Hostname: h, Service: svc, Managed: true})
+		}
+	}
+	if len(routes) == len(cfg.Routes) && len(want) == countManaged(cfg.Routes, svc) {
+		return
+	}
+	cfg.Routes = routes
+	if err := s.saveTunnelConfig(ctx, p.DeviceID, &cfg); err != nil {
+		s.log.Error("save tunnel routes", "err", err)
+		return
+	}
+	d, err := s.store.GetDevice(ctx, p.DeviceID)
+	if err != nil {
+		return
+	}
+	if tok := s.cloudflareToken(ctx); tok != "" {
+		for _, w := range s.applyTunnelRoutes(ctx, d, cfg, tok) {
+			s.event(ctx, d.ID, "warning", "tunnel.routes", w)
+		}
+	}
+}
+
+func countManaged(routes []tunnelRoute, svc string) int {
+	n := 0
+	for _, rt := range routes {
+		if rt.Managed && rt.Service == svc {
+			n++
+		}
+	}
+	return n
 }

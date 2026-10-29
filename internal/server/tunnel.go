@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -166,7 +167,10 @@ func (s *Server) handleSetTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveRoute turns a route's service into the URL cloudflared connects to.
-func (s *Server) resolveRoute(projects []*store.Project, deviceID string, rt tunnelRoute) (string, error) {
+// When several devices run the same tunnel, any of their connectors may receive a request, so
+// "localhost" would be the wrong machine: project routes then use the owning device's address.
+func (s *Server) resolveRoute(projects []*store.Project, dev *store.Device, shared bool, rt tunnelRoute) (string, error) {
+	deviceID := dev.ID
 	name, isProject := strings.CutPrefix(rt.Service, "project:")
 	if !isProject {
 		return rt.Service, nil
@@ -174,7 +178,13 @@ func (s *Server) resolveRoute(projects []*store.Project, deviceID string, rt tun
 	for _, p := range projects {
 		if p.DeviceID == deviceID && p.Name == name {
 			if port := upstreamPort(p); port != "" {
-				return "http://localhost:" + port, nil
+				if !shared {
+					return "http://localhost:" + port, nil
+				}
+				if ip := deviceIPv4(dev); ip != "" {
+					return "http://" + ip + ":" + port, nil
+				}
+				return "", fmt.Errorf("%s reports no IPv4 address, which a shared tunnel needs to reach %s", dev.Name, name)
 			}
 			return "", fmt.Errorf("project %s publishes no port to send traffic to", name)
 		}
@@ -241,14 +251,28 @@ func (s *Server) applyTunnelRoutes(ctx context.Context, d *store.Device, cfg tun
 	var warns []string
 	ingress := []map[string]string{}
 	var applied []tunnelRoute
-	for _, rt := range cfg.Routes {
-		svc, err := s.resolveRoute(projects, d.ID, rt)
-		if err != nil {
-			warns = append(warns, rt.Hostname+": "+err.Error())
-			continue
+	// One tunnel has one ingress configuration, so devices sharing it are applied together.
+	peers := s.tunnelPeers(ctx, t.Tunnel, d)
+	shared := len(peers) > 1
+	seen := map[string]bool{}
+	for _, pd := range peers {
+		pcfg := cfg
+		if pd.ID != d.ID {
+			pcfg, _ = s.tunnelConfig(ctx, pd.ID)
 		}
-		ingress = append(ingress, map[string]string{"hostname": rt.Hostname, "service": svc})
-		applied = append(applied, rt)
+		for _, rt := range pcfg.Routes {
+			if seen[rt.Hostname] {
+				continue
+			}
+			seen[rt.Hostname] = true
+			svc, err := s.resolveRoute(projects, pd, shared, rt)
+			if err != nil {
+				warns = append(warns, rt.Hostname+": "+err.Error())
+				continue
+			}
+			ingress = append(ingress, map[string]string{"hostname": rt.Hostname, "service": svc})
+			applied = append(applied, rt)
+		}
 	}
 	ingress = append(ingress, map[string]string{"service": "http_status:404"})
 	path := "/accounts/" + t.Account + "/cfd_tunnel/" + t.Tunnel + "/configurations"
@@ -290,4 +314,79 @@ func (s *Server) cfUpsertTunnelCNAME(ctx context.Context, tok, host, target stri
 		}
 	}
 	return s.cfCall(ctx, tok, http.MethodPost, "/zones/"+z.ID+"/dns_records", want, nil)
+}
+
+// tunnelPeers returns the devices running the tunnel with this id, always including d.
+func (s *Server) tunnelPeers(ctx context.Context, tunnelID string, d *store.Device) []*store.Device {
+	out := []*store.Device{d}
+	all, _ := s.store.ListDevices(ctx)
+	for _, o := range all {
+		if o.ID == d.ID {
+			continue
+		}
+		if c, ok := s.tunnelConfig(ctx, o.ID); ok {
+			if t, err := parseTunnelToken(c.Token); err == nil && t.Tunnel == tunnelID {
+				out = append(out, o)
+			}
+		}
+	}
+	return out
+}
+
+// deviceIPv4 is the first non-loopback IPv4 address the agent reported.
+func deviceIPv4(d *store.Device) string {
+	for _, a := range d.Host.Addresses {
+		ip := net.ParseIP(a)
+		if ip != nil && ip.To4() != nil && !ip.IsLoopback() {
+			return a
+		}
+	}
+	return ""
+}
+
+// moveTunnelRoutes follows a migrated project: its "project:<name>" routes leave the old device's
+// tunnel for the new device's, and Cloudflare is updated so the public hostname keeps working.
+// It returns log lines for the migration.
+func (s *Server) moveTunnelRoutes(ctx context.Context, p *store.Project, oldDev string, dst *store.Device) []string {
+	oldCfg, ok := s.tunnelConfig(ctx, oldDev)
+	if !ok {
+		return nil
+	}
+	var moving, keep []tunnelRoute
+	for _, rt := range oldCfg.Routes {
+		if rt.Service == "project:"+p.Name {
+			moving = append(moving, rt)
+		} else {
+			keep = append(keep, rt)
+		}
+	}
+	if len(moving) == 0 {
+		return nil
+	}
+	newCfg, ok := s.tunnelConfig(ctx, dst.ID)
+	if !ok {
+		return []string{"Tunnel routes for " + p.Name + " stay on the old device: " + dst.Name + " has no Cloudflare Tunnel. Set one up there and add the routes again"}
+	}
+	newCfg.Routes = append(newCfg.Routes, moving...)
+	oldCfg.Routes = keep
+	if err := s.saveTunnelConfig(ctx, dst.ID, &newCfg); err != nil {
+		return []string{"Couldn't move tunnel routes: " + err.Error()}
+	}
+	if err := s.saveTunnelConfig(ctx, oldDev, &oldCfg); err != nil {
+		return []string{"Couldn't move tunnel routes: " + err.Error()}
+	}
+	tok := s.cloudflareToken(ctx)
+	if tok == "" {
+		return []string{"Tunnel routes moved to " + dst.Name + " but Cloudflare isn't connected, so update the public hostnames in Cloudflare Zero Trust"}
+	}
+	warns := s.applyTunnelRoutes(ctx, dst, newCfg, tok)
+	if od, err := s.store.GetDevice(ctx, oldDev); err == nil {
+		// A different tunnel needs its own ingress rewritten; a shared one was just applied with the union.
+		a, _ := parseTunnelToken(oldCfg.Token)
+		b, _ := parseTunnelToken(newCfg.Token)
+		if a.Tunnel != b.Tunnel {
+			warns = append(warns, s.applyTunnelRoutes(ctx, od, oldCfg, tok)...)
+		}
+	}
+	return append([]string{fmt.Sprintf("Moved %d tunnel route(s) to %s", len(moving), dst.Name)}, warns...)
 }

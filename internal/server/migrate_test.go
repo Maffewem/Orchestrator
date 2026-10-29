@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"sync"
@@ -185,5 +186,44 @@ func TestMaintenanceBlocksNewWork(t *testing.T) {
 	h.do("PATCH", "/api/devices/"+b.DeviceID, adminToken, map[string]any{"maintenance": false}, nil)
 	if code := h.do("POST", "/api/projects", adminToken, body, nil); code != http.StatusCreated {
 		t.Fatalf("create after maintenance: %d", code)
+	}
+}
+
+func TestMigrationMovesTunnelRoutes(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a, b := h.register("pi-a"), h.register("pi-b")
+	da, _ := h.st.GetDevice(ctx, a.DeviceID)
+	db, _ := h.st.GetDevice(ctx, b.DeviceID)
+	tok := func(id string) string {
+		return base64.StdEncoding.EncodeToString([]byte(`{"a":"acct","t":"` + id + `"}`))
+	}
+	p := &store.Project{Name: "web", DeviceID: b.DeviceID, Source: store.Source{Type: store.SourceImage, Image: "nginx"},
+		Runtime: store.Runtime{Ports: []string{"8080:80"}}}
+	if err := h.st.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	h.srv.saveTunnelConfig(ctx, da.ID, &tunnelConfig{Token: tok("t1"), Routes: []tunnelRoute{
+		{Hostname: "web.example.com", Service: "project:web"}, {Hostname: "other.example.com", Service: "http://localhost:9"}}})
+	h.srv.saveTunnelConfig(ctx, db.ID, &tunnelConfig{Token: tok("t2")})
+
+	lines := h.srv.moveTunnelRoutes(ctx, p, da.ID, db)
+	if len(lines) == 0 {
+		t.Fatal("expected a log line")
+	}
+	oc, _ := h.srv.tunnelConfig(ctx, da.ID)
+	nc, _ := h.srv.tunnelConfig(ctx, db.ID)
+	if len(oc.Routes) != 1 || oc.Routes[0].Hostname != "other.example.com" || len(nc.Routes) != 1 || nc.Routes[0].Hostname != "web.example.com" {
+		t.Fatalf("old %+v new %+v", oc.Routes, nc.Routes)
+	}
+
+	// On a shared tunnel the origin is the owning device's address, not localhost.
+	db.Host.Addresses = []string{"127.0.0.1", "192.168.1.20"}
+	got, err := h.srv.resolveRoute([]*store.Project{p}, db, true, tunnelRoute{Hostname: "x", Service: "project:web"})
+	if err != nil || got != "http://192.168.1.20:8080" {
+		t.Fatalf("shared origin %q %v", got, err)
+	}
+	if got, _ := h.srv.resolveRoute([]*store.Project{p}, db, false, tunnelRoute{Hostname: "x", Service: "project:web"}); got != "http://localhost:8080" {
+		t.Fatalf("single origin %q", got)
 	}
 }

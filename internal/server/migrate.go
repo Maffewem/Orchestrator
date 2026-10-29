@@ -336,6 +336,9 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 	// 4. Domains follow the project, then the old copy is retired.
 	s.syncProxy(ctx, dst.ID)
 	s.syncProxy(ctx, oldDevice)
+	for _, line := range s.moveTunnelRoutes(ctx, p, oldDevice, dst) {
+		m.step(p.ID, line)
+	}
 	if src != nil && stopSource {
 		if c := findByName(src, name); c != nil && hasCap(src, api.CapPreview) {
 			m.step(p.ID, "Stopping the old container on "+src.Name)

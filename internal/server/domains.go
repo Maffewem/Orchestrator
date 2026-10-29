@@ -65,6 +65,9 @@ type urlPrefs struct {
 	Preview    bool `json:"preview"`
 	// Tunnel serves the production URL through the device's Cloudflare Tunnel instead of its proxy and an A record.
 	Tunnel bool `json:"tunnel"`
+	// PreviewTunnel does the same for preview URLs; each preview gets its own tunnel hostname.
+	// Needs the tunnel to go through the device proxy.
+	PreviewTunnel bool `json:"preview_tunnel"`
 }
 
 func (s *Server) urlPrefs(ctx context.Context, projectID string) urlPrefs {
@@ -126,6 +129,8 @@ type domainsView struct {
 	LANOnly bool `json:"lan_only"`
 	// TunnelReady is true when the device runs a Cloudflare Tunnel that hostnames can be routed through.
 	TunnelReady bool `json:"tunnel_ready"`
+	// TunnelVia is "" (the tunnel sends traffic straight to workers) or "proxy" (through the device proxy).
+	TunnelVia string `json:"tunnel_via"`
 }
 
 // ipv4s returns the IPv4 addresses a device reported.
@@ -189,6 +194,7 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 	v := &domainsView{BaseDomain: base, Domains: []domainRow{}, Addresses: want, LANOnly: allPrivate(want)}
 	tcfg, hasTunnel := s.tunnelConfig(ctx, p.DeviceID)
 	v.TunnelReady = hasTunnel
+	v.TunnelVia = tcfg.Via
 	tunnelID := ""
 	if hasTunnel {
 		if t, err := parseTunnelToken(tcfg.Token); err == nil {
@@ -221,7 +227,7 @@ func (s *Server) domainsView(ctx context.Context, p *store.Project) (*domainsVie
 			row.Status, row.Detail, row.Records = dnsStatus(ctx, host, want)
 		}
 		v.Production = row
-		v.Preview = &urlRow{Hostname: "<branch>-" + slug(p.Name) + "." + base, Enabled: prefs.Preview}
+		v.Preview = &urlRow{Hostname: "<branch>-" + slug(p.Name) + "." + base, Enabled: prefs.Preview, Tunnel: prefs.PreviewTunnel}
 	}
 	list, err := s.store.ListDomains(ctx, p.ID)
 	if err != nil {
@@ -268,8 +274,15 @@ func (s *Server) handleSetURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Tunnel && req.Production {
-		if err := s.checkTunnelable(r.Context(), p); err != nil {
+		if err := s.checkTunnelable(r.Context(), p, false); err != nil {
 			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+	}
+	if req.PreviewTunnel && req.Preview {
+		cfg, _ := s.tunnelConfig(r.Context(), p.DeviceID)
+		if cfg.Via != "proxy" {
+			writeError(w, http.StatusConflict, "preview URLs through the tunnel need the tunnel set to \"Through the device proxy\" on the device's Settings page")
 			return
 		}
 	}
@@ -302,11 +315,7 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Access == "tunnel" {
-		if req.Type == store.DomainRoute {
-			writeError(w, http.StatusBadRequest, "a route with a path can't go through the tunnel; add the whole hostname instead")
-			return
-		}
-		if err := s.checkTunnelable(r.Context(), p); err != nil {
+		if err := s.checkTunnelable(r.Context(), p, req.Type == store.DomainRoute); err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
@@ -379,11 +388,7 @@ func (s *Server) handleSetDomainAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Access == "tunnel" {
-		if dm.Kind == store.DomainRoute {
-			writeError(w, http.StatusBadRequest, "a route with a path can't go through the tunnel")
-			return
-		}
-		if err := s.checkTunnelable(r.Context(), p); err != nil {
+		if err := s.checkTunnelable(r.Context(), p, dm.Kind == store.DomainRoute); err != nil {
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
@@ -525,22 +530,45 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 			continue
 		}
 		projects = append(projects, p)
-		list, _ := s.store.ListDomains(ctx, p.ID)
-		for _, dm := range list {
-			if dm.Access != "tunnel" { // tunnel hostnames bypass the proxy and DNS
-				doms[p.ID] = append(doms[p.ID], dm)
-			}
-		}
-		pf := s.urlPrefs(ctx, p.ID)
-		if pf.Tunnel {
-			pf.Production = false
-		}
-		prefs[p.ID] = pf
+		doms[p.ID], _ = s.store.ListDomains(ctx, p.ID)
+		prefs[p.ID] = s.urlPrefs(ctx, p.ID)
 		protected[p.ID] = s.projectProtected(ctx, p.ID)
 		previews[p.ID], _ = s.store.ListPreviews(ctx, p.ID)
 	}
+	// Hostnames reached through the tunnel. In direct mode the proxy and DNS skip them; in proxy
+	// mode the proxy serves them over plain HTTP for cloudflared, and DNS still skips them.
+	for _, p := range projects {
+		s.reconcileTunnelHosts(ctx, p) // previews come and go
+	}
+	tunnelHosts, viaProxy := s.tunnelHostsFor(ctx, d, projects, doms, prefs, previews)
+	if !viaProxy {
+		for id, list := range doms {
+			var keep []*store.Domain
+			for _, dm := range list {
+				if !tunnelHosts[dm.Hostname] {
+					keep = append(keep, dm)
+				}
+			}
+			doms[id] = keep
+		}
+		for id, pf := range prefs {
+			if pf.Tunnel {
+				pf.Production = false
+			}
+			prefs[id] = pf
+		}
+	}
 	file, hosts := buildCaddy(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews)
 	n := len(hosts)
+	if viaProxy {
+		file = markHTTPOnly(file, tunnelHosts)
+	}
+	var dnsHosts []string
+	for _, h := range hosts {
+		if !tunnelHosts[h] {
+			dnsHosts = append(dnsHosts, h)
+		}
+	}
 	args := map[string]string{"caddyfile": file}
 	if tok := s.sslDNSToken(ctx); tok != "" && hasCap(d, api.CapProxyDNS) {
 		args["caddyfile"] = withDNSChallenge(file)
@@ -550,7 +578,7 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 	if n == 0 && used == "" && !force {
 		return nil // nothing to serve and no proxy to empty
 	}
-	s.syncDNS(ctx, d, hosts) // DNS does not depend on the agent being new enough to run Caddy
+	s.syncDNS(ctx, d, dnsHosts) // DNS does not depend on the agent being new enough to run Caddy
 	if !hasCap(d, api.CapProxy) {
 		s.event(ctx, d.ID, "warning", "proxy.sync", errAgentTooOld(d, "domains").Error())
 		return errAgentTooOld(d, "domains")
@@ -609,6 +637,10 @@ func (s *Server) handleSetAccess(w http.ResponseWriter, r *http.Request) {
 	v := ""
 	if req.Protected {
 		v = "1"
+		if s.tunnelBypassesLogin(r.Context(), p) {
+			writeError(w, http.StatusConflict, "some of this worker's hostnames go through a direct Cloudflare Tunnel, which would bypass the login. Switch the tunnel to \"Through the device proxy\" on the device's Settings page, or serve those hostnames by DNS instead")
+			return
+		}
 	}
 	if err := s.store.SetSetting(r.Context(), settingProtect+p.ID, v); err != nil {
 		s.internal(w, err)
@@ -617,4 +649,41 @@ func (s *Server) handleSetAccess(w http.ResponseWriter, r *http.Request) {
 	s.event(r.Context(), p.DeviceID, "info", "domain.access", fmt.Sprintf("%s set login for %s to %v", identityFrom(r).Name, p.Name, req.Protected))
 	s.syncProxy(r.Context(), p.DeviceID)
 	s.writeDomains(w, r, http.StatusOK)
+}
+
+// tunnelHostsFor returns the hostnames this device's projects reach through the tunnel, and whether
+// the tunnel goes through the proxy.
+func (s *Server) tunnelHostsFor(ctx context.Context, d *store.Device, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, previews map[string][]*store.Preview) (map[string]bool, bool) {
+	cfg, ok := s.tunnelConfig(ctx, d.ID)
+	out := map[string]bool{}
+	if !ok {
+		return out, false
+	}
+	base := s.baseDomain(ctx)
+	for _, p := range projects {
+		pf := prefs[p.ID]
+		if base != "" && pf.Production && pf.Tunnel {
+			out[slug(p.Name)+"."+base] = true
+		}
+		if base != "" && cfg.Via == "proxy" && pf.Preview && pf.PreviewTunnel {
+			for _, pv := range previews[p.ID] {
+				out[pv.Slug+"-"+slug(p.Name)+"."+base] = true
+			}
+		}
+		for _, dm := range doms[p.ID] {
+			if dm.Access == "tunnel" {
+				out[dm.Hostname] = true
+			}
+		}
+	}
+	return out, cfg.Via == "proxy"
+}
+
+// markHTTPOnly rewrites those site blocks to listen on plain HTTP, so Caddy neither redirects
+// cloudflared to HTTPS nor tries to get a certificate for a name that doesn't point at this device.
+func markHTTPOnly(file string, hosts map[string]bool) string {
+	for h := range hosts {
+		file = strings.Replace(file, "\n"+h+" {\n", "\nhttp://"+h+" {\n", 1)
+	}
+	return file
 }

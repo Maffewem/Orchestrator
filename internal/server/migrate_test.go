@@ -219,11 +219,11 @@ func TestMigrationMovesTunnelRoutes(t *testing.T) {
 
 	// On a shared tunnel the origin is the owning device's address, not localhost.
 	db.Host.Addresses = []string{"127.0.0.1", "192.168.1.20"}
-	got, err := h.srv.resolveRoute([]*store.Project{p}, db, true, tunnelRoute{Hostname: "x", Service: "project:web"})
+	got, err := h.srv.resolveRoute([]*store.Project{p}, db, true, "", tunnelRoute{Hostname: "x", Service: "project:web"})
 	if err != nil || got != "http://192.168.1.20:8080" {
 		t.Fatalf("shared origin %q %v", got, err)
 	}
-	if got, _ := h.srv.resolveRoute([]*store.Project{p}, db, false, tunnelRoute{Hostname: "x", Service: "project:web"}); got != "http://localhost:8080" {
+	if got, _ := h.srv.resolveRoute([]*store.Project{p}, db, false, "", tunnelRoute{Hostname: "x", Service: "project:web"}); got != "http://localhost:8080" {
 		t.Fatalf("single origin %q", got)
 	}
 }

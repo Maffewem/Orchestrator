@@ -199,6 +199,8 @@ export interface TunnelRoute {
   hostname: string;
   /** A URL such as http://localhost:3000, or project:<name>. */
   service: string;
+  /** Kept in step with a project's domains by the server. */
+  managed?: boolean;
 }
 
 export interface TunnelView {
@@ -206,6 +208,7 @@ export interface TunnelView {
   enabled: boolean;
   state?: string;
   tunnel_id?: string;
+  via: "" | "proxy";
   routes: TunnelRoute[];
   can_route: boolean;
   warnings?: string[];
@@ -336,6 +339,7 @@ export interface UrlRow {
 export interface DomainsView {
   lan_only: boolean;
   tunnel_ready: boolean;
+  tunnel_via: "" | "proxy";
   base_domain: string;
   production: UrlRow | null;
   preview: UrlRow | null;
@@ -678,6 +682,7 @@ export const api = {
     request<Device>("PATCH", `/api/devices/${id}`, patch),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),
+  setTunnelVia: (id: string, via: "" | "proxy") => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/via`, { via }),
   setTunnelRoutes: (id: string, routes: TunnelRoute[]) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/routes`, { routes }),
   stackAction: (projectId: string, action: "start" | "stop" | "down", volumes = false) =>
     request<Command>("POST", `/api/projects/${projectId}/stack`, { action, volumes }),
@@ -732,7 +737,7 @@ export const api = {
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
   projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
-  setProjectUrls: (id: string, u: { production: boolean; preview: boolean; tunnel?: boolean }) =>
+  setProjectUrls: (id: string, u: { production: boolean; preview: boolean; tunnel?: boolean; preview_tunnel?: boolean }) =>
     request<DomainsView>("PUT", `/api/projects/${id}/domains/urls`, u),
   addDomain: (id: string, d: { hostname: string; type: "domain" | "route"; path?: string; access?: "tunnel" }) =>
     request<DomainsView>("POST", `/api/projects/${id}/domains`, d),

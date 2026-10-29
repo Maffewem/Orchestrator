@@ -116,11 +116,11 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
         <CardHeader title="Worker URL" />
         {prod && prev ? (
           <div className="divide-y divide-neutral-100">
-            <UrlLine locked={v.protected} label="Production" host={prod.hostname} enabled={prod.enabled} row={prod.status} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: on, preview: prev.enabled, tunnel: prod.tunnel }))} />
+            <UrlLine locked={v.protected} label="Production" host={prod.hostname} enabled={prod.enabled} row={prod.status} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: on, preview: prev.enabled, tunnel: prod.tunnel, preview_tunnel: prev.tunnel }))} />
             {prod.enabled && (v.tunnel_ready || prod.tunnel) && (
               <div className="flex items-center justify-between gap-4 bg-neutral-50/60 px-5 py-3 text-sm">
-                <span className="text-neutral-600">Reach this URL through the device's Cloudflare Tunnel instead of an A record. Needed to open it from outside the LAN.</span>
-                <Toggle on={!!prod.tunnel} onChange={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: prev.enabled, tunnel: on }))} label="Serve the production URL through the tunnel" disabled={!can} />
+                <span className="text-neutral-600">Reach this URL through the device's Cloudflare Tunnel instead of an A record. Needed to open it from outside the LAN.{v.tunnel_via === "proxy" ? " The tunnel goes through the device proxy, so the login setting applies." : " The tunnel goes straight to the worker, so \"Require login\" can't be used with it."}</span>
+                <Toggle on={!!prod.tunnel} onChange={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: prev.enabled, tunnel: on, preview_tunnel: prev.tunnel }))} label="Serve the production URL through the tunnel" disabled={!can} />
               </div>
             )}
             {prod.enabled && prod.status !== "active" && prod.status !== "lan" && prod.records && (
@@ -129,7 +129,7 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
                 {v.dns !== "cloudflare" && <Records rows={prod.records} />}
               </div>
             )}
-            <UrlLine locked={v.protected} label="Preview" host={prev.hostname} enabled={prev.enabled} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: on, tunnel: prod.tunnel }))} />
+            <UrlLine locked={v.protected} label="Preview" host={prev.hostname} enabled={prev.enabled} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: on, tunnel: prod.tunnel, preview_tunnel: prev.tunnel }))} />
             {prev.enabled && <p className="px-5 pb-4 text-xs text-neutral-500">Needs a wildcard DNS record, *.{prod.hostname.split(".").slice(1).join(".")}, pointing at the same address. Preview URLs are served over plain HTTP.</p>}
           </div>
         ) : (
@@ -195,7 +195,7 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
                     <td colSpan={5} className="space-y-2 bg-neutral-50/60 px-5 py-4">
                       <p className="text-sm text-neutral-600">{d.detail}</p>
                       {d.status !== "active" && d.status !== "lan" && <Records rows={d.records} />}
-                      {can && d.type === "domain" && (v.tunnel_ready || d.access === "tunnel") && (
+                      {can && (d.type === "domain" || v.tunnel_via === "proxy") && (v.tunnel_ready || d.access === "tunnel") && (
                         <div className="flex items-center gap-3 pt-1 text-sm">
                           <Toggle on={d.access === "tunnel"} onChange={(on) => act(() => api.setDomainAccess(projectId, d.id!, on ? "tunnel" : ""))} label={`Serve ${d.hostname} through the tunnel`} />
                           Serve through the Cloudflare Tunnel (no A record, reachable from outside the LAN)
@@ -215,6 +215,7 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
           kind={adding}
           onClose={() => setAdding(null)}
           tunnelReady={v.tunnel_ready}
+          tunnelVia={v.tunnel_via}
           onAdd={async (hostname, path, tunnel) => {
             const r = await api.addDomain(projectId, { hostname, type: adding, path, access: tunnel ? "tunnel" : undefined });
             setView(r);
@@ -227,7 +228,7 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
   );
 }
 
-function AddDialog({ kind, onClose, onAdd, tunnelReady }: { kind: "domain" | "route"; onClose: () => void; onAdd: (host: string, path: string, tunnel: boolean) => Promise<void>; tunnelReady: boolean }) {
+function AddDialog({ kind, onClose, onAdd, tunnelReady, tunnelVia }: { kind: "domain" | "route"; onClose: () => void; onAdd: (host: string, path: string, tunnel: boolean) => Promise<void>; tunnelReady: boolean; tunnelVia: "" | "proxy" }) {
   const [tunnel, setTunnel] = useState(false);
   const [host, setHost] = useState("");
   const [path, setPath] = useState("/*");
@@ -237,7 +238,7 @@ function AddDialog({ kind, onClose, onAdd, tunnelReady }: { kind: "domain" | "ro
     setBusy(true);
     setError(null);
     try {
-      await onAdd(host, kind === "route" ? path : "", tunnel && kind === "domain");
+      await onAdd(host, kind === "route" ? path : "", tunnel);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
@@ -254,7 +255,7 @@ function AddDialog({ kind, onClose, onAdd, tunnelReady }: { kind: "domain" | "ro
             <input className={inputClass} value={path} onChange={(e) => setPath(e.target.value)} />
           </Field>
         )}
-        {kind === "domain" && tunnelReady && (
+        {(kind === "domain" || tunnelVia === "proxy") && tunnelReady && (
           <label className="flex cursor-pointer items-start gap-2 text-sm">
             <input type="checkbox" className="mt-1" checked={tunnel} onChange={(e) => setTunnel(e.target.checked)} />
             <span>

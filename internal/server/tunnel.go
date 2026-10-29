@@ -31,6 +31,9 @@ type tunnelRoute struct {
 }
 
 type tunnelConfig struct {
+	// Via is where tunnel traffic for managed hostnames goes: "" straight to the worker's port, or
+	// "proxy" through the device's Caddy, which adds login, path routes and preview URLs.
+	Via    string        `json:"via,omitempty"`
 	Token  string        `json:"token"`
 	Routes []tunnelRoute `json:"routes,omitempty"`
 }
@@ -79,6 +82,7 @@ type tunnelView struct {
 	Enabled   bool          `json:"enabled"`
 	State     string        `json:"state,omitempty"` // container state: running, restarting, exited...
 	TunnelID  string        `json:"tunnel_id,omitempty"`
+	Via       string        `json:"via"` // "" direct | proxy
 	Routes    []tunnelRoute `json:"routes"`
 	// CanRoute is true when Cloudflare is connected, so routes can be applied from here.
 	CanRoute bool     `json:"can_route"`
@@ -92,6 +96,7 @@ func (s *Server) tunnelView(ctx context.Context, d *store.Device) tunnelView {
 		return v
 	}
 	v.Enabled = true
+	v.Via = cfg.Via
 	if t, err := parseTunnelToken(cfg.Token); err == nil {
 		v.TunnelID = t.Tunnel
 	}
@@ -171,8 +176,18 @@ func (s *Server) handleSetTunnel(w http.ResponseWriter, r *http.Request) {
 // resolveRoute turns a route's service into the URL cloudflared connects to.
 // When several devices run the same tunnel, any of their connectors may receive a request, so
 // "localhost" would be the wrong machine: project routes then use the owning device's address.
-func (s *Server) resolveRoute(projects []*store.Project, dev *store.Device, shared bool, rt tunnelRoute) (string, error) {
+func (s *Server) resolveRoute(projects []*store.Project, dev *store.Device, shared bool, via string, rt tunnelRoute) (string, error) {
 	deviceID := dev.ID
+	if rt.Managed && via == "proxy" && strings.HasPrefix(rt.Service, "project:") {
+		// Through the device proxy, which picks the worker by hostname and path.
+		if !shared {
+			return "http://localhost:80", nil
+		}
+		if ip := deviceIPv4(dev); ip != "" {
+			return "http://" + ip + ":80", nil
+		}
+		return "", fmt.Errorf("%s reports no IPv4 address, which a shared tunnel needs to reach its proxy", dev.Name)
+	}
 	name, isProject := strings.CutPrefix(rt.Service, "project:")
 	if !isProject {
 		return rt.Service, nil
@@ -267,7 +282,7 @@ func (s *Server) applyTunnelRoutes(ctx context.Context, d *store.Device, cfg tun
 				continue
 			}
 			seen[rt.Hostname] = true
-			svc, err := s.resolveRoute(projects, pd, shared, rt)
+			svc, err := s.resolveRoute(projects, pd, shared, pcfg.Via, rt)
 			if err != nil {
 				warns = append(warns, rt.Hostname+": "+err.Error())
 				continue
@@ -393,18 +408,44 @@ func (s *Server) moveTunnelRoutes(ctx context.Context, p *store.Project, oldDev 
 	return append([]string{fmt.Sprintf("Moved %d tunnel route(s) to %s", len(moving), dst.Name)}, warns...)
 }
 
-// checkTunnelable says why a project's hostnames can't go through its device's tunnel.
-func (s *Server) checkTunnelable(ctx context.Context, p *store.Project) error {
-	if _, ok := s.tunnelConfig(ctx, p.DeviceID); !ok {
+// checkTunnelable says why a project's hostnames can't go through its device's tunnel. Login
+// protection and path routes need the device proxy in the path (the tunnel's "proxy" mode).
+func (s *Server) checkTunnelable(ctx context.Context, p *store.Project, route bool) error {
+	cfg, ok := s.tunnelConfig(ctx, p.DeviceID)
+	if !ok {
 		return errors.New("set up a Cloudflare Tunnel on this project's device first (Device > Settings)")
 	}
 	if upstreamPort(p) == "" {
 		return errors.New("the project publishes no port for the tunnel to send traffic to")
 	}
-	if s.projectProtected(ctx, p.ID) {
-		return errors.New("login protection is served by the device proxy, which the tunnel bypasses: turn off \"Require login\" first")
+	if cfg.Via != "proxy" {
+		if s.projectProtected(ctx, p.ID) {
+			return errors.New("login protection is served by the device proxy, which a direct tunnel bypasses: switch the tunnel to \"Through the device proxy\" on the device's Settings page, or turn off \"Require login\"")
+		}
+		if route {
+			return errors.New("a route with a path needs the tunnel set to \"Through the device proxy\" on the device's Settings page")
+		}
 	}
 	return nil
+}
+
+// tunnelBypassesLogin reports whether a project has hostnames reaching it through a direct tunnel,
+// where the device proxy's login check would not apply.
+func (s *Server) tunnelBypassesLogin(ctx context.Context, p *store.Project) bool {
+	cfg, ok := s.tunnelConfig(ctx, p.DeviceID)
+	if !ok || cfg.Via == "proxy" {
+		return false
+	}
+	if pf := s.urlPrefs(ctx, p.ID); pf.Production && pf.Tunnel {
+		return true
+	}
+	list, _ := s.store.ListDomains(ctx, p.ID)
+	for _, dm := range list {
+		if dm.Access == "tunnel" {
+			return true
+		}
+	}
+	return false
 }
 
 // reconcileTunnelHosts makes the device tunnel's managed routes match the project: its custom domains
@@ -422,17 +463,29 @@ func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) {
 	}
 	if list, err := s.store.ListDomains(ctx, p.ID); err == nil {
 		for _, dm := range list {
-			if dm.Access == "tunnel" && dm.Kind == store.DomainCustom {
+			if dm.Access == "tunnel" && (dm.Kind == store.DomainCustom || cfg.Via == "proxy") {
 				want[dm.Hostname] = true
+			}
+		}
+	}
+	if cfg.Via == "proxy" {
+		if pf := s.urlPrefs(ctx, p.ID); pf.Preview && pf.PreviewTunnel {
+			if base := s.baseDomain(ctx); base != "" {
+				pvs, _ := s.store.ListPreviews(ctx, p.ID)
+				for _, pv := range pvs {
+					want[pv.Slug+"-"+slug(p.Name)+"."+base] = true
+				}
 			}
 		}
 	}
 	svc := "project:" + p.Name
 	var routes []tunnelRoute
+	changed := false
 	have := map[string]bool{}
 	for _, rt := range cfg.Routes {
 		if rt.Managed && rt.Service == svc {
 			if !want[rt.Hostname] {
+				changed = true
 				continue
 			}
 			have[rt.Hostname] = true
@@ -443,10 +496,11 @@ func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) {
 	}
 	for h := range want {
 		if !have[h] {
+			changed = true
 			routes = append(routes, tunnelRoute{Hostname: h, Service: svc, Managed: true})
 		}
 	}
-	if len(routes) == len(cfg.Routes) && len(want) == countManaged(cfg.Routes, svc) {
+	if !changed {
 		return
 	}
 	cfg.Routes = routes
@@ -465,12 +519,78 @@ func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) {
 	}
 }
 
-func countManaged(routes []tunnelRoute, svc string) int {
-	n := 0
-	for _, rt := range routes {
-		if rt.Managed && rt.Service == svc {
-			n++
+// handleSetTunnelVia chooses whether tunnel traffic goes straight to workers or through the device proxy.
+func (s *Server) handleSetTunnelVia(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.lookupDevice(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Via string `json:"via"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	ctx := r.Context()
+	cfg, has := s.tunnelConfig(ctx, d.ID)
+	if !has {
+		writeError(w, http.StatusConflict, "set up the tunnel on this device first")
+		return
+	}
+	if req.Via != "" && req.Via != "proxy" {
+		writeError(w, http.StatusBadRequest, "via must be empty (direct) or proxy")
+		return
+	}
+	if req.Via == "proxy" && !hasCap(d, api.CapProxy) {
+		writeError(w, http.StatusConflict, errAgentTooOld(d, "the device proxy").Error())
+		return
+	}
+	projects, _ := s.store.ListProjects(ctx)
+	if req.Via == "" {
+		// Going back to direct would bypass the login check and cut off path routes and previews.
+		for _, p := range projects {
+			if p.DeviceID == d.ID && s.tunnelUsesProxyFeatures(ctx, p) {
+				writeError(w, http.StatusConflict, p.Name+" relies on the device proxy through the tunnel (login, a path route or preview URLs). Switch those back to direct DNS first")
+				return
+			}
 		}
 	}
-	return n
+	cfg.Via = req.Via
+	if err := s.saveTunnelConfig(ctx, d.ID, &cfg); err != nil {
+		s.internal(w, err)
+		return
+	}
+	for _, p := range projects {
+		if p.DeviceID == d.ID {
+			s.reconcileTunnelHosts(ctx, p)
+		}
+	}
+	cfg, _ = s.tunnelConfig(ctx, d.ID) // reconcile may have changed the routes
+	if tok := s.cloudflareToken(ctx); tok != "" {
+		for _, wn := range s.applyTunnelRoutes(ctx, d, cfg, tok) {
+			s.event(ctx, d.ID, "warning", "tunnel.routes", wn)
+		}
+	}
+	s.syncProxy(ctx, d.ID)
+	s.event(ctx, d.ID, "info", "tunnel.via", fmt.Sprintf("Tunnel on %s now goes %s", d.Name, map[string]string{"": "straight to workers", "proxy": "through the device proxy"}[req.Via]))
+	writeJSON(w, http.StatusOK, s.tunnelView(ctx, d))
+}
+
+// tunnelUsesProxyFeatures is true when a project's tunnel hostnames need the proxy in the path.
+func (s *Server) tunnelUsesProxyFeatures(ctx context.Context, p *store.Project) bool {
+	pf := s.urlPrefs(ctx, p.ID)
+	if pf.Preview && pf.PreviewTunnel {
+		return true
+	}
+	list, _ := s.store.ListDomains(ctx, p.ID)
+	hasTunnel := pf.Production && pf.Tunnel
+	for _, dm := range list {
+		if dm.Access == "tunnel" {
+			hasTunnel = true
+			if dm.Kind == store.DomainRoute {
+				return true
+			}
+		}
+	}
+	return hasTunnel && s.projectProtected(ctx, p.ID)
 }

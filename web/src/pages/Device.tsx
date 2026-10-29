@@ -202,6 +202,26 @@ function TunnelCard({ d }: { d: Device }) {
                 )}
               </div>
             )}
+            {t.enabled && isAdmin && (
+              <div className="space-y-2 border-t border-neutral-200 pt-3">
+                <p className="font-medium">Where tunnel traffic goes</p>
+                {(
+                  [
+                    ["", "Straight to the worker (default)", "Lightest: cloudflared sends each request directly to the worker's port. Nothing else runs in the path. Login protection, path routes and preview URLs cannot be used through the tunnel."],
+                    ["proxy", "Through the device proxy (Caddy)", "Adds one more process in the path on this device: cloudflared sends requests to Caddy, which forwards them to the worker. Caddy uses little CPU and tens of MB of memory for plain HTTP, but on a very small device that is extra load. It enables login protection, path routes and per-preview hostnames through the tunnel."],
+                  ] as const
+                ).map(([val, label, text]) => (
+                  <label key={val} className="flex cursor-pointer items-start gap-2">
+                    <input type="radio" className="mt-1" name={`via-${d.id}`} checked={t.via === val} disabled={busy} onChange={() => act(() => api.setTunnelVia(d.id, val))} />
+                    <span>
+                      <span className="font-medium">{label}</span>
+                      <br />
+                      <span className="text-neutral-500">{text}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
             {t.enabled && (
               <div className="space-y-2 border-t border-neutral-200 pt-3">
                 <p className="font-medium">Public hostnames</p>

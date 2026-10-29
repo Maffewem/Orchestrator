@@ -101,3 +101,11 @@ export function useTick(ms = 1000) {
     return () => clearInterval(t);
   }, [ms]);
 }
+
+/** "1.2 GB RAM, 20 GB disk free" for a device picker, so you can see whether a worker will fit. */
+export function freeSpace(d: { metrics: { memory_total: number; memory_used: number; disk_total: number; disk_used: number } }): string {
+  const m = d.metrics;
+  if (!m.memory_total && !m.disk_total) return "";
+  const free = (total: number, used: number) => (total ? bytes(Math.max(total - used, 0)) : "?");
+  return `${free(m.memory_total, m.memory_used)} RAM, ${free(m.disk_total, m.disk_used)} disk free`;
+}

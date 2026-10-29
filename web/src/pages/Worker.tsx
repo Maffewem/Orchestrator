@@ -200,6 +200,7 @@ function Deployments({ w }: { w: FleetContainer }) {
 // --- Backups ---
 
 function Backups({ w, canBackup, deviceLoaded }: { w: FleetContainer; canBackup: boolean; deviceLoaded: boolean }) {
+  const isAdmin = useCan("admin");
   const policy = usePoll(() => api.backupPolicy(w.device_id, w.name), 0, [w.device_id, w.name]);
   const backups = usePoll(() => api.backups().then((all) => all.filter((b) => b.device_id === w.device_id && b.container_name === w.name)), 3000, [w.device_id, w.name]);
   const [p, setP] = useState<BackupPolicy | null>(null);
@@ -292,9 +293,9 @@ function Backups({ w, canBackup, deviceLoaded }: { w: FleetContainer; canBackup:
             </div>
             {p.mode !== "off" && p.next_run && <p className="text-sm text-neutral-600">Next backup: {new Date(p.next_run).toLocaleString()}{p.last_run ? ` · last run ${ago(p.last_run)}` : ""}</p>}
             <div className="flex items-center gap-3">
-              <Button variant="primary" onClick={save}>Save</Button>
+              {isAdmin && <Button variant="primary" onClick={save}>Save</Button>}
               {saved && <span className="text-sm text-neutral-600">Saved</span>}
-              <Button
+              {isAdmin && <Button
                 className="ml-auto"
                 icon={<Archive className="size-4" />}
                 loading={busy === "now"}
@@ -312,7 +313,7 @@ function Backups({ w, canBackup, deviceLoaded }: { w: FleetContainer; canBackup:
                 }}
               >
                 Back up now
-              </Button>
+              </Button>}
             </div>
           </div>
         )}
@@ -336,13 +337,13 @@ function Backups({ w, canBackup, deviceLoaded }: { w: FleetContainer; canBackup:
                 <Td className="whitespace-nowrap text-neutral-600">{b.status === "complete" ? bytes(b.size) : "—"}</Td>
                 <Td>
                   <div className="flex justify-end gap-1">
-                    {b.status === "complete" && (
+                    {isAdmin && b.status === "complete" && (
                       <>
                         <Button size="sm" variant="ghost" title="Download" loading={busy === b.id + "download"} icon={<Download className="size-3.5" />} onClick={() => act(b, "download")} />
                         <Button size="sm" variant="ghost" title="Restore" loading={busy === b.id + "restore"} icon={<RotateCcw className="size-3.5" />} onClick={() => act(b, "restore")} />
                       </>
                     )}
-                    <Button size="sm" variant="ghost" title="Delete" loading={busy === b.id + "delete"} icon={<Trash2 className="size-3.5" />} onClick={() => act(b, "delete")} />
+                    {isAdmin && <Button size="sm" variant="ghost" title="Delete" loading={busy === b.id + "delete"} icon={<Trash2 className="size-3.5" />} onClick={() => act(b, "delete")} />}
                   </div>
                 </Td>
               </tr>

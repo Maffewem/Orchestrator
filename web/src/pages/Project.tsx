@@ -11,7 +11,7 @@ import DomainsPanel from "../components/Domains";
 import PreviewsPanel from "../components/Previews";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
-import { ago, usePoll } from "../lib";
+import { ago, freeSpace, usePoll } from "../lib";
 import { confirmDialog, confirmWithOption } from "../components/dialogs";
 
 /** URL of the first published port on the device, if we know an address for it. */
@@ -25,6 +25,7 @@ export function visitUrl(p: Project, device?: Device | null): string | null {
 /** Start, stop and remove all containers of a Compose stack. Redeploying brings a removed stack back. */
 function StackControls({ p, onError }: { p: Project; onError: (e: string | null) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const canOperate = useCan("operator");
   const run = async (action: "start" | "stop" | "down") => {
     let volumes = false;
     if (action === "down") {
@@ -48,6 +49,7 @@ function StackControls({ p, onError }: { p: Project; onError: (e: string | null)
       setBusy(null);
     }
   };
+  if (!canOperate) return null;
   return (
     <>
       <Button onClick={() => run("start")} loading={busy === "start"}>Start</Button>
@@ -66,6 +68,7 @@ export default function ProjectPage() {
   const [deploying, setDeploying] = useState(false);
   const [shell, setShell] = useState(false);
   const isAdmin = useCan("admin");
+  const canOperate = useCan("operator");
   const [error, setError] = useState<string | null>(null);
   const worker = device.data?.containers.find((c) => c.name === (p?.runtime.container || p?.name));
   useCrumbs([{ label: "Projects", to: "/projects" }, { label: p?.name ?? "…" }]);
@@ -129,9 +132,11 @@ export default function ProjectPage() {
               Shell
             </Button>
           )}
-          <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
-            New deployment
-          </Button>
+          {canOperate && (
+            <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
+              New deployment
+            </Button>
+          )}
           {url && (
             <a href={url} target="_blank" rel="noreferrer">
               <Button variant="primary" icon={<ArrowUpRight className="size-4" />}>
@@ -372,6 +377,8 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
   const [target, setTarget] = useState("");
   const [withData, setWithData] = useState(true);
   const [stopSource, setStopSource] = useState(true);
+  const [fromBackup, setFromBackup] = useState(false);
+  const isAdmin = useCan("admin");
   const [error, setError] = useState<string | null>(null);
   const [m, setM] = useState<Migration | null>(null);
   const running = m?.status === "running";
@@ -391,7 +398,10 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
     return () => clearInterval(t);
   }, [running, p.id, onDone]);
 
-  if (p.source.type === "compose") return null;
+  if (!isAdmin) return null;
+  const isStack = p.source.type === "compose";
+  const source = devices.data?.find((d) => d.id === p.device_id);
+  const sourceDown = source?.status === "offline";
   const others = devices.data?.filter((d) => d.id !== p.device_id && !d.maintenance) ?? [];
   return (
     <Card>
@@ -404,12 +414,20 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
             {others.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name} ({d.host.arch}
-                {d.status === "offline" ? ", offline" : ""})
+                {d.status === "offline" ? ", offline" : ""}
+                {freeSpace(d) ? `, ${freeSpace(d)}` : ""})
               </option>
             ))}
           </select>
         </Field>
-        <div className="flex items-center gap-3 text-sm"><Toggle checked={withData} onChange={setWithData} label="Copy volumes and data" />Copy volumes and data</div>
+        {isStack && <p className="text-sm text-neutral-500">A stack is redeployed on the new device. Its volumes are not copied, so it starts with fresh data.</p>}
+        {!isStack && <div className="flex items-center gap-3 text-sm"><Toggle checked={withData} onChange={setWithData} label="Copy volumes and data" />Copy volumes and data</div>}
+        {!isStack && withData && sourceDown && (
+          <div className="flex items-center gap-3 text-sm">
+            <Toggle checked={fromBackup} onChange={setFromBackup} label="Use the newest backup on the server" />
+            {source?.name} is offline: restore the newest backup on the server instead. The data may be out of date.
+          </div>
+        )}
         <div className="flex items-center gap-3 text-sm"><Toggle checked={stopSource} onChange={setStopSource} label="Stop the old container afterwards" />Stop the old container afterwards</div>
         <Button
           disabled={!target || running}
@@ -417,7 +435,7 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
           onClick={async () => {
             setError(null);
             try {
-              setM(await api.migrateProject(p.id, { device_id: target, with_data: withData, stop_source: stopSource }));
+              setM(await api.migrateProject(p.id, { device_id: target, with_data: withData, stop_source: stopSource, from_backup: sourceDown && fromBackup }));
             } catch (e) {
               setError(e instanceof Error ? e.message : String(e));
             }

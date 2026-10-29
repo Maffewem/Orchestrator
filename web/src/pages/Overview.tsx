@@ -33,6 +33,23 @@ export default function OverviewPage() {
     <>
       <PageHeader title="Overview" description="Health of every device, container and deployment in your fleet." />
 
+      {devices.data.some((d) => d.maintenance) && (
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          In maintenance, so nothing new is placed on them:{" "}
+          {devices.data
+            .filter((d) => d.maintenance)
+            .map((d, i) => (
+              <span key={d.id}>
+                {i > 0 && ", "}
+                <Link className="font-medium underline" to={`/devices/${d.id}`}>
+                  {d.name}
+                </Link>
+                {d.maintenance_note ? ` (${d.maintenance_note})` : ""}
+              </span>
+            ))}
+        </div>
+      )}
+
       <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Devices online" value={`${o.devices.online}/${o.devices.total}`} sub={o.devices.offline ? `${o.devices.offline} offline` : "All responding"} tone={o.devices.offline ? "bad" : undefined} />
         <Stat label="Needs attention" value={o.devices.warning + o.devices.critical} sub={`${o.devices.critical} critical, ${o.devices.warning} warning`} tone={o.devices.critical ? "bad" : o.devices.warning ? "warn" : undefined} />

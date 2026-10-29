@@ -12,6 +12,7 @@ const (
 	settingSessionHours = "auth_session_hours"
 	settingMinPassword  = "auth_min_password"
 	settingForceHTTPS   = "https_redirect"
+	settingAgentsHTTPS  = "https_agents"
 
 	minSessionHours = 1
 	maxSessionHours = 24 * 90
@@ -44,10 +45,17 @@ func (s *Server) forceHTTPS(ctx context.Context) bool {
 	return v == "1"
 }
 
+func (s *Server) requireAgentHTTPS(ctx context.Context) bool {
+	v, _ := s.store.GetSetting(ctx, settingAgentsHTTPS)
+	return v == "1"
+}
+
 type securityView struct {
 	SessionHours int  `json:"session_hours"`
 	MinPassword  int  `json:"min_password"`
 	ForceHTTPS   bool `json:"force_https"`
+	// RequireHTTPSAgents makes the server refuse agents that connect over plain HTTP.
+	RequireHTTPSAgents bool `json:"require_https_agents"`
 }
 
 func (s *Server) securityView(ctx context.Context) securityView {
@@ -55,6 +63,8 @@ func (s *Server) securityView(ctx context.Context) securityView {
 		SessionHours: int(s.sessionLifetime(ctx) / time.Hour),
 		MinPassword:  s.minPasswordLen(ctx),
 		ForceHTTPS:   s.forceHTTPS(ctx),
+
+		RequireHTTPSAgents: s.requireAgentHTTPS(ctx),
 	}
 }
 
@@ -78,6 +88,24 @@ func (s *Server) handleSetSecurity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	if req.RequireHTTPSAgents && !s.requireAgentHTTPS(ctx) {
+		// Agents installed with an http:// URL would be locked out, so list them first.
+		devs, _ := s.store.ListDevices(ctx)
+		var plain []string
+		for _, d := range devs {
+			if !d.Offline && s.agentLink(d.ID) != "https" {
+				plain = append(plain, d.Name)
+			}
+		}
+		if len(plain) > 0 {
+			writeError(w, http.StatusConflict, "these devices still connect over plain HTTP and would be cut off: "+strings.Join(plain, ", ")+". Re-run the install command from the HTTPS dashboard on each, then try again")
+			return
+		}
+	}
+	agentsHTTPS := "0"
+	if req.RequireHTTPSAgents {
+		agentsHTTPS = "1"
+	}
 	force := "0"
 	if req.ForceHTTPS {
 		force = "1"
@@ -86,6 +114,7 @@ func (s *Server) handleSetSecurity(w http.ResponseWriter, r *http.Request) {
 		settingSessionHours: strconv.Itoa(req.SessionHours),
 		settingMinPassword:  strconv.Itoa(req.MinPassword),
 		settingForceHTTPS:   force,
+		settingAgentsHTTPS:  agentsHTTPS,
 	} {
 		if err := s.store.SetSetting(ctx, k, v); err != nil {
 			s.internal(w, err)
@@ -107,6 +136,10 @@ func (s *Server) httpsRedirect(next http.Handler) http.Handler {
 		p := r.URL.Path
 		exempt := strings.HasPrefix(p, "/api/agent/") || strings.HasPrefix(p, "/api/github/") ||
 			strings.HasPrefix(p, "/downloads/") || p == "/install.sh" || p == "/api/health"
+		if strings.HasPrefix(p, "/api/agent/") && !requestIsHTTPS(r) && s.requireAgentHTTPS(r.Context()) {
+			writeError(w, http.StatusUpgradeRequired, "this server only accepts agents over HTTPS: re-run the install command from the HTTPS dashboard")
+			return
+		}
 		if !exempt && !requestIsHTTPS(r) && s.forceHTTPS(r.Context()) {
 			http.Redirect(w, r, s.redirectTarget(r), http.StatusMovedPermanently)
 			return
@@ -116,4 +149,21 @@ func (s *Server) httpsRedirect(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// noteAgentLink remembers whether a device's last heartbeat arrived over HTTPS.
+func (s *Server) noteAgentLink(deviceID string, r *http.Request) {
+	s.links.Store(deviceID, requestIsHTTPS(r))
+}
+
+// agentLink is "https", "http", or "unknown" before the device has reported since the server started.
+func (s *Server) agentLink(deviceID string) string {
+	v, ok := s.links.Load(deviceID)
+	switch {
+	case !ok:
+		return "unknown"
+	case v.(bool):
+		return "https"
+	}
+	return "http"
 }

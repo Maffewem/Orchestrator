@@ -74,6 +74,9 @@ export interface Device {
   issues: string[];
   proxy: "running" | "stopped" | "none" | "agent_too_old";
   maintenance: boolean;
+  maintenance_note?: string;
+  maintenance_until?: string;
+  agent_link: "https" | "http" | "unknown";
 }
 
 export interface FleetContainer extends Container {
@@ -347,7 +350,7 @@ export interface Settings {
   ssl_mode: "http" | "dns";
   sso: SSOView;
   https: HTTPSView;
-  security: { session_hours: number; min_password: number; force_https: boolean };
+  security: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
   version: string;
@@ -667,7 +670,7 @@ export const api = {
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
-  updateDevice: (id: string, patch: { name?: string; labels?: string[]; maintenance?: boolean }) =>
+  updateDevice: (id: string, patch: { name?: string; labels?: string[]; maintenance?: boolean; maintenance_note?: string; maintenance_hours?: number }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),
@@ -688,7 +691,7 @@ export const api = {
   updateProject: (id: string, p: Partial<ProjectInput>) => request<Project>("PATCH", `/api/projects/${id}`, p),
   deleteProject: (id: string, removeContainer = false) =>
     request<void>("DELETE", `/api/projects/${id}${removeContainer ? "?remove_container=1" : ""}`),
-  migrateProject: (id: string, body: { device_id: string; with_data: boolean; stop_source: boolean }) =>
+  migrateProject: (id: string, body: { device_id: string; with_data: boolean; stop_source: boolean; from_backup?: boolean }) =>
     request<Migration>("POST", `/api/projects/${id}/migrate`, body),
   migration: (id: string) => request<Migration>("GET", `/api/projects/${id}/migration`),
   deployProject: (id: string, confirm = false) => request<Deployment>("POST", `/api/projects/${id}/deployments${confirm ? "?confirm=1" : ""}`),
@@ -722,7 +725,7 @@ export const api = {
   setCloudflare: (b: { token?: string; proxied?: boolean }) =>
     request<{ connected: boolean; zones?: string[]; proxied?: boolean }>("PUT", "/api/settings/cloudflare", { token: b.token ?? "", proxied: b.proxied }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
-  setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
+  setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
   projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
   setProjectUrls: (id: string, u: { production: boolean; preview: boolean }) =>

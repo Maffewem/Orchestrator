@@ -227,3 +227,91 @@ func TestMigrationMovesTunnelRoutes(t *testing.T) {
 		t.Fatalf("single origin %q", got)
 	}
 }
+
+func TestMaintenanceNoteAndExpiry(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a := h.register("pi-a")
+	var dv DeviceView
+	if code := h.do("PATCH", "/api/devices/"+a.DeviceID, adminToken, map[string]any{"maintenance": true, "maintenance_note": "SD card swap", "maintenance_hours": 2}, &dv); code != http.StatusOK ||
+		!dv.Maintenance || dv.MaintenanceNote != "SD card swap" || dv.MaintenanceUntil == nil {
+		t.Fatalf("enable: %d %+v", code, dv.Device)
+	}
+	if ended, _ := h.st.ExpireMaintenance(ctx, time.Now()); len(ended) != 0 {
+		t.Fatal("expired early")
+	}
+	ended, _ := h.st.ExpireMaintenance(ctx, time.Now().Add(3*time.Hour))
+	if len(ended) != 1 {
+		t.Fatalf("expected one expiry, got %d", len(ended))
+	}
+	d, _ := h.st.GetDevice(ctx, a.DeviceID)
+	if d.Maintenance || d.MaintenanceNote != "" {
+		t.Fatalf("still in maintenance: %+v", d)
+	}
+}
+
+func TestMigrationFromBackupAndStacks(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	oldReg, newReg := h.register("pi-old"), h.register("pi-new")
+	h.do("POST", "/api/agent/heartbeat", newReg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview, api.CapCompose}}}, nil)
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": oldReg.DeviceID,
+		"source": map[string]any{"type": "image", "image": "nginx"}}, &p)
+	h.st.MarkOffline(ctx, time.Now().Add(time.Hour))
+	h.do("POST", "/api/agent/heartbeat", newReg.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview, api.CapCompose}}}, nil)
+	body := map[string]any{"device_id": newReg.DeviceID}
+	if code := h.do("POST", "/api/projects/"+p.ID+"/migrate", adminToken, body, nil); code != http.StatusConflict {
+		t.Fatalf("offline source without backup choice: %d", code)
+	}
+	body["from_backup"] = true
+	if code := h.do("POST", "/api/projects/"+p.ID+"/migrate", adminToken, body, nil); code != http.StatusConflict {
+		t.Fatalf("no backup on the server: %d", code)
+	}
+	var s store.Project
+	if code := h.do("POST", "/api/projects", adminToken, map[string]any{"name": "stack", "device_id": oldReg.DeviceID,
+		"source": map[string]any{"type": "compose", "compose": "services:\n  web:\n    image: nginx\n"}}, &s); code != http.StatusCreated {
+		t.Fatalf("create stack: %d", code)
+	}
+	if code := h.do("POST", "/api/projects/"+s.ID+"/migrate", adminToken, map[string]any{"device_id": newReg.DeviceID}, nil); code != http.StatusAccepted {
+		t.Fatalf("stacks can be moved: %d", code)
+	}
+}
+
+func TestRecoverInterruptedMigration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	a, b := h.register("pi-a"), h.register("pi-b")
+	p := &store.Project{Name: "web", DeviceID: b.DeviceID, Source: store.Source{Type: store.SourceImage, Image: "nginx"}}
+	if err := h.st.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	// The project was already switched to pi-b but never ran there.
+	h.srv.persistMigration(p.ID, MigrationView{Status: migRunning, From: "pi-a", To: "pi-b", FromID: a.DeviceID, ToID: b.DeviceID})
+	h.srv.recoverMigrations(ctx)
+	got, _ := h.st.GetProject(ctx, p.ID)
+	if got.DeviceID != a.DeviceID {
+		t.Fatalf("project should be back on pi-a, is on %s", got.DeviceID)
+	}
+	var v MigrationView
+	if code := h.do("GET", "/api/projects/"+p.ID+"/migration", adminToken, nil, &v); code != http.StatusOK || v.Status != migFailed {
+		t.Fatalf("saved migration: %d %+v", code, v)
+	}
+}
+
+func TestRequireHTTPSAgents(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi-a")
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{}, nil)
+	sec := map[string]any{"session_hours": 24, "min_password": 8, "force_https": false, "require_https_agents": true}
+	if code := h.do("PUT", "/api/settings/security", adminToken, sec, nil); code != http.StatusConflict {
+		t.Fatalf("a plain-HTTP agent must block the switch: %d", code)
+	}
+	h.srv.links.Store(reg.DeviceID, true)
+	if code := h.do("PUT", "/api/settings/security", adminToken, sec, nil); code != http.StatusOK {
+		t.Fatalf("enable: %d", code)
+	}
+	if code := h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{}, nil); code != http.StatusUpgradeRequired {
+		t.Fatalf("plain HTTP agent: %d", code)
+	}
+}

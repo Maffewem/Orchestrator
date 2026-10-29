@@ -22,10 +22,12 @@ type DeviceView struct {
 	Issues []string `json:"issues"`
 	// Proxy is the state of the per-device domain proxy: running | stopped | none | agent_too_old.
 	Proxy string `json:"proxy"`
+	// Link is how the agent reaches this server: https | http | unknown.
+	Link string `json:"agent_link"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d)}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d), Link: s.agentLink(d.ID)}
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"
@@ -102,6 +104,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	s.noteAgentLink(d.ID, r)
 	ctx := r.Context()
 	if err := s.store.UpdateDeviceState(ctx, d.ID, req.Host, req.Metrics, req.Containers); err != nil {
 		s.internal(w, err)
@@ -335,6 +338,11 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name   *string   `json:"name"`
 		Labels *[]string `json:"labels"`
+		// Maintenance blocks new workers, previews and adoptions on the device.
+		Maintenance *bool `json:"maintenance"`
+		// MaintenanceNote says why; MaintenanceHours ends maintenance by itself (0 = never).
+		MaintenanceNote  *string `json:"maintenance_note"`
+		MaintenanceHours *int    `json:"maintenance_hours"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -354,7 +362,50 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	if req.Maintenance != nil || req.MaintenanceNote != nil || req.MaintenanceHours != nil {
+		on, note := d.Maintenance, d.MaintenanceNote
+		if req.Maintenance != nil {
+			on = *req.Maintenance
+		}
+		if req.MaintenanceNote != nil {
+			note = strings.TrimSpace(*req.MaintenanceNote)
+			if len(note) > 300 {
+				note = note[:300]
+			}
+		}
+		var until time.Time
+		if req.MaintenanceHours != nil {
+			if *req.MaintenanceHours < 0 || *req.MaintenanceHours > 24*90 {
+				writeError(w, http.StatusBadRequest, "maintenance can end automatically after 1 hour to 90 days")
+				return
+			}
+			if *req.MaintenanceHours > 0 {
+				until = time.Now().Add(time.Duration(*req.MaintenanceHours) * time.Hour)
+			}
+		} else if d.MaintenanceUntil != nil {
+			until = *d.MaintenanceUntil
+		}
+		if err := s.store.SetDeviceMaintenance(r.Context(), d.ID, on, note, until); err != nil {
+			s.internal(w, err)
+			return
+		}
+		if on != d.Maintenance {
+			if on {
+				s.event(r.Context(), d.ID, "warning", "device.maintenance", d.Name+" is in maintenance mode: no new workers will be placed on it")
+			} else {
+				s.event(r.Context(), d.ID, "info", "device.maintenance", d.Name+" left maintenance mode")
+			}
+		}
+		if fresh, err := s.store.GetDevice(r.Context(), d.ID); err == nil {
+			d = fresh
+		}
+	}
 	writeJSON(w, http.StatusOK, s.view(d))
+}
+
+// errMaintenance is why a device refuses new work.
+func errMaintenance(d *store.Device) error {
+	return errors.New(d.Name + " is in maintenance mode: choose another device, or turn maintenance mode off first")
 }
 
 func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {

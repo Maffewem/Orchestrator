@@ -183,6 +183,22 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := addColumn(db, "devices", "maintenance", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := addColumn(db, "devices", "maintenance_note", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := addColumn(db, "devices", "maintenance_until", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := addColumn(db, "domains", "access", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	if err := addColumn(db, "backups", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -226,6 +242,10 @@ type Device struct {
 	CreatedAt  time.Time       `json:"created_at"`
 	LastSeen   time.Time       `json:"last_seen"`
 	Offline    bool            `json:"-"`
+	// Maintenance stops new workers, previews and adoptions being placed on the device.
+	Maintenance      bool       `json:"maintenance"`
+	MaintenanceNote  string     `json:"maintenance_note,omitempty"`
+	MaintenanceUntil *time.Time `json:"maintenance_until,omitempty"`
 }
 
 type Event struct {
@@ -280,14 +300,15 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 
 // --- devices ---
 
-const deviceCols = `id, name, labels, host, metrics, containers, created_at, last_seen, offline`
+const deviceCols = `id, name, labels, host, metrics, containers, created_at, last_seen, offline, maintenance, maintenance_note, maintenance_until`
 
 func scanDevice(sc interface{ Scan(...any) error }) (*Device, error) {
 	var d Device
 	var labels, host, metrics, containers string
 	var created, seen int64
-	var offline int
-	if err := sc.Scan(&d.ID, &d.Name, &labels, &host, &metrics, &containers, &created, &seen, &offline); err != nil {
+	var offline, maintenance int
+	var until int64
+	if err := sc.Scan(&d.ID, &d.Name, &labels, &host, &metrics, &containers, &created, &seen, &offline, &maintenance, &d.MaintenanceNote, &until); err != nil {
 		return nil, err
 	}
 	for _, f := range []struct {
@@ -307,6 +328,11 @@ func scanDevice(sc interface{ Scan(...any) error }) (*Device, error) {
 	d.CreatedAt = time.Unix(created, 0).UTC()
 	d.LastSeen = time.Unix(seen, 0).UTC()
 	d.Offline = offline != 0
+	d.Maintenance = maintenance != 0
+	if until > 0 {
+		t := time.Unix(until, 0).UTC()
+		d.MaintenanceUntil = &t
+	}
 	return &d, nil
 }
 
@@ -393,6 +419,66 @@ func (s *Store) UpdateDeviceMeta(ctx context.Context, id, name string, labels []
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SetDeviceMaintenance turns maintenance mode on or off. until (zero for never) ends it
+// automatically, see ExpireMaintenance. Turning it off clears the note.
+func (s *Store) SetDeviceMaintenance(ctx context.Context, id string, on bool, note string, until time.Time) error {
+	v, u := 0, int64(0)
+	if on {
+		v = 1
+		if !until.IsZero() {
+			u = until.Unix()
+		}
+	} else {
+		note = ""
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE devices SET maintenance = ?, maintenance_note = ?, maintenance_until = ? WHERE id = ?`, v, note, u, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ExpireMaintenance ends maintenance mode on devices whose end time has passed and returns them.
+func (s *Store) ExpireMaintenance(ctx context.Context, now time.Time) ([]*Device, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`UPDATE devices SET maintenance = 0, maintenance_note = '', maintenance_until = 0
+		 WHERE maintenance = 1 AND maintenance_until > 0 AND maintenance_until <= ? RETURNING `+deviceCols, now.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Device
+	for rows.Next() {
+		d, err := scanDevice(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ListSettingsWithPrefix returns every setting whose key starts with prefix.
+func (s *Store) ListSettingsWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?`, len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) DeleteDevice(ctx context.Context, id string) error {

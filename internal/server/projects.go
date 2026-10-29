@@ -238,6 +238,10 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if d, _ := s.store.GetDevice(r.Context(), in.DeviceID); d != nil && d.Maintenance {
+		writeError(w, http.StatusConflict, errMaintenance(d).Error())
+		return
+	}
 	p := &store.Project{Name: in.Name, DeviceID: in.DeviceID, Source: in.Source, Runtime: in.Runtime}
 	if err := s.store.CreateProject(r.Context(), p); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a project with that name already exists")
@@ -292,6 +296,12 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	if err := s.validateProject(r.Context(), &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if in.DeviceID != p.DeviceID {
+		if d, _ := s.store.GetDevice(r.Context(), in.DeviceID); d != nil && d.Maintenance {
+			writeError(w, http.StatusConflict, errMaintenance(d).Error())
+			return
+		}
 	}
 	p.Name, p.DeviceID, p.Source, p.Runtime = in.Name, in.DeviceID, in.Source, in.Runtime
 	if err := s.store.UpdateProject(r.Context(), p); errors.Is(err, store.ErrConflict) {

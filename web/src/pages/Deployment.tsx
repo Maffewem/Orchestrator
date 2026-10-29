@@ -90,7 +90,7 @@ export default function DeploymentPage() {
               Cancel deployment
             </Button>
           )}
-          <Button
+          {can && <Button
             icon={<RotateCw className="size-4" />}
             loading={retrying}
             disabled={d.status === "queued" || d.status === "running"}
@@ -109,7 +109,7 @@ export default function DeploymentPage() {
             }}
           >
             Retry deployment
-          </Button>
+          </Button>}
           {can && d.status === "succeeded" && !d.preview_id && (
             <Button
               icon={<Undo2 className="size-4" />}

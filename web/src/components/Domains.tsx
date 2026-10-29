@@ -25,6 +25,8 @@ export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChang
 function StatusBadge({ s }: { s: DomainRow["status"] }) {
   if (s === "active") return <Badge tone="ok">Active</Badge>;
   if (s === "mismatch") return <Badge tone="warn">Points elsewhere</Badge>;
+  if (s === "lan") return <Badge tone="info">LAN only</Badge>;
+  if (s === "tunnel") return <Badge tone="info">Cloudflare Tunnel</Badge>;
   return <Badge>Waiting for DNS</Badge>;
 }
 
@@ -102,18 +104,32 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
           The agent on this device is too old to serve domains. Update it from the <Link to="/updates" className="underline">Updates page</Link>, or re-run the install command on the device.
         </div>
       )}
+      {v.lan_only && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          This device only has private (LAN) addresses, so a DNS A record for it works on your network only, and Cloudflare's proxy is never used for it.{" "}
+          {v.tunnel_ready
+            ? "Switch a URL to the Cloudflare Tunnel below to reach it from outside."
+            : "To reach it from outside, set up a Cloudflare Tunnel under Device > Settings, then route the URL through it."}
+        </div>
+      )}
       <Card>
         <CardHeader title="Worker URL" />
         {prod && prev ? (
           <div className="divide-y divide-neutral-100">
-            <UrlLine locked={v.protected} label="Production" host={prod.hostname} enabled={prod.enabled} row={prod.status} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: on, preview: prev.enabled }))} />
-            {prod.enabled && prod.status !== "active" && prod.records && (
+            <UrlLine locked={v.protected} label="Production" host={prod.hostname} enabled={prod.enabled} row={prod.status} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: on, preview: prev.enabled, tunnel: prod.tunnel, preview_tunnel: prev.tunnel }))} />
+            {prod.enabled && (v.tunnel_ready || prod.tunnel) && (
+              <div className="flex items-center justify-between gap-4 bg-neutral-50/60 px-5 py-3 text-sm">
+                <span className="text-neutral-600">Reach this URL through the device's Cloudflare Tunnel instead of an A record. Needed to open it from outside the LAN.{v.tunnel_via === "proxy" ? " The tunnel goes through the device proxy, so the login setting applies." : " The tunnel goes straight to the worker, so \"Require login\" can't be used with it."}</span>
+                <Toggle on={!!prod.tunnel} onChange={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: prev.enabled, tunnel: on, preview_tunnel: prev.tunnel }))} label="Serve the production URL through the tunnel" disabled={!can} />
+              </div>
+            )}
+            {prod.enabled && prod.status !== "active" && prod.status !== "lan" && prod.records && (
               <div className="space-y-2 bg-neutral-50/60 px-5 py-4">
                 <p className="text-sm text-neutral-600">{v.dns === "cloudflare" ? "Cloudflare is connected: the record is created when the proxy next syncs. If it does not appear, check Activity for a DNS warning." : prod.detail}</p>
                 {v.dns !== "cloudflare" && <Records rows={prod.records} />}
               </div>
             )}
-            <UrlLine locked={v.protected} label="Preview" host={prev.hostname} enabled={prev.enabled} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: on }))} />
+            <UrlLine locked={v.protected} label="Preview" host={prev.hostname} enabled={prev.enabled} onToggle={(on) => act(() => api.setProjectUrls(projectId, { production: prod.enabled, preview: on, tunnel: prod.tunnel, preview_tunnel: prev.tunnel }))} />
             {prev.enabled && <p className="px-5 pb-4 text-xs text-neutral-500">Needs a wildcard DNS record, *.{prod.hostname.split(".").slice(1).join(".")}, pointing at the same address. Preview URLs are served over plain HTTP.</p>}
           </div>
         ) : (
@@ -178,7 +194,13 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
                   <tr key={d.id + "-dns"}>
                     <td colSpan={5} className="space-y-2 bg-neutral-50/60 px-5 py-4">
                       <p className="text-sm text-neutral-600">{d.detail}</p>
-                      {d.status !== "active" && <Records rows={d.records} />}
+                      {d.status !== "active" && d.status !== "lan" && <Records rows={d.records} />}
+                      {can && (d.type === "domain" || v.tunnel_via === "proxy") && (v.tunnel_ready || d.access === "tunnel") && (
+                        <div className="flex items-center gap-3 pt-1 text-sm">
+                          <Toggle on={d.access === "tunnel"} onChange={(on) => act(() => api.setDomainAccess(projectId, d.id!, on ? "tunnel" : ""))} label={`Serve ${d.hostname} through the tunnel`} />
+                          Serve through the Cloudflare Tunnel (no A record, reachable from outside the LAN)
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ),
@@ -192,8 +214,10 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
         <AddDialog
           kind={adding}
           onClose={() => setAdding(null)}
-          onAdd={async (hostname, path) => {
-            const r = await api.addDomain(projectId, { hostname, type: adding, path });
+          tunnelReady={v.tunnel_ready}
+          tunnelVia={v.tunnel_via}
+          onAdd={async (hostname, path, tunnel) => {
+            const r = await api.addDomain(projectId, { hostname, type: adding, path, access: tunnel ? "tunnel" : undefined });
             setView(r);
             setOpen(r.domains.find((d) => d.hostname === hostname.toLowerCase().trim())?.id ?? null);
             setAdding(null);
@@ -204,7 +228,8 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
   );
 }
 
-function AddDialog({ kind, onClose, onAdd }: { kind: "domain" | "route"; onClose: () => void; onAdd: (host: string, path: string) => Promise<void> }) {
+function AddDialog({ kind, onClose, onAdd, tunnelReady, tunnelVia }: { kind: "domain" | "route"; onClose: () => void; onAdd: (host: string, path: string, tunnel: boolean) => Promise<void>; tunnelReady: boolean; tunnelVia: "" | "proxy" }) {
+  const [tunnel, setTunnel] = useState(false);
   const [host, setHost] = useState("");
   const [path, setPath] = useState("/*");
   const [busy, setBusy] = useState(false);
@@ -213,7 +238,7 @@ function AddDialog({ kind, onClose, onAdd }: { kind: "domain" | "route"; onClose
     setBusy(true);
     setError(null);
     try {
-      await onAdd(host, kind === "route" ? path : "");
+      await onAdd(host, kind === "route" ? path : "", tunnel);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
@@ -229,6 +254,16 @@ function AddDialog({ kind, onClose, onAdd }: { kind: "domain" | "route"; onClose
           <Field label="Path" hint="Only requests under this path go to this worker, e.g. /api/*">
             <input className={inputClass} value={path} onChange={(e) => setPath(e.target.value)} />
           </Field>
+        )}
+        {(kind === "domain" || tunnelVia === "proxy") && tunnelReady && (
+          <label className="flex cursor-pointer items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={tunnel} onChange={(e) => setTunnel(e.target.checked)} />
+            <span>
+              Serve through the Cloudflare Tunnel
+              <br />
+              <span className="text-neutral-500">Adds the hostname to this device's tunnel (a CNAME instead of an A record). It works from outside the LAN and skips the device proxy.</span>
+            </span>
+          </label>
         )}
         {error && <ErrorNote>{error}</ErrorNote>}
         <div className="flex justify-end gap-2">

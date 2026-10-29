@@ -585,11 +585,12 @@ function SecuritySettings({ value, onSaved }: { value: Settings["security"]; onS
   const [hours, setHours] = useState(value.session_hours);
   const [minLen, setMinLen] = useState(value.min_password);
   const [force, setForce] = useState(value.force_https);
+  const [agentsHTTPS, setAgentsHTTPS] = useState(value.require_https_agents);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const save = async () => {
     setMsg(null);
     try {
-      await api.setSecurity({ session_hours: hours, min_password: minLen, force_https: force });
+      await api.setSecurity({ session_hours: hours, min_password: minLen, force_https: force, require_https_agents: agentsHTTPS });
       setMsg({ ok: true, text: "Saved. New sign-ins use these settings." });
       onSaved();
     } catch (e) {
@@ -615,6 +616,14 @@ function SecuritySettings({ value, onSaved }: { value: Settings["security"]; onS
           <span className="font-medium">Redirect HTTP to HTTPS</span>
           <br />
           <span className="text-neutral-500">Browsers on plain HTTP are sent to the HTTPS address. Agents, webhooks and the installer are not redirected. Turn it on while you are viewing the dashboard over HTTPS, for example behind a reverse proxy or tunnel.</span>
+        </span>
+      </label>
+      <label className="flex cursor-pointer items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-1" checked={agentsHTTPS} onChange={(e) => setAgentsHTTPS(e.target.checked)} />
+        <span>
+          <span className="font-medium">Require HTTPS for agents</span>
+          <br />
+          <span className="text-neutral-500">The server refuses agents that connect over plain HTTP. Every online device must already be connected over HTTPS, otherwise saving lists the ones that would be cut off. To switch a device over, open the dashboard on HTTPS and re-run the install command there.</span>
         </span>
       </label>
       <div className="flex items-center gap-3">

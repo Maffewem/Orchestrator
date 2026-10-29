@@ -371,9 +371,10 @@ export default function ProjectForm({
             <select className={inputClass} value={device} onChange={(e) => setDeviceId(e.target.value)}>
               {devices.data?.length === 0 && <option value="">No devices registered yet</option>}
               {devices.data?.map((d) => (
-                <option key={d.id} value={d.id}>
+                <option key={d.id} value={d.id} disabled={d.maintenance && d.id !== initial?.device_id}>
                   {d.name} ({d.host.arch}
-                  {d.status === "offline" ? ", offline" : ""})
+                  {d.status === "offline" ? ", offline" : ""}
+                  {d.maintenance ? ", maintenance" : ""})
                 </option>
               ))}
             </select>

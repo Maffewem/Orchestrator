@@ -335,6 +335,8 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name   *string   `json:"name"`
 		Labels *[]string `json:"labels"`
+		// Maintenance blocks new workers, previews and adoptions on the device.
+		Maintenance *bool `json:"maintenance"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -354,7 +356,24 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	if req.Maintenance != nil && *req.Maintenance != d.Maintenance {
+		if err := s.store.SetDeviceMaintenance(r.Context(), d.ID, *req.Maintenance); err != nil {
+			s.internal(w, err)
+			return
+		}
+		d.Maintenance = *req.Maintenance
+		if d.Maintenance {
+			s.event(r.Context(), d.ID, "warning", "device.maintenance", d.Name+" is in maintenance mode: no new workers will be placed on it")
+		} else {
+			s.event(r.Context(), d.ID, "info", "device.maintenance", d.Name+" left maintenance mode")
+		}
+	}
 	writeJSON(w, http.StatusOK, s.view(d))
+}
+
+// errMaintenance is why a device refuses new work.
+func errMaintenance(d *store.Device) error {
+	return errors.New(d.Name + " is in maintenance mode: choose another device, or turn maintenance mode off first")
 }
 
 func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {

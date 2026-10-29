@@ -392,7 +392,7 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
   }, [running, p.id, onDone]);
 
   if (p.source.type === "compose") return null;
-  const others = devices.data?.filter((d) => d.id !== p.device_id) ?? [];
+  const others = devices.data?.filter((d) => d.id !== p.device_id && !d.maintenance) ?? [];
   return (
     <Card>
       <CardHeader title="Move to another device" subtitle="Backs up the data, deploys on the new device, copies the data across and checks it runs before anything is stopped." />

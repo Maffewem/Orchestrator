@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Route, Routes, useNavigate, useParams } from "react-router";
 import { Trash2 } from "lucide-react";
-import { api, type Device, type TunnelRoute, type TunnelView } from "../api";
+import { api, type Device, type Migration, type Project, type TunnelRoute, type TunnelView } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
 import { useCan } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, StatusDot, Tabs, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
@@ -33,6 +33,7 @@ export default function DevicePage() {
             <StatusDot status={d.status} />
             {d.name}
             <HealthBadge health={d.health} status={d.status} />
+            {d.maintenance && <Badge tone="warn">maintenance</Badge>}
           </h1>
           <p className="mt-1 flex text-sm text-neutral-500">
             <DeviceSummary d={d} />
@@ -395,6 +396,7 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
           <Button variant="primary">{saved ? "Saved" : "Save"}</Button>
         </form>
       </Card>
+      <MaintenanceCard d={d} onSaved={onSaved} />
       <Card className="border-red-200">
         <CardHeader title="Remove device" subtitle="The agent will be disconnected. Its containers keep running. It can rejoin with the join token." />
         <div className="p-5">
@@ -412,5 +414,146 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Maintenance mode keeps new workers, previews and adoptions off the device. Turning it on lists
+ * the workers that would become unreachable if the device goes down, and offers to move them.
+ */
+function MaintenanceCard({ d, onSaved }: { d: Device; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = async (on: boolean) => {
+    setError(null);
+    try {
+      await api.updateDevice(d.id, { maintenance: on });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  return (
+    <Card>
+      <CardHeader title="Maintenance mode" subtitle="No new workers, previews or adopted containers are placed on the device. Workers already here keep running and can still be redeployed." />
+      <div className="space-y-3 p-5">
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {d.maintenance ? (
+          <Button onClick={() => set(false)}>Leave maintenance mode</Button>
+        ) : (
+          <Button variant="primary" onClick={() => setOpen(true)}>
+            Enter maintenance mode
+          </Button>
+        )}
+      </div>
+      {open && <MaintenanceModal d={d} onClose={() => setOpen(false)} onEnter={() => set(true)} />}
+    </Card>
+  );
+}
+
+function MaintenanceModal({ d, onClose, onEnter }: { d: Device; onClose: () => void; onEnter: () => Promise<void> }) {
+  const projects = usePoll(api.projects, 0);
+  const devices = usePoll(api.devices, 0);
+  const mine = (projects.data ?? []).filter((p: Project) => p.device_id === d.id);
+  const movable = mine.filter((p) => p.source.type !== "compose");
+  const stacks = mine.filter((p) => p.source.type === "compose");
+  const targets = (devices.data ?? []).filter((t) => t.id !== d.id && !t.maintenance && t.status === "online");
+  const [target, setTarget] = useState("");
+  const [started, setStarted] = useState<Record<string, Migration | string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Follow the migrations once they are running.
+  const running = Object.entries(started).filter(([, v]) => typeof v !== "string" && v.status === "running").map(([id]) => id);
+  useEffect(() => {
+    if (running.length === 0) return;
+    const t = setInterval(async () => {
+      for (const id of running) {
+        try {
+          const m = await api.migration(id);
+          setStarted((s) => ({ ...s, [id]: m }));
+        } catch {}
+      }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [running.join(",")]);
+
+  const move = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onEnter();
+      for (const p of movable) {
+        try {
+          const m = await api.migrateProject(p.id, { device_id: target, with_data: true, stop_source: true });
+          setStarted((s) => ({ ...s, [p.id]: m }));
+        } catch (err) {
+          setStarted((s) => ({ ...s, [p.id]: err instanceof Error ? err.message : String(err) }));
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const moving = Object.keys(started).length > 0;
+  return (
+    <Modal title={`Put ${d.name} in maintenance?`} onClose={onClose}>
+      <div className="space-y-4 p-5 text-sm">
+        {mine.length > 0 ? (
+          <>
+            <p>
+              These workers run on {d.name}. They become inaccessible if it goes down, unless you move them to another device first. A moved worker gets the other
+              device's IP address, so anything that points at the old IP needs updating (domains and tunnels are handled per device).
+            </p>
+            <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">
+              {mine.map((p) => {
+                const s = started[p.id];
+                return (
+                  <li key={p.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                    <span className="truncate">{p.name}</span>
+                    <span className="shrink-0 text-xs text-neutral-500">
+                      {p.source.type === "compose" ? "stack: can't be moved yet" : typeof s === "string" ? s : s ? (s.status === "failed" ? `failed: ${s.error}` : s.status === "done" ? "moved" : s.step) : ""}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            {stacks.length > 0 && <p className="text-neutral-500">Stacks have to be redeployed on the other device by hand.</p>}
+            {movable.length > 0 && !moving && (
+              <Field label="Move workers to">
+                <select className={inputClass} value={target} onChange={(e) => setTarget(e.target.value)}>
+                  <option value="">Choose a device</option>
+                  {targets.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({t.host.arch})
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+          </>
+        ) : (
+          <p>No workers run on this device. New workers will simply be placed elsewhere.</p>
+        )}
+        {error && <ErrorNote>{error}</ErrorNote>}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={onClose}>{moving ? "Close" : "Cancel"}</Button>
+          {!moving && (
+            <>
+              <Button variant={mine.length ? "danger" : "primary"} disabled={busy} onClick={async () => { await onEnter(); onClose(); }}>
+                {mine.length ? "Enter without moving" : "Enter maintenance mode"}
+              </Button>
+              {movable.length > 0 && (
+                <Button variant="primary" disabled={!target || busy} onClick={move}>
+                  Move workers and enter
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }

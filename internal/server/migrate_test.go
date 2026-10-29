@@ -158,3 +158,32 @@ func TestMigrateRevertsOnFailedDeploy(t *testing.T) {
 		t.Fatalf("status %q, project on %s (want %s)", v.Status, got.DeviceID, oldReg.DeviceID)
 	}
 }
+
+func TestMaintenanceBlocksNewWork(t *testing.T) {
+	h := newHarness(t)
+	a, b := h.register("pi-a"), h.register("pi-b")
+	var p store.Project
+	body := map[string]any{"name": "web", "device_id": a.DeviceID, "source": map[string]any{"type": "image", "image": "nginx"}}
+	if code := h.do("POST", "/api/projects", adminToken, body, &p); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	var dv DeviceView
+	if code := h.do("PATCH", "/api/devices/"+b.DeviceID, adminToken, map[string]any{"maintenance": true}, &dv); code != http.StatusOK || !dv.Maintenance {
+		t.Fatalf("enable: %d %+v", code, dv.Device)
+	}
+	body["name"] = "other"
+	body["device_id"] = b.DeviceID
+	if code := h.do("POST", "/api/projects", adminToken, body, nil); code != http.StatusConflict {
+		t.Fatalf("create on maintenance device: %d", code)
+	}
+	if code := h.do("POST", "/api/projects/"+p.ID+"/migrate", adminToken, map[string]any{"device_id": b.DeviceID}, nil); code != http.StatusConflict {
+		t.Fatalf("migrate to maintenance device: %d", code)
+	}
+	if code := h.do("POST", "/api/devices/"+b.DeviceID+"/adopt", adminToken, map[string]any{"containers": []map[string]any{{"id": "x"}}}, nil); code != http.StatusConflict {
+		t.Fatalf("adopt on maintenance device: %d", code)
+	}
+	h.do("PATCH", "/api/devices/"+b.DeviceID, adminToken, map[string]any{"maintenance": false}, nil)
+	if code := h.do("POST", "/api/projects", adminToken, body, nil); code != http.StatusCreated {
+		t.Fatalf("create after maintenance: %d", code)
+	}
+}

@@ -103,6 +103,10 @@ func (s *Server) handleAdopt(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	if dev.Maintenance {
+		writeError(w, http.StatusConflict, errMaintenance(dev).Error())
+		return
+	}
 	if len(req.Containers) == 0 {
 		writeError(w, http.StatusBadRequest, "choose at least one container")
 		return

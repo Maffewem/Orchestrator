@@ -183,6 +183,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := addColumn(db, "devices", "maintenance", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
 	if err := addColumn(db, "backups", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -226,6 +230,8 @@ type Device struct {
 	CreatedAt  time.Time       `json:"created_at"`
 	LastSeen   time.Time       `json:"last_seen"`
 	Offline    bool            `json:"-"`
+	// Maintenance stops new workers, previews and adoptions being placed on the device.
+	Maintenance bool `json:"maintenance"`
 }
 
 type Event struct {
@@ -280,14 +286,14 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 
 // --- devices ---
 
-const deviceCols = `id, name, labels, host, metrics, containers, created_at, last_seen, offline`
+const deviceCols = `id, name, labels, host, metrics, containers, created_at, last_seen, offline, maintenance`
 
 func scanDevice(sc interface{ Scan(...any) error }) (*Device, error) {
 	var d Device
 	var labels, host, metrics, containers string
 	var created, seen int64
-	var offline int
-	if err := sc.Scan(&d.ID, &d.Name, &labels, &host, &metrics, &containers, &created, &seen, &offline); err != nil {
+	var offline, maintenance int
+	if err := sc.Scan(&d.ID, &d.Name, &labels, &host, &metrics, &containers, &created, &seen, &offline, &maintenance); err != nil {
 		return nil, err
 	}
 	for _, f := range []struct {
@@ -307,6 +313,7 @@ func scanDevice(sc interface{ Scan(...any) error }) (*Device, error) {
 	d.CreatedAt = time.Unix(created, 0).UTC()
 	d.LastSeen = time.Unix(seen, 0).UTC()
 	d.Offline = offline != 0
+	d.Maintenance = maintenance != 0
 	return &d, nil
 }
 
@@ -386,6 +393,21 @@ func (s *Store) UpdateDeviceMeta(ctx context.Context, id, name string, labels []
 		labels = []string{}
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE devices SET name = ?, labels = ? WHERE id = ?`, name, mustJSON(labels), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SetDeviceMaintenance(ctx context.Context, id string, on bool) error {
+	v := 0
+	if on {
+		v = 1
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE devices SET maintenance = ? WHERE id = ?`, v, id)
 	if err != nil {
 		return err
 	}

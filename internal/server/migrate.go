@@ -101,6 +101,10 @@ func (s *Server) handleMigrateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "choose a device to move to")
 		return
 	}
+	if dst.Maintenance {
+		writeError(w, http.StatusConflict, errMaintenance(dst).Error())
+		return
+	}
 	if dst.Offline {
 		writeError(w, http.StatusConflict, dst.Name+" is offline")
 		return

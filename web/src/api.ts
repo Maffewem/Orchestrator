@@ -73,6 +73,7 @@ export interface Device {
   health: Health;
   issues: string[];
   proxy: "running" | "stopped" | "none" | "agent_too_old";
+  maintenance: boolean;
 }
 
 export interface FleetContainer extends Container {
@@ -666,7 +667,7 @@ export const api = {
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
-  updateDevice: (id: string, patch: { name?: string; labels?: string[] }) =>
+  updateDevice: (id: string, patch: { name?: string; labels?: string[]; maintenance?: boolean }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),

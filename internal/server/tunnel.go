@@ -364,7 +364,7 @@ func deviceIPv4(d *store.Device) string {
 	return ""
 }
 
-// moveTunnelRoutes follows a migrated project: its "project:<name>" routes leave the old device's
+// moveTunnelRoutes follows a migrated project: its "project:<name>" routes and Tunnel-tab routes leave the old device's
 // tunnel for the new device's, and Cloudflare is updated so the public hostname keeps working.
 // It returns log lines for the migration.
 func (s *Server) moveTunnelRoutes(ctx context.Context, p *store.Project, oldDev string, dst *store.Device) []string {
@@ -374,7 +374,9 @@ func (s *Server) moveTunnelRoutes(ctx context.Context, p *store.Project, oldDev 
 	}
 	var moving, keep []tunnelRoute
 	for _, rt := range oldCfg.Routes {
-		if rt.Service == "project:"+p.Name {
+		// Routes set from the project's Tunnel tab point at a host port and carry the project ID; the
+		// port comes from the project's own settings, so it is the same on the new device.
+		if rt.Service == "project:"+p.Name || rt.Project == p.ID {
 			moving = append(moving, rt)
 		} else {
 			keep = append(keep, rt)

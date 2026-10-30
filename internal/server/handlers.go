@@ -57,6 +57,41 @@ func (s *Server) view(d *store.Device) DeviceView {
 	}
 	check("Memory", d.Metrics.MemoryUsed, d.Metrics.MemoryTotal)
 	check("Disk", d.Metrics.DiskUsed, d.Metrics.DiskTotal)
+
+	// Sustained CPU load: the 5-minute load average per core, so a short spike doesn't count.
+	if cpus := float64(d.Host.CPUs); cpus > 0 {
+		per := d.Metrics.Load5 / cpus
+		switch {
+		case per >= 3:
+			raise("critical", fmt.Sprintf("CPU is overloaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
+		case per >= 1.5:
+			raise("warning", fmt.Sprintf("CPU is heavily loaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
+		}
+	}
+	switch t := d.Metrics.TempC; {
+	case t >= 85:
+		raise("critical", fmt.Sprintf("Temperature is %.0f°C", t))
+	case t >= 80:
+		raise("warning", fmt.Sprintf("Temperature is %.0f°C", t))
+	}
+
+	// Container failures that point at the device rather than the app: crash loops and kills
+	// by the kernel's out-of-memory killer (exit code 137).
+	var looping, killed []string
+	for _, c := range d.Containers {
+		switch {
+		case c.State == "restarting" || c.State == "dead":
+			looping = append(looping, c.Name)
+		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
+			killed = append(killed, c.Name)
+		}
+	}
+	if len(looping) > 0 {
+		raise("warning", "Containers restarting or dead: "+strings.Join(looping, ", "))
+	}
+	if len(killed) > 0 {
+		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(killed, ", "))
+	}
 	return v
 }
 

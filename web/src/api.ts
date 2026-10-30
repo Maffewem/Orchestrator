@@ -35,6 +35,7 @@ export interface Metrics {
   load5: number;
   load15: number;
   uptime_seconds: number;
+  temp_c?: number;
 }
 
 export interface Port {

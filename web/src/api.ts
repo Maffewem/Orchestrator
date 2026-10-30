@@ -360,6 +360,8 @@ export interface DomainsView {
   protected: boolean;
   dns: "manual" | "cloudflare";
   ssl: "http" | "dns";
+  /** Problems applying the last change, such as a tunnel hostname Cloudflare refused. */
+  warnings?: string[];
 }
 
 export interface Settings {

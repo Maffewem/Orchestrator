@@ -5,7 +5,7 @@ import { api, type DomainRow, type DomainsView } from "../api";
 import { Badge, Button, Card, CardHeader, CopyButton, Empty, ErrorNote, Field, Loading, Modal, Table, Td, inputClass } from "./ui";
 import { cx, usePoll } from "../lib";
 import { useCan } from "./auth";
-import { confirmDialog } from "./dialogs";
+import { confirmDialog, notify } from "./dialogs";
 
 export function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
@@ -88,8 +88,12 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
       const r = await fn();
       if (r) setView(r);
       else setView(await api.projectDomains(projectId));
+      if (r?.warnings?.length) notify(r.warnings.join(" "));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const m = e instanceof Error ? e.message : String(e);
+      setError(m);
+      // The inline note can be scrolled out of sight, so say it in a pop-up too.
+      notify(m);
     }
   };
   const rows = v.domains.filter((d) => (d.hostname + (d.path ?? "")).includes(filter.trim().toLowerCase()));

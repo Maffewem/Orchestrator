@@ -162,10 +162,7 @@ export default function ProjectPage() {
             p.source.type === "compose" ? (
               <TunnelPanel projectId={p.id} />
             ) : (
-              <div className="space-y-8">
-                <DomainsPanel projectId={p.id} />
-                <TunnelPanel projectId={p.id} />
-              </div>
+              <DomainsPanel projectId={p.id} />
             )
           }
         />

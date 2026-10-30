@@ -131,6 +131,8 @@ type domainsView struct {
 	TunnelReady bool `json:"tunnel_ready"`
 	// TunnelVia is "" (the tunnel sends traffic straight to workers) or "proxy" (through the device proxy).
 	TunnelVia string `json:"tunnel_via"`
+	// Warnings are problems applying the last change (for example a tunnel hostname Cloudflare refused).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ipv4s returns the IPv4 addresses a device reported.
@@ -251,7 +253,7 @@ func (s *Server) handleGetDomains(w http.ResponseWriter, r *http.Request) {
 	s.writeDomains(w, r, http.StatusOK)
 }
 
-func (s *Server) writeDomains(w http.ResponseWriter, r *http.Request, status int) {
+func (s *Server) writeDomains(w http.ResponseWriter, r *http.Request, status int, warns ...string) {
 	p, ok := s.lookupProject(w, r)
 	if !ok {
 		return
@@ -261,6 +263,7 @@ func (s *Server) writeDomains(w http.ResponseWriter, r *http.Request, status int
 		s.internal(w, err)
 		return
 	}
+	v.Warnings = warns
 	writeJSON(w, status, v)
 }
 
@@ -291,9 +294,9 @@ func (s *Server) handleSetURLs(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	s.reconcileTunnelHosts(r.Context(), p)
+	warns := s.reconcileTunnelHosts(r.Context(), p)
 	s.syncProxy(r.Context(), p.DeviceID)
-	s.handleGetDomains(w, r)
+	s.writeDomains(w, r, http.StatusOK, warns...)
 }
 
 func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
@@ -342,9 +345,9 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.event(r.Context(), p.DeviceID, "info", "domain.added", fmt.Sprintf("%s%s added to %s", host, path, p.Name))
-	s.reconcileTunnelHosts(r.Context(), p)
+	warns := s.reconcileTunnelHosts(r.Context(), p)
 	s.syncProxy(r.Context(), p.DeviceID)
-	s.writeDomains(w, r, http.StatusCreated)
+	s.writeDomains(w, r, http.StatusCreated, warns...)
 }
 
 func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
@@ -397,9 +400,9 @@ func (s *Server) handleSetDomainAccess(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	s.reconcileTunnelHosts(r.Context(), p)
+	warns := s.reconcileTunnelHosts(r.Context(), p)
 	s.syncProxy(r.Context(), p.DeviceID)
-	s.writeDomains(w, r, http.StatusOK)
+	s.writeDomains(w, r, http.StatusOK, warns...)
 }
 
 func (s *Server) handleSetBaseDomain(w http.ResponseWriter, r *http.Request) {

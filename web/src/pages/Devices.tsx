@@ -118,6 +118,7 @@ export default function DevicesPage() {
               </div>
               <div className="text-xs text-neutral-500 md:text-right">
                 <p>{d.containers.filter((c) => c.state === "running").length}/{d.containers.length} containers</p>
+                <p className="mt-0.5">{d.metrics.temp_c ? `${d.metrics.temp_c.toFixed(0)}°C · ` : ""}Load {d.metrics.load5.toFixed(2)}</p>
                 <p className="mt-0.5">Seen {ago(d.last_seen)}</p>
               </div>
             </Link>

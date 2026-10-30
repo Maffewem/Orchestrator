@@ -488,6 +488,52 @@ const hourOptions: [number, string][] = [
   [168, "1 week"],
 ];
 
+const GB = 1024 ** 3;
+
+/** Before/after worker counts and free RAM/disk for every device that would receive workers. Per-worker size is not tracked, so a warning means the device is already tight. */
+function Impact({ targets, mine, dest, source }: { targets: Device[]; mine: Project[]; dest: Record<string, string>; source: Device }) {
+  const rows = targets
+    .map((t) => ({ t, add: mine.filter((p) => dest[p.id] === t.id) }))
+    .filter((r) => r.add.length > 0);
+  const free = (total: number, used: number) => Math.max(total - used, 0);
+  return (
+    <div className="rounded-md border border-neutral-200">
+      <div className="border-b border-neutral-100 px-3 py-2 text-xs font-medium uppercase tracking-wide text-neutral-500">Projected impact</div>
+      <ul className="divide-y divide-neutral-100">
+        {rows.map(({ t, add }) => {
+          const m = t.metrics;
+          const ram = free(m.memory_total, m.memory_used);
+          const disk = free(m.disk_total, m.disk_used);
+          const lowRam = m.memory_total > 0 && (ram < 0.5 * GB || ram < m.memory_total * 0.15);
+          const lowDisk = m.disk_total > 0 && (disk < 2 * GB || disk < m.disk_total * 0.1);
+          const stacks = add.filter((p) => p.source.type === "compose").length;
+          const before = t.containers.filter((c) => c.state === "running").length;
+          return (
+            <li key={t.id} className="space-y-1 px-3 py-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="font-medium">{t.name}</span>
+                <span className="text-xs text-neutral-500">
+                  Workers {before} → {before + add.length} (+{add.length})
+                </span>
+              </div>
+              <div className="text-xs text-neutral-500">
+                Free now: {m.memory_total ? bytes(ram) : "?"} RAM, {m.disk_total ? bytes(disk) : "?"} disk · {t.host.arch}
+                {t.host.arch !== source.host.arch && <span className="text-amber-700"> · different architecture from {source.name}: image is rebuilt</span>}
+              </div>
+              {(lowRam || lowDisk) && (
+                <div className="text-xs text-red-700">
+                  Low {[lowRam && "memory", lowDisk && "disk space"].filter(Boolean).join(" and ")} on {t.name}: adding {add.length} worker{add.length === 1 ? "" : "s"} may exhaust it.
+                </div>
+              )}
+              {stacks > 0 && <div className="text-xs text-neutral-500">{stacks} stack{stacks === 1 ? "" : "s"} will be redeployed; volumes are not copied.</div>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => void; onDone: () => void }) {
   const projects = usePoll(api.projects, 0);
   const devices = usePoll(api.devices, 0);
@@ -549,11 +595,11 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
         {mine.length > 0 ? (
           <>
             <p>
-              These workers run on {d.name}. They become inaccessible if it goes down, unless you move them to another device first. A moved worker gets the other device's IP address, so
+              These workers run on {d.name}. They become inaccessible if it goes down, unless you migrate them to another device first. A moved worker gets the other device's IP address, so
               anything that points at the old IP needs updating. Cloudflare Tunnel routes and Cloudflare-managed DNS follow automatically.
             </p>
             {!moving && targets.length > 0 && (
-              <Field label="Move every worker to">
+              <Field label="Migrate all workers to">
                 <select
                   className={inputClass}
                   value={bulk}
@@ -562,7 +608,7 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
                     setDest(Object.fromEntries(mine.map((p) => [p.id, e.target.value])));
                   }}
                 >
-                  <option value="">Leave them here</option>
+                  <option value="">Keep on this device</option>
                   {targets.map((t) => (
                     <option key={t.id} value={t.id}>
                       {label(t)}
@@ -575,18 +621,18 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
               {mine.map((p) => {
                 const s = started[p.id];
                 return (
-                  <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                  <li key={p.id} className="grid grid-cols-1 items-center gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_16rem]">
                     <span className="min-w-0 truncate">
                       {p.name}
                       {p.source.type === "compose" && <span className="ml-2 text-xs text-neutral-500">stack: redeployed, volumes not copied</span>}
                     </span>
                     {moving ? (
-                      <span className="shrink-0 text-xs text-neutral-500">
-                        {typeof s === "string" ? s : s ? (s.status === "failed" ? `failed: ${s.error}` : s.status === "done" ? "moved" : s.step) : "staying"}
+                      <span className="text-xs text-neutral-500 sm:text-right">
+                        {typeof s === "string" ? s : s ? (s.status === "failed" ? `failed: ${s.error}` : s.status === "done" ? "moved" : s.step) : "not migrating"}
                       </span>
                     ) : (
-                      <select className={`${inputClass} max-w-[16rem]`} value={dest[p.id] ?? ""} onChange={(e) => setDest({ ...dest, [p.id]: e.target.value })} aria-label={`Move ${p.name} to`}>
-                        <option value="">Stay here</option>
+                      <select className={`${inputClass} w-full`} value={dest[p.id] ?? ""} onChange={(e) => setDest({ ...dest, [p.id]: e.target.value })} aria-label={`Move ${p.name} to`}>
+                        <option value="">Do not migrate</option>
                         {targets.map((t) => (
                           <option key={t.id} value={t.id}>
                             {label(t)}
@@ -598,6 +644,7 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
                 );
               })}
             </ul>
+            {!moving && chosen.length > 0 && <Impact targets={targets} mine={mine} dest={dest} source={d} />}
           </>
         ) : (
           <p>No workers run on this device. New workers will simply be placed elsewhere.</p>
@@ -624,11 +671,11 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
           {!moving && (
             <>
               <Button variant={mine.length && chosen.length < mine.length ? "danger" : "primary"} disabled={busy} onClick={() => enter(false)}>
-                {mine.length ? "Enter without moving" : "Enter maintenance mode"}
+                {mine.length ? "Enter without migrating" : "Enter maintenance mode"}
               </Button>
               {chosen.length > 0 && (
                 <Button variant="primary" disabled={busy} onClick={() => enter(true)}>
-                  Move {chosen.length} and enter
+                  Migrate {chosen.length} and enter
                 </Button>
               )}
             </>

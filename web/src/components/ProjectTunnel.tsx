@@ -4,6 +4,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { api, type ProjectTunnelView } from "../api";
 import { Badge, Button, Card, CardHeader, ErrorNote, Loading, inputClass } from "./ui";
 import { useCan } from "./auth";
+import { notify } from "./dialogs";
 import { usePoll } from "../lib";
 
 type Row = { hostname: string; port: string };
@@ -17,7 +18,7 @@ export default function TunnelPanel({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   if (t.error && !t.data) return <ErrorNote>{t.error}</ErrorNote>;
-  const v: ProjectTunnelView | null = t.data;
+  const v: ProjectTunnelView | null = t.data && { ...t.data, ports: t.data.ports ?? [], routes: t.data.routes ?? [] };
   if (!v) return <Loading />;
   const saved: Row[] = v.routes.map((r) => ({ hostname: r.hostname, port: r.service.split(":").pop() ?? "" }));
   const shown = rows ?? saved;
@@ -30,11 +31,16 @@ export default function TunnelPanel({ projectId }: { projectId: string }) {
         projectId,
         shown.filter((r) => r.hostname.trim()).map((r) => ({ hostname: r.hostname.trim(), port: Number(r.port) })),
       );
-      setWarnings(res.warnings ?? []);
+      const warns = res.warnings ?? [];
+      setWarnings(warns);
+      if (warns.length) notify(`Saved, but not fully applied: ${warns.join(" ")}`);
+      else notify(`Tunnel routes applied: ${res.routes.length ? res.routes.map((r) => r.hostname).join(", ") : "none left for this project"}.`, "info");
       setRows(null);
       t.reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const m = e instanceof Error ? e.message : String(e);
+      setError(m);
+      notify(`Couldn't apply the tunnel routes: ${m}`);
     } finally {
       setBusy(false);
     }

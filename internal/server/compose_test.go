@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
+	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
 const claudeUIStack = `services:
@@ -259,5 +260,23 @@ func TestProjectTunnelRoutes(t *testing.T) {
 	h.do("GET", "/api/devices/"+reg.DeviceID+"/tunnel", adminToken, nil, &dev)
 	if len(v.Routes) != 0 || len(dev.Routes) != 1 {
 		t.Fatalf("after clearing: %+v / %+v", v.Routes, dev.Routes)
+	}
+}
+
+func TestProjectPortsEmptyIsList(t *testing.T) {
+	// A nil slice would serialise as null and crash the Tunnel card.
+	if got := projectPorts(&store.Project{}, &store.Device{}); got == nil {
+		t.Fatal("projectPorts returned nil")
+	}
+}
+
+func TestUpstreamPortWebPort(t *testing.T) {
+	p := &store.Project{Runtime: store.Runtime{Ports: []string{"502:502", "9080:80"}}}
+	if got := upstreamPort(p); got != "502" {
+		t.Fatalf("default is the first port: %q", got)
+	}
+	p.Runtime.WebPort = "9080"
+	if got := upstreamPort(p); got != "9080" {
+		t.Fatalf("chosen web port: %q", got)
 	}
 }

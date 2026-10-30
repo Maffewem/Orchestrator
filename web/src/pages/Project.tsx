@@ -109,8 +109,7 @@ export default function ProjectPage() {
             { to: base, label: "Overview", end: true },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/metrics`, label: "Metrics" },
-            { to: `${base}/tunnel`, label: "Tunnel" },
-            ...(p.source.type !== "compose" ? [{ to: `${base}/domains`, label: "Domains" }] : []),
+            { to: `${base}/domains`, label: "Domains" },
             ...(p.source.type === "github" ? [{ to: `${base}/previews`, label: "Previews" }] : []),
             { to: `${base}/settings`, label: "Settings" },
           ]}
@@ -157,9 +156,20 @@ export default function ProjectPage() {
       <Routes>
         <Route index element={<ProjectOverview p={p} device={device.data} url={url} />} />
         <Route path="deployments" element={<ProjectDeployments p={p} />} />
-        <Route path="domains" element={<DomainsPanel projectId={p.id} />} />
+        <Route
+          path="domains"
+          element={
+            p.source.type === "compose" ? (
+              <TunnelPanel projectId={p.id} />
+            ) : (
+              <div className="space-y-8">
+                <DomainsPanel projectId={p.id} />
+                <TunnelPanel projectId={p.id} />
+              </div>
+            )
+          }
+        />
         <Route path="previews" element={<PreviewsPanel projectId={p.id} />} />
-        <Route path="tunnel" element={<TunnelPanel projectId={p.id} />} />
         <Route path="metrics" element={<ProjectMetrics p={p} />} />
         <Route path="settings" element={<ProjectSettings p={p} onSaved={project.reload} />} />
       </Routes>

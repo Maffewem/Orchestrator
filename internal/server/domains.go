@@ -425,8 +425,12 @@ func (s *Server) handleSetBaseDomain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"base_domain": base})
 }
 
-// upstreamPort is the first published TCP host port of a project.
+// upstreamPort is the host port that carries a project's web traffic: the one chosen in its
+// settings, otherwise the first published TCP host port.
 func upstreamPort(p *store.Project) string {
+	if p.Runtime.WebPort != "" {
+		return p.Runtime.WebPort
+	}
 	for _, m := range p.Runtime.Ports {
 		host, _, ok := strings.Cut(m, ":")
 		if ok && !strings.HasSuffix(m, "/udp") && host != "" {

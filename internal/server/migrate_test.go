@@ -204,7 +204,8 @@ func TestMigrationMovesTunnelRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.srv.saveTunnelConfig(ctx, da.ID, &tunnelConfig{Token: tok("t1"), Routes: []tunnelRoute{
-		{Hostname: "web.example.com", Service: "project:web"}, {Hostname: "other.example.com", Service: "http://localhost:9"}}})
+		{Hostname: "web.example.com", Service: "project:web"}, {Hostname: "other.example.com", Service: "http://localhost:9"},
+		{Hostname: "tab.example.com", Service: "http://localhost:8080", Project: p.ID}}})
 	h.srv.saveTunnelConfig(ctx, db.ID, &tunnelConfig{Token: tok("t2")})
 
 	lines := h.srv.moveTunnelRoutes(ctx, p, da.ID, db)
@@ -213,7 +214,7 @@ func TestMigrationMovesTunnelRoutes(t *testing.T) {
 	}
 	oc, _ := h.srv.tunnelConfig(ctx, da.ID)
 	nc, _ := h.srv.tunnelConfig(ctx, db.ID)
-	if len(oc.Routes) != 1 || oc.Routes[0].Hostname != "other.example.com" || len(nc.Routes) != 1 || nc.Routes[0].Hostname != "web.example.com" {
+	if len(oc.Routes) != 1 || oc.Routes[0].Hostname != "other.example.com" || len(nc.Routes) != 2 || nc.Routes[0].Hostname != "web.example.com" || nc.Routes[1].Hostname != "tab.example.com" {
 		t.Fatalf("old %+v new %+v", oc.Routes, nc.Routes)
 	}
 

@@ -70,7 +70,9 @@ type PreviewBuild struct {
 
 // Runtime is how the project's container runs on its device.
 type Runtime struct {
-	Ports   []string `json:"ports"`
+	Ports []string `json:"ports"`
+	// WebPort is the host port that carries web traffic when a project publishes several; empty means the first TCP port.
+	WebPort string   `json:"web_port,omitempty"`
 	Env     []string `json:"env"`
 	Command []string `json:"command,omitempty"`
 	Restart string   `json:"restart"`

@@ -180,6 +180,16 @@ function ProjectOverview({ p, device, url }: { p: Project; device: Device | null
   const d = deps.data?.find((x) => x.status === "succeeded") ?? p.latest_deployment;
   const latest = p.latest_deployment;
   const container = device?.containers.find((c) => c.name === (p.runtime.container || p.name));
+  const isStack = p.source.type === "compose";
+  // Public hostnames that reach the worker through the device's Cloudflare Tunnel.
+  const domains = usePoll(() => (isStack ? Promise.resolve(null) : api.projectDomains(p.id)), 30000, [p.id, isStack]);
+  const stackTunnel = usePoll(() => (isStack ? api.projectTunnel(p.id) : Promise.resolve(null)), 30000, [p.id, isStack]);
+  const publicUrls: string[] = isStack
+    ? (stackTunnel.data?.routes ?? []).map((r) => `https://${r.hostname}`)
+    : [
+        ...(domains.data?.production?.enabled && domains.data.production.tunnel ? [`https://${domains.data.production.hostname}`] : []),
+        ...(domains.data?.domains ?? []).filter((x) => x.access === "tunnel").map((x) => `https://${x.hostname}${x.path ?? ""}`),
+      ];
   return (
     <div className="space-y-6">
       <div>
@@ -251,8 +261,20 @@ function ProjectOverview({ p, device, url }: { p: Project; device: Device | null
               <dt className="text-neutral-500">Ports</dt>
               <dd className="truncate font-mono text-xs">{p.runtime.ports.join(", ") || "—"}</dd>
             </div>
+            {publicUrls.length > 0 && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-neutral-500">Public URL</dt>
+                <dd className="flex min-w-0 flex-col items-end gap-1">
+                  {publicUrls.map((u) => (
+                    <a key={u} href={u} target="_blank" rel="noreferrer" className="max-w-full truncate text-primary hover:underline">
+                      {u.replace("https://", "")}
+                    </a>
+                  ))}
+                </dd>
+              </div>
+            )}
             <div className="flex justify-between gap-3">
-              <dt className="text-neutral-500">URL</dt>
+              <dt className="text-neutral-500">{publicUrls.length > 0 ? "Local URL" : "URL"}</dt>
               <dd className="truncate">
                 {url ? (
                   <a href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline">

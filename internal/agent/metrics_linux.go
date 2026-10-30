@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -79,6 +80,8 @@ func (a *Agent) metrics() api.Metrics {
 		m.UptimeSeconds = uint64(up)
 	}
 
+	m.TempC = a.temperature()
+
 	var st syscall.Statfs_t
 	if syscall.Statfs(a.hostPath("/"), &st) == nil {
 		bs := uint64(st.Bsize)
@@ -86,4 +89,17 @@ func (a *Agent) metrics() api.Metrics {
 		m.DiskUsed = (st.Blocks - st.Bfree) * bs
 	}
 	return m
+}
+
+// temperature returns the hottest thermal zone in °C, or 0 when the device exposes none.
+func (a *Agent) temperature() float64 {
+	zones, _ := filepath.Glob(a.hostPath("/sys/class/thermal/thermal_zone*/temp"))
+	var hottest float64
+	for _, z := range zones {
+		milli, err := strconv.ParseFloat(readTrim(z), 64)
+		if err == nil && milli/1000 > hottest {
+			hottest = milli / 1000
+		}
+	}
+	return hottest
 }

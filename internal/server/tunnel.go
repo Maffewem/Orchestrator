@@ -621,7 +621,7 @@ func cleanRoutes(routes []tunnelRoute) error {
 // from its running containers, which is how the ports of a Compose stack's services are found.
 func projectPorts(p *store.Project, d *store.Device) []int {
 	seen := map[int]bool{}
-	var out []int
+	out := []int{}
 	add := func(n int) {
 		if n > 0 && n < 65536 && !seen[n] {
 			seen[n] = true

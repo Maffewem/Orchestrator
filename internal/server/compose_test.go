@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
+	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
 const claudeUIStack = `services:
@@ -259,5 +260,12 @@ func TestProjectTunnelRoutes(t *testing.T) {
 	h.do("GET", "/api/devices/"+reg.DeviceID+"/tunnel", adminToken, nil, &dev)
 	if len(v.Routes) != 0 || len(dev.Routes) != 1 {
 		t.Fatalf("after clearing: %+v / %+v", v.Routes, dev.Routes)
+	}
+}
+
+func TestProjectPortsEmptyIsList(t *testing.T) {
+	// A nil slice would serialise as null and crash the Tunnel card.
+	if got := projectPorts(&store.Project{}, &store.Device{}); got == nil {
+		t.Fatal("projectPorts returned nil")
 	}
 }

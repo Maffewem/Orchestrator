@@ -18,7 +18,7 @@ export default function TunnelPanel({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   if (t.error && !t.data) return <ErrorNote>{t.error}</ErrorNote>;
-  const v: ProjectTunnelView | null = t.data;
+  const v: ProjectTunnelView | null = t.data && { ...t.data, ports: t.data.ports ?? [], routes: t.data.routes ?? [] };
   if (!v) return <Loading />;
   const saved: Row[] = v.routes.map((r) => ({ hostname: r.hostname, port: r.service.split(":").pop() ?? "" }));
   const shown = rows ?? saved;

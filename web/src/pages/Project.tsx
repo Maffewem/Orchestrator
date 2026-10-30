@@ -9,6 +9,7 @@ import { Button, Card, CardHeader, Empty, Field, Toggle, inputClass, ErrorNote, 
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
 import DomainsPanel from "../components/Domains";
 import PreviewsPanel from "../components/Previews";
+import TunnelPanel from "../components/ProjectTunnel";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
 import { ago, freeSpace, usePoll } from "../lib";
@@ -108,6 +109,7 @@ export default function ProjectPage() {
             { to: base, label: "Overview", end: true },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/metrics`, label: "Metrics" },
+            { to: `${base}/tunnel`, label: "Tunnel" },
             ...(p.source.type !== "compose" ? [{ to: `${base}/domains`, label: "Domains" }] : []),
             ...(p.source.type === "github" ? [{ to: `${base}/previews`, label: "Previews" }] : []),
             { to: `${base}/settings`, label: "Settings" },
@@ -157,6 +159,7 @@ export default function ProjectPage() {
         <Route path="deployments" element={<ProjectDeployments p={p} />} />
         <Route path="domains" element={<DomainsPanel projectId={p.id} />} />
         <Route path="previews" element={<PreviewsPanel projectId={p.id} />} />
+        <Route path="tunnel" element={<TunnelPanel projectId={p.id} />} />
         <Route path="metrics" element={<ProjectMetrics p={p} />} />
         <Route path="settings" element={<ProjectSettings p={p} onSaved={project.reload} />} />
       </Routes>

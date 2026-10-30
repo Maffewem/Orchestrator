@@ -3,12 +3,16 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -51,6 +55,9 @@ type Config struct {
 	Restart func()
 	// DockerHost is the engine used for self-updates (default: the local socket).
 	DockerHost string
+	// TrustedProxies lists the reverse proxies (IPs or CIDRs) whose X-Forwarded-For header is
+	// believed when working out a visitor's address for login throttling.
+	TrustedProxies string
 }
 
 type Server struct {
@@ -62,6 +69,8 @@ type Server struct {
 	cloudflareAPI string
 	metrics       *metricsHistory
 	logins        limiter
+	trusted       []*net.IPNet
+	sums          sync.Map // agent binary name -> [stamp, sha256]
 	mig           migrations
 	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
 	migratePoll   time.Duration // test hook; 2s when zero
@@ -97,10 +106,14 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.GitHubAPI == "" {
 		cfg.GitHubAPI = "https://api.github.com"
 	}
+	trusted, err := parseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		return nil, "", err
+	}
 	if cfg.DockerHost == "" {
 		cfg.DockerHost = "unix:///var/run/docker.sock"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub()}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 	s.mig.persist = s.persistMigration
 
@@ -405,7 +418,44 @@ func (s *Server) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
-	io.WriteString(w, strings.ReplaceAll(installScript, "{{SERVER}}", scheme+"://"+r.Host))
+	script := strings.ReplaceAll(installScript, "{{SERVER}}", scheme+"://"+r.Host)
+	io.WriteString(w, strings.ReplaceAll(script, "{{SUMS}}", s.agentChecksums()))
+}
+
+// agentChecksums lists "sha256  filename" for each agent binary in the downloads directory.
+// Hashes are cached until a file's size or modification time changes.
+func (s *Server) agentChecksums() string {
+	if s.cfg.DownloadsDir == "" {
+		return ""
+	}
+	var out strings.Builder
+	for _, arch := range []string{"amd64", "arm64", "armv7", "armv6"} {
+		name := "orchestrator-agent-linux-" + arch
+		p := filepath.Join(s.cfg.DownloadsDir, name)
+		fi, err := os.Stat(p)
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		stamp := fmt.Sprintf("%d-%d", fi.Size(), fi.ModTime().UnixNano())
+		if c, ok := s.sums.Load(name); ok && c.([2]string)[0] == stamp {
+			fmt.Fprintf(&out, "%s  %s\n", c.([2]string)[1], name)
+			continue
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		h := sha256.New()
+		_, err = io.Copy(h, f)
+		f.Close()
+		if err != nil {
+			continue
+		}
+		sum := hex.EncodeToString(h.Sum(nil))
+		s.sums.Store(name, [2]string{stamp, sum})
+		fmt.Fprintf(&out, "%s  %s\n", sum, name)
+	}
+	return strings.TrimSuffix(out.String(), "\n")
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

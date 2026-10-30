@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +44,62 @@ type stream struct {
 	lastClient time.Time
 	lastInput  time.Time
 	wake       chan struct{}
+
+	// Audit trail for shells: what was typed, a line at a time. Input typed at a password
+	// prompt is recorded as hidden.
+	line   []byte
+	esc    bool
+	tail   string
+	secret bool
+}
+
+const maxAuditLine = 512
+
+// auditInput folds typed bytes into command lines and returns each finished one. Callers hold mu.
+func (st *stream) auditInput(data []byte) []string {
+	var done []string
+	for _, b := range data {
+		switch {
+		case st.esc:
+			// Arrow keys and friends: ESC [ A. The sequence ends at the first letter or ~.
+			if (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '~' {
+				st.esc = false
+			}
+		case b == 0x1b:
+			st.esc = true
+		case b == '\r' || b == '\n':
+			if len(st.line) > 0 {
+				if st.secret {
+					done = append(done, "[hidden input]")
+				} else {
+					done = append(done, string(st.line))
+				}
+			}
+			st.line, st.secret = st.line[:0], false
+		case b == 0x7f || b == 0x08:
+			if n := len(st.line); n > 0 {
+				st.line = st.line[:n-1]
+			}
+		case b == 0x03 || b == 0x15: // Ctrl-C, Ctrl-U: the line is thrown away
+			st.line = st.line[:0]
+		case b >= 0x20 && len(st.line) < maxAuditLine:
+			st.line = append(st.line, b)
+		}
+	}
+	return done
+}
+
+// noteOutput watches the end of the output for a password prompt, so what is typed next is
+// not written to the audit log. Callers hold mu.
+func (st *stream) noteOutput(data []byte) {
+	st.tail += strings.ToLower(string(data))
+	if len(st.tail) > 80 {
+		st.tail = st.tail[len(st.tail)-80:]
+	}
+	t := strings.TrimRight(st.tail, " \r\n")
+	if strings.HasSuffix(t, ":") && (strings.Contains(t, "password") || strings.Contains(t, "passphrase") || strings.Contains(t, "token")) {
+		st.secret = true
+	}
 }
 
 func (st *stream) signal() {
@@ -300,6 +357,9 @@ func (s *Server) handleStreamInput(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		st.in = append(st.in, in.Data...)
+		for _, l := range st.auditInput(in.Data) {
+			s.event(r.Context(), st.deviceID, "info", "shell.input", fmt.Sprintf("%s ran in %s: %s", st.user, st.Container, l))
+		}
 	}
 	if in.Cols > 0 && in.Rows > 0 && (in.Cols != st.cols || in.Rows != st.rows) {
 		st.cols, st.rows, st.resized = in.Cols, in.Rows, true
@@ -351,6 +411,9 @@ func (s *Server) handleAgentStreamOutput(w http.ResponseWriter, r *http.Request)
 	st.expire(time.Now())
 	if !st.closed {
 		st.out = append(st.out, out.Data...)
+		if st.Kind == api.StreamShell {
+			st.noteOutput(out.Data)
+		}
 		if over := len(st.out) - streamBuffer; over > 0 {
 			st.out = st.out[over:]
 			st.base += int64(over)

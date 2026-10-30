@@ -16,9 +16,11 @@ import (
 var (
 	projectNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	repoRe        = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
-	portRe        = regexp.MustCompile(`^(\d{1,5}:)?\d{1,5}(/(tcp|udp))?$`)
-	volumeRe      = regexp.MustCompile(`^[^:\s]+:/[^:\s]*(:ro|:rw)?$`)
-	restarts      = map[string]bool{"": true, "no": true, "always": true, "unless-stopped": true, "on-failure": true}
+	// branchRe keeps a branch from being read as a git option or breaking out of the build context.
+	branchRe = regexp.MustCompile(`^[A-Za-z0-9_][^\s#:\x00-\x1f\x7f]*$`)
+	portRe   = regexp.MustCompile(`^(\d{1,5}:)?\d{1,5}(/(tcp|udp))?$`)
+	volumeRe = regexp.MustCompile(`^[^:\s]+:/[^:\s]*(:ro|:rw)?$`)
+	restarts = map[string]bool{"": true, "no": true, "always": true, "unless-stopped": true, "on-failure": true}
 )
 
 // ProjectView is a project with its latest deployment, for list and overview pages.
@@ -130,6 +132,9 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 		if src.Branch = strings.TrimSpace(src.Branch); src.Branch == "" {
 			src.Branch = "main"
 		}
+		if !branchRe.MatchString(src.Branch) {
+			return errors.New("branch names can't start with - or contain spaces or control characters")
+		}
 		if strings.Contains(src.Context, "..") || strings.Contains(src.Dockerfile, "..") {
 			return errors.New("paths must stay inside the repository")
 		}
@@ -175,6 +180,9 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			}
 			if src.Branch = strings.TrimSpace(src.Branch); src.Branch == "" {
 				src.Branch = "main"
+			}
+			if !branchRe.MatchString(src.Branch) {
+				return errors.New("branch names can't start with - or contain spaces or control characters")
 			}
 			src.ComposeFile = strings.Trim(strings.TrimSpace(src.ComposeFile), "/")
 			if src.ComposeFile == "" {

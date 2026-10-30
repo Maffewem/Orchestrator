@@ -280,3 +280,26 @@ func TestUpstreamPortWebPort(t *testing.T) {
 		t.Fatalf("chosen web port: %q", got)
 	}
 }
+
+func TestReconcileTunnelHostsWarnsWithoutCloudflare(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	reg := h.register("pi-4")
+	d, _ := h.st.GetDevice(ctx, reg.DeviceID)
+	p := &store.Project{Name: "web", DeviceID: d.ID, Source: store.Source{Type: store.SourceImage, Image: "nginx"}, Runtime: store.Runtime{Ports: []string{"8080:80"}}}
+	if err := h.st.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	tok := base64.StdEncoding.EncodeToString([]byte(`{"a":"acct","t":"tun-1","s":"x"}`))
+	h.srv.saveTunnelConfig(ctx, d.ID, &tunnelConfig{Token: tok})
+	if _, err := h.st.CreateDomain(ctx, p.ID, "web.example.com", store.DomainCustom, "", "tunnel"); err != nil {
+		t.Fatal(err)
+	}
+	if w := h.srv.reconcileTunnelHosts(ctx, p); len(w) == 0 {
+		t.Fatal("expected a warning that Cloudflare isn't connected")
+	}
+	cfg, _ := h.srv.tunnelConfig(ctx, d.ID)
+	if len(cfg.Routes) != 1 || !cfg.Routes[0].Managed {
+		t.Fatalf("routes: %+v", cfg.Routes)
+	}
+}

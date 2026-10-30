@@ -454,11 +454,12 @@ func (s *Server) tunnelBypassesLogin(ctx context.Context, p *store.Project) bool
 }
 
 // reconcileTunnelHosts makes the device tunnel's managed routes match the project: its custom domains
-// set to "tunnel" and, if switched on, its production URL. Other routes are left alone.
-func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) {
+// set to "tunnel" and, if switched on, its production URL. Other routes are left alone. The returned
+// warnings (also logged as events) say why a hostname could not be applied, for the dashboard to show.
+func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) []string {
 	cfg, ok := s.tunnelConfig(ctx, p.DeviceID)
 	if !ok {
-		return
+		return nil
 	}
 	want := map[string]bool{}
 	if pf := s.urlPrefs(ctx, p.ID); pf.Production && pf.Tunnel {
@@ -505,23 +506,37 @@ func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) {
 			routes = append(routes, tunnelRoute{Hostname: h, Service: svc, Managed: true})
 		}
 	}
-	if !changed {
-		return
+	var warns []string
+	if pf := s.urlPrefs(ctx, p.ID); pf.Production && pf.Tunnel && s.baseDomain(ctx) == "" {
+		warns = append(warns, "The production URL needs a base domain (Settings) before it can go through the tunnel")
 	}
-	cfg.Routes = routes
-	if err := s.saveTunnelConfig(ctx, p.DeviceID, &cfg); err != nil {
-		s.log.Error("save tunnel routes", "err", err)
-		return
+	if changed {
+		cfg.Routes = routes
+		if err := s.saveTunnelConfig(ctx, p.DeviceID, &cfg); err != nil {
+			s.log.Error("save tunnel routes", "err", err)
+			return append(warns, "couldn't save the tunnel routes: "+err.Error())
+		}
+	}
+	if !changed && len(want) == 0 {
+		return warns
 	}
 	d, err := s.store.GetDevice(ctx, p.DeviceID)
 	if err != nil {
-		return
+		return warns
 	}
-	if tok := s.cloudflareToken(ctx); tok != "" {
-		for _, w := range s.applyTunnelRoutes(ctx, d, cfg, tok) {
-			s.event(ctx, d.ID, "warning", "tunnel.routes", w)
+	tok := s.cloudflareToken(ctx)
+	if tok == "" {
+		if len(want) > 0 {
+			warns = append(warns, "Cloudflare isn't connected in Settings, so the tunnel hostnames were saved but not applied. Connect a token with Cloudflare Tunnel > Edit, or add them in Cloudflare Zero Trust")
 		}
+		return warns
 	}
+	// Applied every time, not only when the routes changed, so a hostname that failed earlier is retried.
+	for _, w := range s.applyTunnelRoutes(ctx, d, cfg, tok) {
+		s.event(ctx, d.ID, "warning", "tunnel.routes", w)
+		warns = append(warns, w)
+	}
+	return warns
 }
 
 // handleSetTunnelVia chooses whether tunnel traffic goes straight to workers or through the device proxy.

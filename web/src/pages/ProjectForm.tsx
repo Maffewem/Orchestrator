@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Box, Github, Globe, Layers, Package, Server } from "lucide-react";
 import { api, type NodeBuild, type PreviewBuild, type Project, type ProjectInput, type Source } from "../api";
 import EnvEditor from "../components/EnvEditor";
+import { parseEnv, serializeEnv } from "../env";
 import { Button, ChipInput, ErrorNote, Field, Toggle, inputClass } from "../components/ui";
 import { cx, usePoll } from "../lib";
 
@@ -84,7 +85,7 @@ export default function ProjectForm({
     setError(null);
     try {
       await onSubmit(
-        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), web_port: webPort.trim(), env: lines(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), web_port: webPort.trim(), env: serializeEnv(parseEnv(env)), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
     } catch (err) {

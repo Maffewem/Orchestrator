@@ -23,3 +23,8 @@ test("merge overrides and appends", () => {
   const m = mergeEnv([{ key: "A", value: "1" }], [{ key: "A", value: "2" }, { key: "B", value: "3" }]);
   assert.deepEqual(m, [{ key: "A", value: "2" }, { key: "B", value: "3" }]);
 });
+
+test("comment-only lines never become rows", () => {
+  const rows = parseEnv("# Phone push alerts (treat it like a password)\nNTFY_TOPIC=\n\n# Or Claude instead:\nANTHROPIC_API_KEY=");
+  assert.deepEqual(serializeEnv(rows), ["NTFY_TOPIC=", "ANTHROPIC_API_KEY="]);
+});

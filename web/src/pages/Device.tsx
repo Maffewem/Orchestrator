@@ -320,7 +320,7 @@ function DeviceOverview({ d }: { d: Device }) {
             <Prop k="IP addresses" v={d.host.addresses?.join(", ")} />
             <Prop k="Uptime" v={uptime(m.uptime_seconds)} />
             <Prop k="Load average" v={`${m.load1.toFixed(2)} ${m.load5.toFixed(2)} ${m.load15.toFixed(2)}`} />
-            {m.temp_c ? <Prop k="Temperature" v={`${m.temp_c.toFixed(0)}°C`} /> : null}
+            <Prop k="Temperature" v={m.temp_c ? `${m.temp_c.toFixed(0)}°C` : "Not reported (no sensor, or the agent needs updating)"} />
             <Prop k="Last seen" v={ago(d.last_seen)} />
             <Prop k="Agent" v={d.host.agent_version} />
           </dl>

@@ -232,7 +232,7 @@ func (s *Server) agentBackup(w http.ResponseWriter, r *http.Request) (*store.Bac
 	if !ok {
 		return nil, false
 	}
-	if b.DeviceID != deviceFrom(r).ID {
+	if b.DeviceID != deviceFrom(r).ID && !(r.Method == http.MethodGet && s.mig.mayDownload(b.ID, deviceFrom(r).ID)) {
 		writeError(w, http.StatusForbidden, "backup belongs to another device")
 		return nil, false
 	}

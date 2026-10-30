@@ -1,18 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCan } from "../components/auth";
 import { Shell } from "../components/Streams";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router";
 import { ArrowUpRight, CloudUpload, Loader2, PackagePlus, Rocket, SquareTerminal, Trash2 } from "lucide-react";
-import { api, ApiError, type Device, type Project } from "../api";
+import { api, ApiError, type Device, type Migration, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
-import { Button, Card, CardHeader, Empty, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
+import { Button, Card, CardHeader, Empty, Field, Toggle, inputClass, ErrorNote, LineChart, Loading, StatusDot, StatusIcon, Tabs, deploymentLabel } from "../components/ui";
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "./Projects";
 import DomainsPanel from "../components/Domains";
 import PreviewsPanel from "../components/Previews";
 import TunnelPanel from "../components/ProjectTunnel";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
-import { ago, usePoll } from "../lib";
+import { ago, freeSpace, usePoll } from "../lib";
 import { confirmDialog, confirmWithOption } from "../components/dialogs";
 
 /** URL of the first published port on the device, if we know an address for it. */
@@ -26,6 +26,7 @@ export function visitUrl(p: Project, device?: Device | null): string | null {
 /** Start, stop and remove all containers of a Compose stack. Redeploying brings a removed stack back. */
 function StackControls({ p, onError }: { p: Project; onError: (e: string | null) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
+  const canOperate = useCan("operator");
   const run = async (action: "start" | "stop" | "down") => {
     let volumes = false;
     if (action === "down") {
@@ -49,6 +50,7 @@ function StackControls({ p, onError }: { p: Project; onError: (e: string | null)
       setBusy(null);
     }
   };
+  if (!canOperate) return null;
   return (
     <>
       <Button onClick={() => run("start")} loading={busy === "start"}>Start</Button>
@@ -67,6 +69,7 @@ export default function ProjectPage() {
   const [deploying, setDeploying] = useState(false);
   const [shell, setShell] = useState(false);
   const isAdmin = useCan("admin");
+  const canOperate = useCan("operator");
   const [error, setError] = useState<string | null>(null);
   const worker = device.data?.containers.find((c) => c.name === (p?.runtime.container || p?.name));
   useCrumbs([{ label: "Projects", to: "/projects" }, { label: p?.name ?? "…" }]);
@@ -131,9 +134,11 @@ export default function ProjectPage() {
               Shell
             </Button>
           )}
-          <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
-            New deployment
-          </Button>
+          {canOperate && (
+            <Button icon={<CloudUpload className="size-4" />} onClick={deploy} loading={deploying}>
+              New deployment
+            </Button>
+          )}
           {url && (
             <a href={url} target="_blank" rel="noreferrer">
               <Button variant="primary" icon={<ArrowUpRight className="size-4" />}>
@@ -341,6 +346,7 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
           }}
         />
       </Card>
+      <MigrateCard p={p} onDone={onSaved} />
       <Card className="border-red-200">
         <CardHeader title="Delete project" subtitle="Removes the project and its deployment history. You can also remove its container from the device." />
         <div className="p-5">
@@ -365,5 +371,92 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+/** Moves the project to another device: data is backed up, copied across and verified before the old container is touched. */
+function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
+  const devices = usePoll(api.devices, 0);
+  const [target, setTarget] = useState("");
+  const [withData, setWithData] = useState(true);
+  const [stopSource, setStopSource] = useState(true);
+  const [fromBackup, setFromBackup] = useState(false);
+  const isAdmin = useCan("admin");
+  const [error, setError] = useState<string | null>(null);
+  const [m, setM] = useState<Migration | null>(null);
+  const running = m?.status === "running";
+
+  useEffect(() => {
+    api.migration(p.id).then(setM).catch(() => {});
+  }, [p.id]);
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(async () => {
+      try {
+        const next = await api.migration(p.id);
+        setM(next);
+        if (next.status !== "running") onDone();
+      } catch {}
+    }, 2000);
+    return () => clearInterval(t);
+  }, [running, p.id, onDone]);
+
+  if (!isAdmin) return null;
+  const isStack = p.source.type === "compose";
+  const source = devices.data?.find((d) => d.id === p.device_id);
+  const sourceDown = source?.status === "offline";
+  const others = devices.data?.filter((d) => d.id !== p.device_id && !d.maintenance) ?? [];
+  return (
+    <Card>
+      <CardHeader title="Move to another device" subtitle="Backs up the data, deploys on the new device, copies the data across and checks it runs before anything is stopped." />
+      <div className="space-y-4 p-5">
+        {error && <ErrorNote>{error}</ErrorNote>}
+        <Field label="Move to">
+          <select className={inputClass} value={target} onChange={(e) => setTarget(e.target.value)} disabled={running}>
+            <option value="">Choose a device</option>
+            {others.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name} ({d.host.arch}
+                {d.status === "offline" ? ", offline" : ""}
+                {freeSpace(d) ? `, ${freeSpace(d)}` : ""})
+              </option>
+            ))}
+          </select>
+        </Field>
+        {isStack && <p className="text-sm text-neutral-500">A stack is redeployed on the new device. Its volumes are not copied, so it starts with fresh data.</p>}
+        {!isStack && <div className="flex items-center gap-3 text-sm"><Toggle checked={withData} onChange={setWithData} label="Copy volumes and data" />Copy volumes and data</div>}
+        {!isStack && withData && sourceDown && (
+          <div className="flex items-center gap-3 text-sm">
+            <Toggle checked={fromBackup} onChange={setFromBackup} label="Use the newest backup on the server" />
+            {source?.name} is offline: restore the newest backup on the server instead. The data may be out of date.
+          </div>
+        )}
+        <div className="flex items-center gap-3 text-sm"><Toggle checked={stopSource} onChange={setStopSource} label="Stop the old container afterwards" />Stop the old container afterwards</div>
+        <Button
+          disabled={!target || running}
+          icon={running ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
+          onClick={async () => {
+            setError(null);
+            try {
+              setM(await api.migrateProject(p.id, { device_id: target, with_data: withData, stop_source: stopSource, from_backup: sourceDown && fromBackup }));
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        >
+          Move project
+        </Button>
+        {m && (
+          <div className="rounded-md bg-slate-50 p-3 font-mono text-xs dark:bg-slate-900">
+            <div className="mb-1 font-sans text-sm">
+              {m.from} to {m.to}: {m.status === "failed" ? "failed" : m.status === "done" ? "done" : m.step}
+            </div>
+            {(m.log ?? []).map((l, i) => (
+              <div key={i}>{l}</div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

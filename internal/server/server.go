@@ -62,6 +62,9 @@ type Server struct {
 	cloudflareAPI string
 	metrics       *metricsHistory
 	logins        limiter
+	mig           migrations
+	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
+	migratePoll   time.Duration // test hook; 2s when zero
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState
@@ -99,6 +102,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	}
 	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub()}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
+	s.mig.persist = s.persistMigration
 
 	for _, key := range []string{settingJoinToken, settingWebhookSecret} {
 		if _, err := st.GetSetting(ctx, key); errors.Is(err, store.ErrNotFound) {
@@ -139,6 +143,7 @@ func (s *Server) Run(ctx context.Context) {
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
 	s.startHTTPS(ctx)
+	s.recoverMigrations(ctx)
 	go s.afterBoot(ctx)
 	t := time.NewTicker(s.cfg.HeartbeatInterval)
 	defer t.Stop()
@@ -159,6 +164,13 @@ func (s *Server) sweep(ctx context.Context) {
 	}
 	for _, d := range gone {
 		s.event(ctx, d.ID, "warning", "device.offline", d.Name+" stopped responding")
+	}
+	if ended, err := s.store.ExpireMaintenance(ctx, time.Now()); err != nil {
+		s.log.Error("expire maintenance", "err", err)
+	} else {
+		for _, d := range ended {
+			s.event(ctx, d.ID, "info", "device.maintenance", d.Name+" left maintenance mode (the time set for it ended)")
+		}
 	}
 	if _, err := s.store.ExpireCommands(ctx, time.Now().Add(-2*time.Minute), time.Now().Add(-30*time.Minute)); err != nil {
 		s.log.Error("expire commands", "err", err)
@@ -246,16 +258,21 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/devices/{id}/tunnel/routes", s.handleSetTunnelRoutes)
 	admin("GET /api/projects/{id}/tunnel", s.handleGetProjectTunnel)
 	admin("PUT /api/projects/{id}/tunnel", s.handleSetProjectTunnel)
+	admin("PUT /api/devices/{id}/tunnel/via", s.handleSetTunnelVia)
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
+	admin("POST /api/projects/{id}/migrate", s.handleMigrateProject)
+	admin("GET /api/projects/{id}/migration", s.handleGetMigration)
 	admin("GET /api/projects/{id}/deployments", s.handleListDeployments)
 	admin("GET /api/deployments", s.handleListDeployments)
 	admin("GET /api/deployments/{id}", s.handleGetDeployment)
 	admin("POST /api/deployments/{id}/retry", s.handleRetryDeployment)
+	admin("POST /api/deployments/{id}/cancel", s.handleCancelDeployment)
 	admin("GET /api/github/repos", s.handleListGitHubRepos)
 	admin("GET /api/projects/{id}/domains", s.handleGetDomains)
 	admin("PUT /api/projects/{id}/domains/urls", s.handleSetURLs)
 	admin("POST /api/projects/{id}/domains", s.handleAddDomain)
 	admin("DELETE /api/projects/{id}/domains/{did}", s.handleDeleteDomain)
+	admin("PATCH /api/projects/{id}/domains/{did}", s.handleSetDomainAccess)
 	admin("POST /api/deployments/{id}/rollback", s.handleRollback)
 	admin("GET /api/projects/{id}/previews", s.handleListPreviews)
 	admin("PUT /api/projects/{id}/previews/settings", s.handleSetPreviewSettings)

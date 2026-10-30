@@ -184,6 +184,9 @@ func (s *Server) syncPreviews(ctx context.Context, p *store.Project) {
 		if w := previewWatch(p.Source); (len(w.Include) > 0 || len(w.Exclude) > 0) && !wants(w, s.pullFiles(ctx, p.Source.Repo, pr.Number)) {
 			continue // nothing the Previews tab watches changed
 		}
+		if pv == nil && d.Maintenance {
+			continue // no new previews while the device is in maintenance
+		}
 		if pv == nil {
 			pv = &store.Preview{ProjectID: p.ID, Branch: pr.Head.Ref, PR: pr.Number, Title: pr.Title, Author: pr.User.Login}
 			if err := s.newPreview(ctx, p, pv); err != nil {

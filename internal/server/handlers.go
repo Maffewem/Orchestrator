@@ -22,10 +22,12 @@ type DeviceView struct {
 	Issues []string `json:"issues"`
 	// Proxy is the state of the per-device domain proxy: running | stopped | none | agent_too_old.
 	Proxy string `json:"proxy"`
+	// Link is how the agent reaches this server: https | http | unknown.
+	Link string `json:"agent_link"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d)}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d), Link: s.agentLink(d.ID)}
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"
@@ -55,6 +57,41 @@ func (s *Server) view(d *store.Device) DeviceView {
 	}
 	check("Memory", d.Metrics.MemoryUsed, d.Metrics.MemoryTotal)
 	check("Disk", d.Metrics.DiskUsed, d.Metrics.DiskTotal)
+
+	// Sustained CPU load: the 5-minute load average per core, so a short spike doesn't count.
+	if cpus := float64(d.Host.CPUs); cpus > 0 {
+		per := d.Metrics.Load5 / cpus
+		switch {
+		case per >= 3:
+			raise("critical", fmt.Sprintf("CPU is overloaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
+		case per >= 1.5:
+			raise("warning", fmt.Sprintf("CPU is heavily loaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
+		}
+	}
+	switch t := d.Metrics.TempC; {
+	case t >= 85:
+		raise("critical", fmt.Sprintf("Temperature is %.0f°C", t))
+	case t >= 80:
+		raise("warning", fmt.Sprintf("Temperature is %.0f°C", t))
+	}
+
+	// Container failures that point at the device rather than the app: crash loops and kills
+	// by the kernel's out-of-memory killer (exit code 137).
+	var looping, killed []string
+	for _, c := range d.Containers {
+		switch {
+		case c.State == "restarting" || c.State == "dead":
+			looping = append(looping, c.Name)
+		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
+			killed = append(killed, c.Name)
+		}
+	}
+	if len(looping) > 0 {
+		raise("warning", "Containers restarting or dead: "+strings.Join(looping, ", "))
+	}
+	if len(killed) > 0 {
+		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(killed, ", "))
+	}
 	return v
 }
 
@@ -102,6 +139,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	s.noteAgentLink(d.ID, r)
 	ctx := r.Context()
 	if err := s.store.UpdateDeviceState(ctx, d.ID, req.Host, req.Metrics, req.Containers); err != nil {
 		s.internal(w, err)
@@ -120,7 +158,9 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withCredentials(cmds, s.githubToken(ctx))
+	cancel, _ := s.store.RecentlyCancelled(ctx, d.ID, time.Now().Add(-15*time.Minute))
 	writeJSON(w, http.StatusOK, api.HeartbeatResponse{
+		Cancel:          cancel,
 		Commands:        cmds,
 		IntervalSeconds: int(s.cfg.HeartbeatInterval / time.Second),
 	})
@@ -162,7 +202,10 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := s.store.CompleteCommand(r.Context(), d.ID, r.PathValue("id"), res)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrCancelled) {
+		w.WriteHeader(http.StatusNoContent) // the user already gave up on it
+		return
+	} else if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "no such command")
 		return
 	} else if err != nil {
@@ -330,6 +373,11 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name   *string   `json:"name"`
 		Labels *[]string `json:"labels"`
+		// Maintenance blocks new workers, previews and adoptions on the device.
+		Maintenance *bool `json:"maintenance"`
+		// MaintenanceNote says why; MaintenanceHours ends maintenance by itself (0 = never).
+		MaintenanceNote  *string `json:"maintenance_note"`
+		MaintenanceHours *int    `json:"maintenance_hours"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -349,7 +397,50 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	if req.Maintenance != nil || req.MaintenanceNote != nil || req.MaintenanceHours != nil {
+		on, note := d.Maintenance, d.MaintenanceNote
+		if req.Maintenance != nil {
+			on = *req.Maintenance
+		}
+		if req.MaintenanceNote != nil {
+			note = strings.TrimSpace(*req.MaintenanceNote)
+			if len(note) > 300 {
+				note = note[:300]
+			}
+		}
+		var until time.Time
+		if req.MaintenanceHours != nil {
+			if *req.MaintenanceHours < 0 || *req.MaintenanceHours > 24*90 {
+				writeError(w, http.StatusBadRequest, "maintenance can end automatically after 1 hour to 90 days")
+				return
+			}
+			if *req.MaintenanceHours > 0 {
+				until = time.Now().Add(time.Duration(*req.MaintenanceHours) * time.Hour)
+			}
+		} else if d.MaintenanceUntil != nil {
+			until = *d.MaintenanceUntil
+		}
+		if err := s.store.SetDeviceMaintenance(r.Context(), d.ID, on, note, until); err != nil {
+			s.internal(w, err)
+			return
+		}
+		if on != d.Maintenance {
+			if on {
+				s.event(r.Context(), d.ID, "warning", "device.maintenance", d.Name+" is in maintenance mode: no new workers will be placed on it")
+			} else {
+				s.event(r.Context(), d.ID, "info", "device.maintenance", d.Name+" left maintenance mode")
+			}
+		}
+		if fresh, err := s.store.GetDevice(r.Context(), d.ID); err == nil {
+			d = fresh
+		}
+	}
 	writeJSON(w, http.StatusOK, s.view(d))
+}
+
+// errMaintenance is why a device refuses new work.
+func errMaintenance(d *store.Device) error {
+	return errors.New(d.Name + " is in maintenance mode: choose another device, or turn maintenance mode off first")
 }
 
 func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {

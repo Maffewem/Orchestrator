@@ -203,7 +203,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
 
   return (
     <CrumbContext.Provider value={setCrumbs}>
-      <div className="flex min-h-full">
+      <div className="flex min-h-full w-full max-w-full overflow-x-clip">
         <aside className={cx("sticky top-0 hidden h-screen shrink-0 border-r border-neutral-200 bg-neutral-50 transition-[width] lg:block", rail ? "w-16" : "w-60")}>{sidebar(rail)}</aside>
         {open && (
           <div className="fixed inset-0 z-40 bg-black/30 lg:hidden" onClick={() => setOpen(false)}>
@@ -238,7 +238,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
               <kbd className="hidden rounded border border-neutral-300 px-1.5 text-xs sm:inline">Ctrl K</kbd>
             </button>
           </header>
-          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
+          <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
             <Outlet />
           </main>
         </div>

@@ -1,16 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Route, Routes, useNavigate, useParams } from "react-router";
 import { Trash2 } from "lucide-react";
-import { api, type Device, type TunnelRoute, type TunnelView } from "../api";
+import { api, type Device, type Migration, type Project, type TunnelRoute, type TunnelView } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
 import { useCan } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, StatusDot, Tabs, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
-import { ago, bytes, bytesOrDash, pct, uptime, usePoll } from "../lib";
+import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 
 export default function DevicePage() {
@@ -33,7 +33,9 @@ export default function DevicePage() {
             <StatusDot status={d.status} />
             {d.name}
             <HealthBadge health={d.health} status={d.status} />
+            {d.maintenance && <Badge tone="warn">maintenance</Badge>}
           </h1>
+          {d.maintenance && d.maintenance_note && <p className="mt-1 text-sm text-neutral-500">In maintenance: {d.maintenance_note}</p>}
           <p className="mt-1 flex text-sm text-neutral-500">
             <DeviceSummary d={d} />
           </p>
@@ -200,6 +202,26 @@ function TunnelCard({ d }: { d: Device }) {
                 )}
               </div>
             )}
+            {t.enabled && isAdmin && (
+              <div className="space-y-2 border-t border-neutral-200 pt-3">
+                <p className="font-medium">Where tunnel traffic goes</p>
+                {(
+                  [
+                    ["", "Straight to the worker (default)", "Lightest: cloudflared sends each request directly to the worker's port. Nothing else runs in the path. Login protection, path routes and preview URLs cannot be used through the tunnel."],
+                    ["proxy", "Through the device proxy (Caddy)", "Adds one more process in the path on this device: cloudflared sends requests to Caddy, which forwards them to the worker. Caddy uses little CPU and tens of MB of memory for plain HTTP, but on a very small device that is extra load. It enables login protection, path routes and per-preview hostnames through the tunnel."],
+                  ] as const
+                ).map(([val, label, text]) => (
+                  <label key={val} className="flex cursor-pointer items-start gap-2">
+                    <input type="radio" className="mt-1" name={`via-${d.id}`} checked={t.via === val} disabled={busy} onChange={() => act(() => api.setTunnelVia(d.id, val))} />
+                    <span>
+                      <span className="font-medium">{label}</span>
+                      <br />
+                      <span className="text-neutral-500">{text}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
             {t.enabled && (
               <div className="space-y-2 border-t border-neutral-200 pt-3">
                 <p className="font-medium">Public hostnames</p>
@@ -298,6 +320,7 @@ function DeviceOverview({ d }: { d: Device }) {
             <Prop k="IP addresses" v={d.host.addresses?.join(", ")} />
             <Prop k="Uptime" v={uptime(m.uptime_seconds)} />
             <Prop k="Load average" v={`${m.load1.toFixed(2)} ${m.load5.toFixed(2)} ${m.load15.toFixed(2)}`} />
+            {m.temp_c ? <Prop k="Temperature" v={`${m.temp_c.toFixed(0)}°C`} /> : null}
             <Prop k="Last seen" v={ago(d.last_seen)} />
             <Prop k="Agent" v={d.host.agent_version} />
           </dl>
@@ -395,6 +418,7 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
           <Button variant="primary">{saved ? "Saved" : "Save"}</Button>
         </form>
       </Card>
+      <MaintenanceCard d={d} onSaved={onSaved} />
       <Card className="border-red-200">
         <CardHeader title="Remove device" subtitle="The agent will be disconnected. Its containers keep running. It can rejoin with the join token." />
         <div className="p-5">
@@ -412,5 +436,253 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Maintenance mode keeps new workers, previews and adoptions off the device. Turning it on lists
+ * the workers that would become unreachable if the device goes down, and offers to move them.
+ */
+function MaintenanceCard({ d, onSaved }: { d: Device; onSaved: () => void }) {
+  const isAdmin = useCan("admin");
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!isAdmin) return null;
+  const leave = async () => {
+    setError(null);
+    try {
+      await api.updateDevice(d.id, { maintenance: false });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  return (
+    <Card>
+      <CardHeader title="Maintenance mode" subtitle="No new workers, previews or adopted containers are placed on the device. Workers already here keep running and can still be redeployed." />
+      <div className="space-y-3 p-5">
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {d.maintenance && (
+          <p className="text-sm text-neutral-600">
+            {d.maintenance_note ? <>“{d.maintenance_note}”. </> : null}
+            {d.maintenance_until ? `Ends automatically ${new Date(d.maintenance_until).toLocaleString()}.` : "Stays on until you turn it off."}
+          </p>
+        )}
+        {d.maintenance ? (
+          <Button onClick={leave}>Leave maintenance mode</Button>
+        ) : (
+          <Button variant="primary" onClick={() => setOpen(true)}>
+            Enter maintenance mode
+          </Button>
+        )}
+      </div>
+      {open && <MaintenanceModal d={d} onClose={() => setOpen(false)} onDone={onSaved} />}
+    </Card>
+  );
+}
+
+const hourOptions: [number, string][] = [
+  [0, "Until I turn it off"],
+  [1, "1 hour"],
+  [4, "4 hours"],
+  [24, "1 day"],
+  [168, "1 week"],
+];
+
+const GB = 1024 ** 3;
+
+/** Before/after worker counts and free RAM/disk for every device that would receive workers. Per-worker size is not tracked, so a warning means the device is already tight. */
+function Impact({ targets, mine, dest, source }: { targets: Device[]; mine: Project[]; dest: Record<string, string>; source: Device }) {
+  const rows = targets
+    .map((t) => ({ t, add: mine.filter((p) => dest[p.id] === t.id) }))
+    .filter((r) => r.add.length > 0);
+  const free = (total: number, used: number) => Math.max(total - used, 0);
+  return (
+    <div className="rounded-md border border-neutral-200">
+      <div className="border-b border-neutral-100 px-3 py-2 text-xs font-medium uppercase tracking-wide text-neutral-500">Projected impact</div>
+      <ul className="divide-y divide-neutral-100">
+        {rows.map(({ t, add }) => {
+          const m = t.metrics;
+          const ram = free(m.memory_total, m.memory_used);
+          const disk = free(m.disk_total, m.disk_used);
+          const lowRam = m.memory_total > 0 && (ram < 0.5 * GB || ram < m.memory_total * 0.15);
+          const lowDisk = m.disk_total > 0 && (disk < 2 * GB || disk < m.disk_total * 0.1);
+          const stacks = add.filter((p) => p.source.type === "compose").length;
+          const before = t.containers.filter((c) => c.state === "running").length;
+          return (
+            <li key={t.id} className="space-y-1 px-3 py-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                <span className="font-medium">{t.name}</span>
+                <span className="text-xs text-neutral-500">
+                  Workers {before} → {before + add.length} (+{add.length})
+                </span>
+              </div>
+              <div className="text-xs text-neutral-500">
+                Free now: {m.memory_total ? bytes(ram) : "?"} RAM, {m.disk_total ? bytes(disk) : "?"} disk · {t.host.arch}
+                {t.host.arch !== source.host.arch && <span className="text-amber-700"> · different architecture from {source.name}: image is rebuilt</span>}
+              </div>
+              {(lowRam || lowDisk) && (
+                <div className="text-xs text-red-700">
+                  Low {[lowRam && "memory", lowDisk && "disk space"].filter(Boolean).join(" and ")} on {t.name}: adding {add.length} worker{add.length === 1 ? "" : "s"} may exhaust it.
+                </div>
+              )}
+              {stacks > 0 && <div className="text-xs text-neutral-500">{stacks} stack{stacks === 1 ? "" : "s"} will be redeployed; volumes are not copied.</div>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => void; onDone: () => void }) {
+  const projects = usePoll(api.projects, 0);
+  const devices = usePoll(api.devices, 0);
+  const mine = (projects.data ?? []).filter((p: Project) => p.device_id === d.id);
+  const targets = (devices.data ?? []).filter((t) => t.id !== d.id && !t.maintenance && t.status === "online");
+  const [note, setNote] = useState("");
+  const [hours, setHours] = useState(0);
+  // The device each worker moves to; "" means leave it where it is.
+  const [dest, setDest] = useState<Record<string, string>>({});
+  const [bulk, setBulk] = useState("");
+  const [started, setStarted] = useState<Record<string, Migration | string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const running = Object.entries(started).filter(([, v]) => typeof v !== "string" && v.status === "running").map(([id]) => id);
+  useEffect(() => {
+    if (running.length === 0) return;
+    const t = setInterval(async () => {
+      for (const id of running) {
+        try {
+          const m = await api.migration(id);
+          setStarted((s) => ({ ...s, [id]: m }));
+        } catch {}
+      }
+    }, 2000);
+    return () => clearInterval(t);
+  }, [running.join(",")]);
+
+  const moving = Object.keys(started).length > 0;
+  const chosen = mine.filter((p) => dest[p.id]);
+  const enter = async (move: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateDevice(d.id, { maintenance: true, maintenance_note: note, maintenance_hours: hours });
+      onDone();
+      if (!move) {
+        onClose();
+        return;
+      }
+      for (const p of chosen) {
+        try {
+          const m = await api.migrateProject(p.id, { device_id: dest[p.id], with_data: p.source.type !== "compose", stop_source: true });
+          setStarted((s) => ({ ...s, [p.id]: m }));
+        } catch (err) {
+          setStarted((s) => ({ ...s, [p.id]: err instanceof Error ? err.message : String(err) }));
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label = (t: Device) => `${t.name} (${t.host.arch}${freeSpace(t) ? `, ${freeSpace(t)}` : ""})`;
+  return (
+    <Modal title={`Put ${d.name} in maintenance?`} onClose={onClose}>
+      <div className="space-y-4 p-5 text-sm">
+        {mine.length > 0 ? (
+          <>
+            <p>
+              These workers run on {d.name}. They become inaccessible if it goes down, unless you migrate them to another device first. A moved worker gets the other device's IP address, so
+              anything that points at the old IP needs updating. Cloudflare Tunnel routes and Cloudflare-managed DNS follow automatically.
+            </p>
+            {!moving && targets.length > 0 && (
+              <Field label="Migrate all workers to">
+                <select
+                  className={inputClass}
+                  value={bulk}
+                  onChange={(e) => {
+                    setBulk(e.target.value);
+                    setDest(Object.fromEntries(mine.map((p) => [p.id, e.target.value])));
+                  }}
+                >
+                  <option value="">Keep on this device</option>
+                  {targets.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {label(t)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">
+              {mine.map((p) => {
+                const s = started[p.id];
+                return (
+                  <li key={p.id} className="grid grid-cols-1 items-center gap-2 px-3 py-2 sm:grid-cols-[minmax(0,1fr)_16rem]">
+                    <span className="min-w-0 truncate">
+                      {p.name}
+                      {p.source.type === "compose" && <span className="ml-2 text-xs text-neutral-500">stack: redeployed, volumes not copied</span>}
+                    </span>
+                    {moving ? (
+                      <span className="text-xs text-neutral-500 sm:text-right">
+                        {typeof s === "string" ? s : s ? (s.status === "failed" ? `failed: ${s.error}` : s.status === "done" ? "moved" : s.step) : "not migrating"}
+                      </span>
+                    ) : (
+                      <select className={`${inputClass} w-full`} value={dest[p.id] ?? ""} onChange={(e) => setDest({ ...dest, [p.id]: e.target.value })} aria-label={`Move ${p.name} to`}>
+                        <option value="">Do not migrate</option>
+                        {targets.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {label(t)}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {!moving && chosen.length > 0 && <Impact targets={targets} mine={mine} dest={dest} source={d} />}
+          </>
+        ) : (
+          <p>No workers run on this device. New workers will simply be placed elsewhere.</p>
+        )}
+        {!moving && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Reason (optional)">
+              <input className={inputClass} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="Replacing the SD card" />
+            </Field>
+            <Field label="Ends">
+              <select className={inputClass} value={hours} onChange={(e) => setHours(Number(e.target.value))}>
+                {hourOptions.map(([h, l]) => (
+                  <option key={h} value={h}>
+                    {l}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        )}
+        {error && <ErrorNote>{error}</ErrorNote>}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={onClose}>{moving ? "Close" : "Cancel"}</Button>
+          {!moving && (
+            <>
+              <Button variant={mine.length && chosen.length < mine.length ? "danger" : "primary"} disabled={busy} onClick={() => enter(false)}>
+                {mine.length ? "Enter without migrating" : "Enter maintenance mode"}
+              </Button>
+              {chosen.length > 0 && (
+                <Button variant="primary" disabled={busy} onClick={() => enter(true)}>
+                  Migrate {chosen.length} and enter
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }

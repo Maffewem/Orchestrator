@@ -35,6 +35,7 @@ export interface Metrics {
   load5: number;
   load15: number;
   uptime_seconds: number;
+  temp_c?: number;
 }
 
 export interface Port {
@@ -73,6 +74,10 @@ export interface Device {
   health: Health;
   issues: string[];
   proxy: "running" | "stopped" | "none" | "agent_too_old";
+  maintenance: boolean;
+  maintenance_note?: string;
+  maintenance_until?: string;
+  agent_link: "https" | "http" | "unknown";
 }
 
 export interface FleetContainer extends Container {
@@ -197,6 +202,8 @@ export interface TunnelRoute {
   service: string;
   /** Set when the route belongs to a project; kept as is when the device page saves routes. */
   project?: string;
+  /** Kept in step with a project's domains by the server. */
+  managed?: boolean;
 }
 
 export interface TunnelView {
@@ -204,6 +211,7 @@ export interface TunnelView {
   enabled: boolean;
   state?: string;
   tunnel_id?: string;
+  via: "" | "proxy";
   routes: TunnelRoute[];
   can_route: boolean;
   warnings?: string[];
@@ -322,7 +330,8 @@ export interface DomainRow {
   type: "domain" | "route";
   path?: string;
   zone: string;
-  status: "active" | "pending" | "mismatch";
+  status: "active" | "lan" | "tunnel" | "pending" | "mismatch";
+  access?: "tunnel";
   detail: string;
   records: DnsRecord[];
 }
@@ -333,9 +342,13 @@ export interface UrlRow {
   status?: DomainRow["status"];
   detail?: string;
   records?: DnsRecord[];
+  tunnel?: boolean;
 }
 
 export interface DomainsView {
+  lan_only: boolean;
+  tunnel_ready: boolean;
+  tunnel_via: "" | "proxy";
   base_domain: string;
   production: UrlRow | null;
   preview: UrlRow | null;
@@ -354,7 +367,7 @@ export interface Settings {
   ssl_mode: "http" | "dns";
   sso: SSOView;
   https: HTTPSView;
-  security: { session_hours: number; min_password: number; force_https: boolean };
+  security: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
   version: string;
@@ -454,6 +467,15 @@ async function fetchStreamOutput(id: string, from: number, signal: AbortSignal):
   const bin = atob(j.data ?? "");
   const data = Uint8Array.from(bin, (c) => c.charCodeAt(0));
   return { data, next: j.next, closed: !!j.closed, error: j.error };
+}
+
+export interface Migration {
+  status: "running" | "done" | "failed";
+  step: string;
+  error?: string;
+  from: string;
+  to: string;
+  log: string[];
 }
 
 export interface Backup {
@@ -665,10 +687,11 @@ export const api = {
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
-  updateDevice: (id: string, patch: { name?: string; labels?: string[] }) =>
+  updateDevice: (id: string, patch: { name?: string; labels?: string[]; maintenance?: boolean; maintenance_note?: string; maintenance_hours?: number }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),
+  setTunnelVia: (id: string, via: "" | "proxy") => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/via`, { via }),
   setTunnelRoutes: (id: string, routes: TunnelRoute[]) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/routes`, { routes }),
   projectTunnel: (id: string) => request<ProjectTunnelView>("GET", `/api/projects/${id}/tunnel`),
   setProjectTunnel: (id: string, routes: { hostname: string; port: number }[]) =>
@@ -689,6 +712,9 @@ export const api = {
   updateProject: (id: string, p: Partial<ProjectInput>) => request<Project>("PATCH", `/api/projects/${id}`, p),
   deleteProject: (id: string, removeContainer = false) =>
     request<void>("DELETE", `/api/projects/${id}${removeContainer ? "?remove_container=1" : ""}`),
+  migrateProject: (id: string, body: { device_id: string; with_data: boolean; stop_source: boolean; from_backup?: boolean }) =>
+    request<Migration>("POST", `/api/projects/${id}/migrate`, body),
+  migration: (id: string) => request<Migration>("GET", `/api/projects/${id}/migration`),
   deployProject: (id: string, confirm = false) => request<Deployment>("POST", `/api/projects/${id}/deployments${confirm ? "?confirm=1" : ""}`),
   adopt: (deviceId: string, containers: { id: string; name?: string }[], dryRun: boolean) =>
     request<AdoptItem[]>("POST", `/api/devices/${deviceId}/adopt`, { containers, dry_run: dryRun }),
@@ -696,6 +722,7 @@ export const api = {
   deployments: (q: { device?: string; limit?: number } = {}) =>
     request<Deployment[]>("GET", `/api/deployments?limit=${q.limit ?? 50}${q.device ? `&device=${q.device}` : ""}`),
   deployment: (id: string) => request<Deployment>("GET", `/api/deployments/${id}`),
+  cancelDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/cancel`),
   retryDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/retry`),
   rollbackDeployment: (id: string) => request<Deployment>("POST", `/api/deployments/${id}/rollback`),
   projectPreviews: (id: string) => request<PreviewsView>("GET", `/api/projects/${id}/previews`),
@@ -719,13 +746,14 @@ export const api = {
   setCloudflare: (b: { token?: string; proxied?: boolean }) =>
     request<{ connected: boolean; zones?: string[]; proxied?: boolean }>("PUT", "/api/settings/cloudflare", { token: b.token ?? "", proxied: b.proxied }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
-  setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
+  setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
   projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
-  setProjectUrls: (id: string, u: { production: boolean; preview: boolean }) =>
+  setProjectUrls: (id: string, u: { production: boolean; preview: boolean; tunnel?: boolean; preview_tunnel?: boolean }) =>
     request<DomainsView>("PUT", `/api/projects/${id}/domains/urls`, u),
-  addDomain: (id: string, d: { hostname: string; type: "domain" | "route"; path?: string }) =>
+  addDomain: (id: string, d: { hostname: string; type: "domain" | "route"; path?: string; access?: "tunnel" }) =>
     request<DomainsView>("POST", `/api/projects/${id}/domains`, d),
+  setDomainAccess: (id: string, did: string, access: "" | "tunnel") => request<DomainsView>("PATCH", `/api/projects/${id}/domains/${did}`, { access }),
   deleteDomain: (id: string, did: string) => request<void>("DELETE", `/api/projects/${id}/domains/${did}`),
   setBackupPassword: (password: string) => request<{ backup_password_set: boolean }>("PUT", "/api/settings/backup-password", { password }),
   setBaseDomain: (base_domain: string) => request<{ base_domain: string }>("PUT", "/api/settings/domain", { base_domain }),

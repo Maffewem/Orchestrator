@@ -64,6 +64,8 @@ type Metrics struct {
 	Load5         float64 `json:"load5"`
 	Load15        float64 `json:"load15"`
 	UptimeSeconds uint64  `json:"uptime_seconds"`
+	// TempC is the hottest thermal zone in °C; 0 when the device has no sensor (or the agent predates it).
+	TempC float64 `json:"temp_c,omitempty"`
 }
 
 // Container is the agent's view of one container on its local engine.
@@ -110,6 +112,8 @@ type HeartbeatRequest struct {
 type HeartbeatResponse struct {
 	Commands        []Command `json:"commands"`
 	IntervalSeconds int       `json:"interval_seconds"`
+	// Cancel lists ids of recently cancelled commands, so an agent can abort one it is running.
+	Cancel []string `json:"cancel,omitempty"`
 }
 
 // Command actions understood by the agent.
@@ -188,6 +192,8 @@ const (
 	CommandDispatched = "dispatched"
 	CommandSucceeded  = "succeeded"
 	CommandFailed     = "failed"
+	// CommandCancelled is a command the user gave up on; a running agent is told to abort it.
+	CommandCancelled = "cancelled"
 )
 
 // CommandResult is what the agent reports after running a command.

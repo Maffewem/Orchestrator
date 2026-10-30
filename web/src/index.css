@@ -59,6 +59,15 @@ body,
   height: 100%;
 }
 
+/* A wide child must never widen the page: on iOS that lets the user pinch out
+   past the layout, leaving cards and the fixed bottom nav short of full width. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
 body {
   @apply bg-neutral-50 text-neutral-900 antialiased;
 }

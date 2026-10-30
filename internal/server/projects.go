@@ -211,6 +211,12 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			return fmt.Errorf("port %q should look like 8080:80 or 53/udp", p)
 		}
 	}
+	in.Runtime.WebPort = strings.TrimSpace(in.Runtime.WebPort)
+	if in.Runtime.WebPort != "" {
+		if n, err := strconv.Atoi(in.Runtime.WebPort); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("web port %q should be a host port number", in.Runtime.WebPort)
+		}
+	}
 	in.Runtime.Env = cleanLabels(in.Runtime.Env)
 	for _, e := range in.Runtime.Env {
 		if k, _, ok := strings.Cut(e, "="); !ok || k == "" {

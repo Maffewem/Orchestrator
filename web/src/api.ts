@@ -136,6 +136,8 @@ export interface Source {
 
 export interface Runtime {
   ports: string[];
+  /** Host port that carries web traffic (tunnel, proxy, production URL); empty uses the first TCP port. */
+  web_port?: string;
   env: string[];
   command?: string[];
   restart: string;

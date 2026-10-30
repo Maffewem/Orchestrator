@@ -56,6 +56,7 @@ export default function ProjectForm({
     initial?.source ?? { type: "github", repo: "", branch: "main", context: "", dockerfile: "", auto_deploy: true },
   );
   const [ports, setPorts] = useState((initial?.runtime.ports ?? []).join("\n"));
+  const [webPort, setWebPort] = useState(initial?.runtime.web_port ?? "");
   const [env, setEnv] = useState((initial?.runtime.env ?? []).join("\n"));
   const [volumes, setVolumes] = useState((initial?.runtime.volumes ?? []).join("\n"));
   const [restart, setRestart] = useState(initial?.runtime.restart || "unless-stopped");
@@ -83,7 +84,7 @@ export default function ProjectForm({
     setError(null);
     try {
       await onSubmit(
-        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), env: lines(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), web_port: webPort.trim(), env: lines(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
     } catch (err) {
@@ -388,6 +389,9 @@ export default function ProjectForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Ports" hint={node ? "host:container. Empty: 8080:80 for a static site, 3000:3000 for a Node server (it gets PORT set to the container port)." : "One per line: host:container, e.g. 8080:80 or 53:53/udp."}>
             <textarea className={cx(inputClass, "font-mono")} rows={3} value={ports} onChange={(e) => setPorts(e.target.value)} />
+          </Field>
+          <Field label="Web port" hint="The host port that serves the website when there are several. The Cloudflare Tunnel, domains and the production URL send traffic here. Empty: the first TCP port.">
+            <input className={inputClass} inputMode="numeric" placeholder="e.g. 9080" value={webPort} onChange={(e) => setWebPort(e.target.value)} />
           </Field>
           <Field label="Restart policy">
             <select className={inputClass} value={restart} onChange={(e) => setRestart(e.target.value)}>

@@ -269,3 +269,14 @@ func TestProjectPortsEmptyIsList(t *testing.T) {
 		t.Fatal("projectPorts returned nil")
 	}
 }
+
+func TestUpstreamPortWebPort(t *testing.T) {
+	p := &store.Project{Runtime: store.Runtime{Ports: []string{"502:502", "9080:80"}}}
+	if got := upstreamPort(p); got != "502" {
+		t.Fatalf("default is the first port: %q", got)
+	}
+	p.Runtime.WebPort = "9080"
+	if got := upstreamPort(p); got != "9080" {
+		t.Fatalf("chosen web port: %q", got)
+	}
+}

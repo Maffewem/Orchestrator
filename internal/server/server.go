@@ -224,6 +224,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PATCH /api/users/{id}", s.handleUpdateUser)
 	admin("DELETE /api/users/{id}", s.handleDeleteUser)
 	admin("GET /api/overview", s.handleOverview)
+	admin("POST /api/device-setups", s.handleCreateDeviceSetup)
 	admin("GET /api/devices", s.handleListDevices)
 	admin("GET /api/devices/{id}", s.handleGetDevice)
 	admin("GET /api/devices/{id}/metrics", s.handleDeviceMetrics)

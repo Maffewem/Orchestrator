@@ -28,6 +28,7 @@ func main() {
 	flag.StringVar(&cfg.JoinToken, "join-token", env("ORCH_JOIN_TOKEN", ""), "join token from the dashboard (first run only)")
 	flag.StringVar(&cfg.Name, "name", env("ORCH_NAME", ""), "device name (defaults to the hostname)")
 	flag.StringVar(&labels, "labels", env("ORCH_LABELS", ""), "comma-separated roles/labels, e.g. pi,edge,dns")
+	flag.StringVar(&cfg.Setup, "setup", env("ORCH_SETUP", ""), "setup plan ID from the dashboard wizard (first run only)")
 	flag.StringVar(&cfg.StatePath, "state", env("ORCH_STATE", "/var/lib/orchestrator-agent/state.json"), "where the agent keeps its identity")
 	flag.StringVar(&cfg.DockerHost, "docker-host", env("DOCKER_HOST", "unix:///var/run/docker.sock"), "Docker engine address")
 	flag.StringVar(&cfg.HostRoot, "host-root", env("ORCH_HOST_ROOT", ""), "host filesystem mount when running in a container, e.g. /host")

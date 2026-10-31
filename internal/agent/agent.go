@@ -29,6 +29,8 @@ type Config struct {
 	JoinToken  string
 	Name       string
 	Labels     []string
+	// Setup is the ID of the setup plan from the Add device wizard (first registration only).
+	Setup string
 	StatePath  string
 	DockerHost string
 	// HostRoot is where the host filesystem is mounted when the agent runs in a container.
@@ -133,7 +135,7 @@ func (a *Agent) ensureRegistered(ctx context.Context) error {
 	if a.cfg.JoinToken == "" {
 		return errors.New("not registered yet: a join token is required (see Devices → Add device)")
 	}
-	req := api.RegisterRequest{JoinToken: a.cfg.JoinToken, Name: a.cfg.Name, Labels: a.cfg.Labels, Host: a.hostInfo()}
+	req := api.RegisterRequest{JoinToken: a.cfg.JoinToken, Name: a.cfg.Name, Labels: a.cfg.Labels, Setup: a.cfg.Setup, Host: a.hostInfo()}
 	var res api.RegisterResponse
 	for {
 		err := a.post(ctx, "/api/agent/register", "", req, &res)

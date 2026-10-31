@@ -155,7 +155,8 @@ CREATE TABLE IF NOT EXISTS deployment_steps (
 `
 
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	box *box
 }
 
 // Open opens (and migrates) the SQLite database at path. Use ":memory:" for tests.
@@ -203,7 +204,21 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return &Store{db: db}, nil
+	bx, err := loadBox(path)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("secret key: %w", err)
+	}
+	st := &Store{db: db, box: bx}
+	if err := st.adoptBackupKey(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("secret key: %w", err)
+	}
+	if err := st.migrateSecrets(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("seal secrets: %w", err)
+	}
+	return st, nil
 }
 
 // addColumn adds a column to a table created by an earlier version, if it is missing.
@@ -288,10 +303,22 @@ func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
-	return v, err
+	return s.openSetting(key, v), err
+}
+
+func (s *Store) openSetting(key, v string) string {
+	if sensitiveSettings[key] {
+		if p, ok := s.box.open(v); ok {
+			return p
+		}
+	}
+	return v
 }
 
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
+	if sensitiveSettings[key] && value != "" {
+		value = s.box.seal(value)
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, value)
@@ -476,7 +503,7 @@ func (s *Store) ListSettingsWithPrefix(ctx context.Context, prefix string) (map[
 		if err := rows.Scan(&k, &v); err != nil {
 			return nil, err
 		}
-		out[k] = v
+		out[k] = s.openSetting(k, v)
 	}
 	return out, rows.Err()
 }
@@ -515,7 +542,7 @@ func (s *Store) MarkOffline(ctx context.Context, cutoff time.Time) ([]*Device, e
 
 const commandCols = `id, device_id, action, target, args, payload, status, output, error, created_at, updated_at`
 
-func scanCommand(sc interface{ Scan(...any) error }) (*api.Command, error) {
+func scanCommand(b *box, sc interface{ Scan(...any) error }) (*api.Command, error) {
 	var c api.Command
 	var args, payload string
 	var created, updated int64
@@ -528,6 +555,9 @@ func scanCommand(sc interface{ Scan(...any) error }) (*api.Command, error) {
 	if err := json.Unmarshal([]byte(payload), &c.Deploy); err != nil {
 		return nil, err
 	}
+	if c.Deploy != nil {
+		b.openSpec(c.Deploy)
+	}
 	c.CreatedAt = time.Unix(created, 0).UTC()
 	c.UpdatedAt = time.Unix(updated, 0).UTC()
 	return &c, nil
@@ -535,7 +565,7 @@ func scanCommand(sc interface{ Scan(...any) error }) (*api.Command, error) {
 
 func (s *Store) CreateCommand(ctx context.Context, deviceID, action, target string, args map[string]string) (*api.Command, error) {
 	c := newCommand(deviceID, action, target, args, nil)
-	return c, insertCommand(ctx, s.db, c)
+	return c, insertCommand(ctx, s.db, s.box, c)
 }
 
 func newCommand(deviceID, action, target string, args map[string]string, deploy *api.DeploySpec) *api.Command {
@@ -548,15 +578,20 @@ type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func insertCommand(ctx context.Context, db execer, c *api.Command) error {
+func insertCommand(ctx context.Context, db execer, b *box, c *api.Command) error {
+	var deploy *api.DeploySpec
+	if c.Deploy != nil {
+		d := b.sealSpec(*c.Deploy)
+		deploy = &d
+	}
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO commands(id, device_id, action, target, args, payload, status, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.ID, c.DeviceID, c.Action, c.Target, mustJSON(c.Args), mustJSON(c.Deploy), c.Status, c.CreatedAt.Unix(), c.UpdatedAt.Unix())
+		c.ID, c.DeviceID, c.Action, c.Target, mustJSON(c.Args), mustJSON(deploy), c.Status, c.CreatedAt.Unix(), c.UpdatedAt.Unix())
 	return err
 }
 
 func (s *Store) GetCommand(ctx context.Context, id string) (*api.Command, error) {
-	c, err := scanCommand(s.db.QueryRowContext(ctx, `SELECT `+commandCols+` FROM commands WHERE id = ?`, id))
+	c, err := scanCommand(s.box, s.db.QueryRowContext(ctx, `SELECT `+commandCols+` FROM commands WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -574,7 +609,7 @@ func (s *Store) DispatchCommands(ctx context.Context, deviceID string) ([]api.Co
 	defer rows.Close()
 	out := []api.Command{}
 	for rows.Next() {
-		c, err := scanCommand(rows)
+		c, err := scanCommand(s.box, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -597,7 +632,7 @@ func (s *Store) CompleteCommand(ctx context.Context, deviceID, id string, res ap
 	row := s.db.QueryRowContext(ctx,
 		`UPDATE commands SET status = ?, output = ?, error = ?, updated_at = ? WHERE id = ? AND device_id = ? AND status != ? RETURNING `+commandCols,
 		status, res.Output, res.Error, time.Now().Unix(), id, deviceID, api.CommandCancelled)
-	c, err := scanCommand(row)
+	c, err := scanCommand(s.box, row)
 	if errors.Is(err, sql.ErrNoRows) {
 		var n int
 		s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM commands WHERE id = ? AND device_id = ? AND status = ?`, id, deviceID, api.CommandCancelled).Scan(&n)

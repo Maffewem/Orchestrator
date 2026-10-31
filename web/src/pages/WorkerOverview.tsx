@@ -76,7 +76,7 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
   const prod = domains.data?.production;
   const eps = w.state === "running" ? endpoints(w, addresses) : [];
   const mainUrl = prod?.enabled ? `https://${prod.hostname}` : eps[0] ? `http://${eps[0]}` : null;
-  const env = p?.runtime.env.map((e) => e.split("=")[0]) ?? [];
+  const env = p?.runtime.env.filter((e) => e.trim() && !e.trimStart().startsWith("#")).map((e) => e.split("=")[0]) ?? [];
   const publishedPorts = p?.runtime.ports ?? [];
   const mode = policy.data?.mode ?? "off";
   const samples = metrics.data ?? [];

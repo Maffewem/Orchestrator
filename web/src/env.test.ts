@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeEnv, parseEnv, serializeEnv } from "./env.ts";
+import { mergeEnv, normalizeEnv, parseEnv, parseEnvDoc, serializeDoc, serializeEnv } from "./env.ts";
 
 test("parses comments, export and quotes", () => {
   const rows = parseEnv('# c\nexport A=1\nB="two words"\nC=\'x\'\nD=v # note\n\nE\n');
@@ -27,4 +27,13 @@ test("merge overrides and appends", () => {
 test("comment-only lines never become rows", () => {
   const rows = parseEnv("# Phone push alerts (treat it like a password)\nNTFY_TOPIC=\n\n# Or Claude instead:\nANTHROPIC_API_KEY=");
   assert.deepEqual(serializeEnv(rows), ["NTFY_TOPIC=", "ANTHROPIC_API_KEY="]);
+});
+
+test("comments and blank lines survive a document round trip", () => {
+  const text = "# db\nA=1\n\n# api\nB=2\n# end";
+  assert.deepEqual(serializeDoc(parseEnvDoc(text)), ["# db", "A=1", "", "# api", "B=2", "# end"]);
+});
+
+test("normalizeEnv tidies assignments and keeps comments", () => {
+  assert.deepEqual(normalizeEnv('\n# c\nexport A="x y"\n\n\nB=v # n\n'), ["# c", "A=x y", "", "", "B=v"]);
 });

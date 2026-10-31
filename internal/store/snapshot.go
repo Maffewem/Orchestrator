@@ -7,9 +7,16 @@ import (
 )
 
 // Snapshot writes a consistent copy of the whole database to path (which must not exist).
-func (s *Store) Snapshot(ctx context.Context, path string) error {
-	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
-	return err
+// With withKey the secret key is stored inside the copy, so only do that for a copy that will be
+// password-protected: it is what lets a restore on a new server read the sealed values.
+func (s *Store) Snapshot(ctx context.Context, path string, withKey bool) error {
+	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path); err != nil {
+		return err
+	}
+	if withKey {
+		return s.withBackupKey(ctx, path)
+	}
+	return nil
 }
 
 // CheckSnapshot opens the database file at path and confirms it is an Orchestrator database.

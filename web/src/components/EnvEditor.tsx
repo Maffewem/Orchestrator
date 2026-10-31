@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Eye, EyeOff, Plus, Trash2, Upload } from "lucide-react";
-import { mergeEnv, parseEnv, SECRET_RE, serializeEnv, type EnvRow } from "../env";
+import { mergeEnv, parseEnvDoc, SECRET_RE, serializeDoc, serializeEnv, type EnvDoc, type EnvRow } from "../env";
 import { cx } from "../lib";
 import { inputClass as baseInput } from "./ui";
 
@@ -15,15 +15,18 @@ export default function EnvEditor({ value, onChange }: { value: string; onChange
   const [shown, setShown] = useState<Set<number>>(new Set());
   const file = useRef<HTMLInputElement>(null);
   // Rows are local so blank, half-typed rows survive; only complete rows are emitted.
-  const [rows, setLocal] = useState<EnvRow[]>(() => parseEnv(value));
+  const [doc, setDoc] = useState<EnvDoc>(() => parseEnvDoc(value));
+  const rows = doc.rows;
+  const setLocal = (r: EnvRow[]) => setDoc({ ...doc, rows: r });
 
   const setRows = (r: EnvRow[]) => {
-    setLocal(r);
-    onChange(serializeEnv(r).join("\n"));
+    const next = { ...doc, rows: r };
+    setDoc(next);
+    onChange(serializeDoc(next).join("\n"));
   };
   const edit = (i: number, patch: Partial<EnvRow>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const setMode = (r: boolean) => {
-    if (!r) setLocal(parseEnv(value)); // leaving the raw box: re-read what was typed
+    if (!r) setDoc(parseEnvDoc(value)); // leaving the raw box: re-read what was typed
     setRaw(r);
   };
   const toggle = (i: number) =>
@@ -39,12 +42,15 @@ export default function EnvEditor({ value, onChange }: { value: string; onChange
 
   async function importFile(f: File | undefined) {
     if (!f) return;
-    const cur = parseEnv(value);
-    const inc = parseEnv(await f.text());
+    const cur = parseEnvDoc(value).rows;
+    const inc = parseEnvDoc(await f.text()).rows;
     const old = new Map(cur.map((r) => [r.key, r.value]));
     const added = inc.filter((r) => !old.has(r.key)).length;
     const changed = inc.filter((r) => old.has(r.key) && old.get(r.key) !== r.value).length;
-    setRows(mergeEnv(cur, inc));
+    const merged = parseEnvDoc(value);
+    const next = { ...merged, rows: mergeEnv(cur, inc) };
+    setDoc(next);
+    onChange(serializeDoc(next).join("\n"));
     setNote(`${f.name}: ${added} added, ${changed} changed, ${inc.length - added - changed} unchanged. Review, then save.`);
     if (file.current) file.current.value = "";
   }

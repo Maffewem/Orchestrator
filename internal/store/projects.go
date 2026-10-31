@@ -102,7 +102,7 @@ type Project struct {
 
 const projectCols = `id, name, device_id, source, runtime, created_at, updated_at`
 
-func scanProject(sc interface{ Scan(...any) error }) (*Project, error) {
+func scanProject(b *box, sc interface{ Scan(...any) error }) (*Project, error) {
 	var p Project
 	var source, runtime string
 	var created, updated int64
@@ -121,6 +121,7 @@ func scanProject(sc interface{ Scan(...any) error }) (*Project, error) {
 	if p.Runtime.Env == nil {
 		p.Runtime.Env = []string{}
 	}
+	b.openLines(p.Runtime.Env)
 	p.CreatedAt = time.Unix(created, 0).UTC()
 	p.UpdatedAt = time.Unix(updated, 0).UTC()
 	return &p, nil
@@ -135,7 +136,7 @@ func (s *Store) CreateProject(ctx context.Context, p *Project) error {
 	p.ID, p.CreatedAt, p.UpdatedAt = newID("prj_"), now, now
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO projects(id, name, device_id, source, runtime, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.DeviceID, mustJSON(p.Source), mustJSON(p.Runtime), now.Unix(), now.Unix())
+		p.ID, p.Name, p.DeviceID, mustJSON(p.Source), mustJSON(s.box.sealRuntime(p.Runtime)), now.Unix(), now.Unix())
 	if isUnique(err) {
 		return ErrConflict
 	}
@@ -146,7 +147,7 @@ func (s *Store) UpdateProject(ctx context.Context, p *Project) error {
 	p.UpdatedAt = time.Now().UTC().Truncate(time.Second)
 	res, err := s.db.ExecContext(ctx,
 		`UPDATE projects SET name = ?, device_id = ?, source = ?, runtime = ?, updated_at = ? WHERE id = ?`,
-		p.Name, p.DeviceID, mustJSON(p.Source), mustJSON(p.Runtime), p.UpdatedAt.Unix(), p.ID)
+		p.Name, p.DeviceID, mustJSON(p.Source), mustJSON(s.box.sealRuntime(p.Runtime)), p.UpdatedAt.Unix(), p.ID)
 	if isUnique(err) {
 		return ErrConflict
 	} else if err != nil {
@@ -159,7 +160,7 @@ func (s *Store) UpdateProject(ctx context.Context, p *Project) error {
 }
 
 func (s *Store) GetProject(ctx context.Context, id string) (*Project, error) {
-	p, err := scanProject(s.db.QueryRowContext(ctx, `SELECT `+projectCols+` FROM projects WHERE id = ?`, id))
+	p, err := scanProject(s.box, s.db.QueryRowContext(ctx, `SELECT `+projectCols+` FROM projects WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -174,7 +175,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]*Project, error) {
 	defer rows.Close()
 	out := []*Project{}
 	for rows.Next() {
-		p, err := scanProject(rows)
+		p, err := scanProject(s.box, rows)
 		if err != nil {
 			return nil, err
 		}

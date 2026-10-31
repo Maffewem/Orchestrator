@@ -54,10 +54,10 @@ func forRole(r *http.Request, v ProjectView) ProjectView {
 		return v
 	}
 	p := *v.Project
-	p.Runtime.Env = make([]string, len(p.Runtime.Env))
-	for i, e := range v.Project.Runtime.Env {
+	p.Runtime.Env = []string{}
+	for _, e := range store.EnvAssignments(v.Project.Runtime.Env) {
 		k, _, _ := strings.Cut(e, "=")
-		p.Runtime.Env[i] = k + "="
+		p.Runtime.Env = append(p.Runtime.Env, k+"=")
 	}
 	v.Project = &p
 	return v
@@ -225,8 +225,8 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			return fmt.Errorf("web port %q should be a host port number", in.Runtime.WebPort)
 		}
 	}
-	in.Runtime.Env = cleanLabels(dropEnvComments(in.Runtime.Env))
-	for _, e := range in.Runtime.Env {
+	in.Runtime.Env = tidyEnv(in.Runtime.Env)
+	for _, e := range store.EnvAssignments(in.Runtime.Env) {
 		if k, _, ok := strings.Cut(e, "="); !ok || k == "" {
 			return fmt.Errorf("environment variable %q should look like KEY=value", e)
 		}
@@ -590,14 +590,28 @@ func (s *Server) adoptedWarning(r *http.Request, p *store.Project) string {
 	return ""
 }
 
-// dropEnvComments removes .env comment lines so pasted files with # notes save cleanly.
-func dropEnvComments(in []string) []string {
+// tidyEnv keeps an environment's comments and blank lines (so a pasted .env survives saving) while
+// trimming each line, collapsing runs of blank lines and dropping repeated assignments.
+func tidyEnv(in []string) []string {
 	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
 	for _, l := range in {
-		if strings.HasPrefix(strings.TrimSpace(l), "#") {
-			continue
+		l = strings.TrimSpace(l)
+		switch {
+		case l == "":
+			if len(out) == 0 || out[len(out)-1] == "" {
+				continue
+			}
+		case !strings.HasPrefix(l, "#"):
+			if seen[l] {
+				continue
+			}
+			seen[l] = true
 		}
 		out = append(out, l)
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
 	}
 	return out
 }

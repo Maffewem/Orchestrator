@@ -130,6 +130,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.event(r.Context(), d.ID, "info", "device.registered", fmt.Sprintf("%s joined the fleet", d.Name))
+	s.applyDeviceSetup(r.Context(), d, req.Setup)
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{DeviceID: d.ID, AgentToken: token})
 }
 

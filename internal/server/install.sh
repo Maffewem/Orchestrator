@@ -1,6 +1,6 @@
 #!/bin/sh
 # Orchestrator agent installer. Served by the control plane at /install.sh.
-#   curl -fsSL {{SERVER}}/install.sh | sudo sh -s -- --token <join-token> [--name pi-1] [--labels pi,edge]
+#   curl -fsSL {{SERVER}}/install.sh | sudo sh -s -- --token <join-token> [--name pi-1] [--labels pi,edge] [--setup <plan-id>] [--no-docker-install]
 set -eu
 
 SERVER="{{SERVER}}"
@@ -10,11 +10,15 @@ SUMS="{{SUMS}}"
 TOKEN=""
 NAME=""
 LABELS=""
+SETUP=""
+INSTALL_DOCKER=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --token) TOKEN="$2"; shift 2 ;;
     --name) NAME="$2"; shift 2 ;;
     --labels) LABELS="$2"; shift 2 ;;
+    --setup) SETUP="$2"; shift 2 ;;
+    --no-docker-install) INSTALL_DOCKER=0; shift ;;
     --server) SERVER="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
@@ -35,6 +39,9 @@ if [ -n "$need_pkgs" ]; then
   else
     echo "warning: please install:$need_pkgs" >&2
   fi
+fi
+if ! command -v docker >/dev/null 2>&1 && [ "$INSTALL_DOCKER" -eq 0 ]; then
+  echo "Docker is not installed and --no-docker-install was given; install Docker first" >&2; exit 1
 fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "Docker not found; installing it with get.docker.com"
@@ -78,6 +85,7 @@ ORCH_SERVER=$SERVER
 ORCH_JOIN_TOKEN=$TOKEN
 ORCH_NAME=$NAME
 ORCH_LABELS=$LABELS
+ORCH_SETUP=$SETUP
 ORCH_STATE=/var/lib/orchestrator-agent/state.json
 CONF
 

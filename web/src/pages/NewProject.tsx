@@ -11,7 +11,7 @@ export default function NewProjectPage() {
   const nav = useNavigate();
   if (!useCan("operator")) return <Empty title="Not allowed">Your role cannot create projects.</Empty>;
   return (
-    <div className="mx-auto max-w-3xl">
+    <div>
       <PageHeader title="Create a project" back={{ to: "/projects", label: "Back to projects" }} />
       <Card className="p-6">
         <ProjectForm

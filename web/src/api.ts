@@ -751,6 +751,8 @@ export const api = {
     request<{ connected: boolean; zones?: string[]; proxied?: boolean }>("PUT", "/api/settings/cloudflare", { token: b.token ?? "", proxied: b.proxied }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
+  createDeviceSetup: (b: { proxy: boolean; tunnel_token?: string; tunnel_via?: "" | "proxy"; maintenance: boolean; maintenance_note?: string }) =>
+    request<{ id: string }>("POST", "/api/device-setups", b),
   rotateJoinToken: () => request<{ join_token: string }>("POST", "/api/settings/join-token/rotate"),
   projectDomains: (id: string) => request<DomainsView>("GET", `/api/projects/${id}/domains`),
   setProjectUrls: (id: string, u: { production: boolean; preview: boolean; tunnel?: boolean; preview_tunnel?: boolean }) =>

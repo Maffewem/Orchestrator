@@ -95,7 +95,9 @@ type RegisterRequest struct {
 	JoinToken string   `json:"join_token"`
 	Name      string   `json:"name,omitempty"`
 	Labels    []string `json:"labels,omitempty"`
-	Host      HostInfo `json:"host"`
+	// Setup is the ID of a setup plan made in the Add device wizard; the server applies it once.
+	Setup string   `json:"setup,omitempty"`
+	Host  HostInfo `json:"host"`
 }
 
 type RegisterResponse struct {

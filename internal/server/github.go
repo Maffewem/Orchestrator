@@ -246,10 +246,16 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 	if restart == "" {
 		restart = "unless-stopped"
 	}
+	env := store.EnvAssignments(p.Runtime.Env)
+	for _, e := range env {
+		if store.IsSealed(e) {
+			return api.DeploySpec{}, errors.New("environment values can't be decrypted: the server's secret key has changed since they were saved. Re-enter them in the project settings")
+		}
+	}
 	spec := api.DeploySpec{
 		Service: serviceOf(p),
 		Ports:   p.Runtime.Ports,
-		Env:     p.Runtime.Env,
+		Env:     env,
 		Command: p.Runtime.Command,
 		Restart: restart,
 		Volumes: p.Runtime.Volumes,
@@ -270,10 +276,10 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 		if strings.TrimSpace(p.Source.Compose) == "" {
 			return spec, errors.New("project has no compose file")
 		}
-		if err := checkComposeVars(p.Source.Compose, p.Runtime.Env); err != nil {
+		if err := checkComposeVars(p.Source.Compose, env); err != nil {
 			return spec, err
 		}
-		spec.Compose = &api.ComposeSpec{YAML: p.Source.Compose, Env: p.Runtime.Env}
+		spec.Compose = &api.ComposeSpec{YAML: p.Source.Compose, Env: env}
 		if p.Source.Repo != "" {
 			if commit == nil || commit.SHA == "" {
 				return spec, errors.New("no commit to deploy")

@@ -97,7 +97,7 @@ func formatLines(lines []api.LogLine) string {
 
 const deploymentCols = `id, project_id, device_id, trigger, git_commit, spec, status, error, command_id, created_at, started_at, finished_at, preview_id`
 
-func scanDeployment(sc interface{ Scan(...any) error }) (*Deployment, error) {
+func scanDeployment(b *box, sc interface{ Scan(...any) error }) (*Deployment, error) {
 	var d Deployment
 	var commit, spec string
 	var created, started, finished int64
@@ -107,6 +107,7 @@ func scanDeployment(sc interface{ Scan(...any) error }) (*Deployment, error) {
 	if err := json.Unmarshal([]byte(spec), &d.Spec); err != nil {
 		return nil, err
 	}
+	b.openSpec(&d.Spec)
 	if err := json.Unmarshal([]byte(commit), &d.Commit); err != nil {
 		return nil, err
 	}
@@ -138,14 +139,14 @@ func (s *Store) CreateDeployment(ctx context.Context, in NewDeployment) (*Deploy
 	id := newID("dep_")
 	spec := in.Spec
 	cmd := newCommand(in.DeviceID, api.ActionDeploy, id, nil, &spec)
-	if err := insertCommand(ctx, tx, cmd); err != nil {
+	if err := insertCommand(ctx, tx, s.box, cmd); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO deployments(id, project_id, device_id, trigger, git_commit, spec, status, command_id, created_at, preview_id)
 		 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, in.ProjectID, in.DeviceID, in.Trigger, mustJSON(in.Commit), mustJSON(spec), DeploymentQueued, cmd.ID, now.UnixMilli(), in.PreviewID); err != nil {
+		id, in.ProjectID, in.DeviceID, in.Trigger, mustJSON(in.Commit), mustJSON(s.box.sealSpec(spec)), DeploymentQueued, cmd.ID, now.UnixMilli(), in.PreviewID); err != nil {
 		return nil, err
 	}
 	names := api.StepsFor(spec)
@@ -167,7 +168,7 @@ func (s *Store) CreateDeployment(ctx context.Context, in NewDeployment) (*Deploy
 
 // GetDeployment returns a deployment with its steps.
 func (s *Store) GetDeployment(ctx context.Context, id string) (*Deployment, error) {
-	d, err := scanDeployment(s.db.QueryRowContext(ctx, `SELECT `+deploymentCols+` FROM deployments WHERE id = ?`, id))
+	d, err := scanDeployment(s.box, s.db.QueryRowContext(ctx, `SELECT `+deploymentCols+` FROM deployments WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	} else if err != nil {
@@ -235,7 +236,7 @@ func (s *Store) ListDeployments(ctx context.Context, f DeploymentFilter) ([]*Dep
 	defer rows.Close()
 	out := []*Deployment{}
 	for rows.Next() {
-		d, err := scanDeployment(rows)
+		d, err := scanDeployment(s.box, rows)
 		if err != nil {
 			return nil, err
 		}

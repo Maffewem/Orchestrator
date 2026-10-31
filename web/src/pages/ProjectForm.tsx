@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from "react";
-import { Box, Github, Globe, Layers, Package, Server } from "lucide-react";
+import { Box, Cloud, Github, Globe, Layers, Package, Server } from "lucide-react";
 import { api, type NodeBuild, type PreviewBuild, type Project, type ProjectInput, type Source } from "../api";
 import EnvEditor from "../components/EnvEditor";
 import { normalizeEnv } from "../env";
@@ -73,6 +73,9 @@ export default function ProjectForm({
   const pv: PreviewBuild = source.preview ?? {};
   const setPv = (patch: Partial<PreviewBuild>) => setSource((s) => ({ ...s, preview: { ...s.preview, ...patch } }));
   const kind = source.node ? (source.node.static ? "static" : "node") : "docker";
+  const isCF = source.type === "cloudflare";
+  const cfTarget = source.cloudflare ?? { kind: "pages" as const };
+  const setCF = (patch: Partial<NonNullable<Source["cloudflare"]>>) => setSource((s) => ({ ...s, cloudflare: { ...(s.cloudflare ?? { kind: "pages" as const }), ...patch } }));
 
   const device = deviceId || devices.data?.[0]?.id || "";
   const set = (patch: Partial<Source>) => setSource((s) => ({ ...s, ...patch }));
@@ -85,7 +88,7 @@ export default function ProjectForm({
     setError(null);
     try {
       await onSubmit(
-        { name: name.trim(), device_id: device, source, runtime: { ports: lines(ports), web_port: webPort.trim(), env: normalizeEnv(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: isCF ? "" : device, source, runtime: { ports: lines(ports), web_port: webPort.trim(), env: normalizeEnv(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
     } catch (err) {
@@ -99,16 +102,23 @@ export default function ProjectForm({
     <form onSubmit={submit} className="space-y-8">
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Source</legend>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { type: "github" as const, icon: Github, title: "GitHub repository", sub: "Build a Dockerfile or Node.js project on the device, redeploy on push" },
             { type: "image" as const, icon: Package, title: "Container image", sub: "Pull an image from Docker Hub or any registry" },
             { type: "compose" as const, icon: Layers, title: "Compose stack", sub: "Paste a docker-compose file that runs several services together" },
+            { type: "cloudflare" as const, icon: Cloud, title: "Cloudflare", sub: "Build here, deploy to Cloudflare Pages or Workers. No device needed" },
           ].map((o) => (
             <button
               type="button"
               key={o.type}
-              onClick={() => set({ type: o.type })}
+              onClick={() =>
+                set(
+                  o.type === "cloudflare"
+                    ? { type: o.type, cloudflare: source.cloudflare ?? { kind: "pages" }, node: undefined, repo: source.repo?.trim(), branch: source.branch || "main", auto_deploy: true }
+                    : { type: o.type, cloudflare: undefined, node: source.type === "cloudflare" ? undefined : source.node },
+                )
+              }
               className={cx(
                 "rounded-xl border p-4 text-left transition-colors",
                 source.type === o.type ? "border-primary bg-blue-50/50 ring-1 ring-primary" : "border-neutral-200 bg-white hover:bg-neutral-50",
@@ -121,7 +131,7 @@ export default function ProjectForm({
           ))}
         </div>
 
-        {source.type === "github" ? (
+        {source.type === "github" || isCF ? (
           <div className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
@@ -155,6 +165,32 @@ export default function ProjectForm({
               </Field>
             </div>
 
+            {isCF && (
+              <div>
+                <p className="mb-1.5 text-sm font-medium">Where does it go?</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {[
+                    { kind: "pages" as const, icon: Globe, title: "Cloudflare Pages", sub: "A static site or front end: the build output folder is uploaded" },
+                    { kind: "worker" as const, icon: Server, title: "Cloudflare Worker", sub: "Server-side code on Cloudflare's edge: one bundled JavaScript module" },
+                  ].map((k) => (
+                    <button
+                      type="button"
+                      key={k.kind}
+                      onClick={() => setCF({ kind: k.kind })}
+                      className={cx(
+                        "rounded-xl border p-3.5 text-left transition-colors",
+                        cfTarget.kind === k.kind ? "border-primary bg-blue-50/50 ring-1 ring-primary" : "border-neutral-200 bg-white hover:bg-neutral-50",
+                      )}
+                    >
+                      <k.icon className="mb-2 size-5" />
+                      <p className="text-sm font-medium">{k.title}</p>
+                      <p className="mt-0.5 text-xs text-neutral-500">{k.sub}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!isCF && (
             <div>
               <p className="mb-1.5 text-sm font-medium">What are you building?</p>
               <div className="grid gap-3 sm:grid-cols-3">
@@ -175,6 +211,7 @@ export default function ProjectForm({
                 ))}
               </div>
             </div>
+            )}
 
             <div className="space-y-4">
               <div className="flex items-center gap-3">
@@ -205,6 +242,35 @@ export default function ProjectForm({
                       onChange={(off) => set({ auto_deploy: !off })}
                     />
                   </Panel>
+                  {isCF ? (
+                    <Panel title="Build configuration" sub="Runs on this server in a fresh checkout. Anything left empty is detected.">
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Install command" hint="Empty: npm ci, pnpm or yarn, chosen from your lock file.">
+                          <input className={inputClass} placeholder="npm ci" value={node?.install ?? ""} onChange={(e) => setNode({ install: e.target.value })} />
+                        </Field>
+                        <Field label="Build command" hint="Empty: npm run build, if package.json has a build script.">
+                          <input className={inputClass} placeholder="npm run build" value={node?.build ?? ""} onChange={(e) => setNode({ build: e.target.value })} />
+                        </Field>
+                        <Field
+                          label={cfTarget.kind === "pages" ? "Build output directory" : "Worker entry file"}
+                          hint={cfTarget.kind === "pages" ? "Empty: the first of dist, build, out, public or _site." : "A single bundled ES module. Empty: dist/index.js, then src/index.js."}
+                        >
+                          <input className={inputClass} placeholder={cfTarget.kind === "pages" ? "dist" : "dist/index.js"} value={cfTarget.output ?? ""} onChange={(e) => setCF({ output: e.target.value })} />
+                        </Field>
+                        <Field label="Root directory" hint="Folder that holds package.json. Empty: the repo root.">
+                          <input className={inputClass} placeholder="/" value={source.context} onChange={(e) => set({ context: e.target.value })} />
+                        </Field>
+                        <Field label={cfTarget.kind === "pages" ? "Pages project name" : "Worker name"} hint="Empty: the project name. Created on first deploy if it doesn't exist.">
+                          <input className={inputClass} placeholder={name || "my-site"} value={cfTarget.name ?? ""} onChange={(e) => setCF({ name: e.target.value })} />
+                        </Field>
+                        {cfTarget.kind === "worker" && (
+                          <Field label="Compatibility date" hint="Empty: the day of each deployment.">
+                            <input className={inputClass} placeholder="2025-01-31" value={cfTarget.compatibility_date ?? ""} onChange={(e) => setCF({ compatibility_date: e.target.value })} />
+                          </Field>
+                        )}
+                      </div>
+                    </Panel>
+                  ) : (
                   <Panel title="Build configuration">
                     <div className="grid gap-4 sm:grid-cols-2">
                       {node && (
@@ -227,6 +293,7 @@ export default function ProjectForm({
                       </Field>
                     </div>
                   </Panel>
+                  )}
                   <Panel title="Build watch paths" sub="Only commits that change a matching file trigger a build.">
                     <div className="grid gap-4 sm:grid-cols-2">
                       <Field as="div" label="Include paths">
@@ -261,7 +328,7 @@ export default function ProjectForm({
                   <Panel>
                     <ToggleRow
                       title="Builds for Preview branches"
-                      sub="Build and serve every open pull request from this repository into the production branch on its own port."
+                      sub={isCF ? (cfTarget.kind === "pages" ? "Deploy every open pull request from this repository into the production branch as a Pages preview deployment." : "Deploy every open pull request from this repository into the production branch as its own Worker, removed when the pull request closes.") : "Build and serve every open pull request from this repository into the production branch on its own port."}
                       checked={previewsOn}
                       onChange={setPreviewsOn}
                     />
@@ -270,12 +337,12 @@ export default function ProjectForm({
                     <p className="text-xs text-neutral-500">Anything left empty uses the Production setting shown as its placeholder.</p>
                     <Panel title="Build configuration">
                       <div className="grid gap-4 sm:grid-cols-2">
-                        {node && (
+                        {(node || isCF) && (
                           <Field label="Build command">
-                            <input className={inputClass} placeholder={node.build || "npm run build"} value={pv.build ?? ""} onChange={(e) => setPv({ build: e.target.value })} />
+                            <input className={inputClass} placeholder={node?.build || "npm run build"} value={pv.build ?? ""} onChange={(e) => setPv({ build: e.target.value })} />
                           </Field>
                         )}
-                        {node && !node.static && (
+                        {node && !node.static && !isCF && (
                           <Field label="Preview command">
                             <input className={inputClass} placeholder={node.start || "npm start"} value={pv.start ?? ""} onChange={(e) => setPv({ start: e.target.value })} />
                           </Field>
@@ -369,7 +436,7 @@ export default function ProjectForm({
           <Field label="Project name" hint={source.type === "compose" ? "Lowercase letters, digits and dashes. Also the Compose project name." : "Lowercase letters, digits and dashes. Also used as the container name."}>
             <input className={inputClass} placeholder="my-service" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
-          <Field label="Device">
+          {!isCF && (<Field label="Device">
             <select className={inputClass} value={device} onChange={(e) => setDeviceId(e.target.value)}>
               {devices.data?.length === 0 && <option value="">No devices registered yet</option>}
               {devices.data?.map((d) => (
@@ -380,13 +447,13 @@ export default function ProjectForm({
                 </option>
               ))}
             </select>
-          </Field>
+          </Field>)}
         </div>
       </fieldset>
 
       <fieldset className="space-y-4">
-        <legend className="mb-3 text-base font-semibold">{source.type === "compose" ? "Environment" : "Runtime"}</legend>
-        {source.type !== "compose" && (<>
+        <legend className="mb-3 text-base font-semibold">{source.type === "compose" ? "Environment" : isCF ? "Build environment" : "Runtime"}</legend>
+        {source.type !== "compose" && !isCF && (<>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Ports" hint={node ? "host:container. Empty: 8080:80 for a static site, 3000:3000 for a Node server (it gets PORT set to the container port)." : "One per line: host:container, e.g. 8080:80 or 53:53/udp."}>
             <textarea className={cx(inputClass, "font-mono")} rows={3} value={ports} onChange={(e) => setPorts(e.target.value)} />
@@ -407,14 +474,14 @@ export default function ProjectForm({
           <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
         </Field>
         </>)}
-        <Field as="div" label="Environment variables" hint={source.type === "compose" ? "Fills the ${VAR} references in the compose file. They are not passed to the containers unless the file lists them under environment." : node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
+        <Field as="div" label="Environment variables" hint={isCF ? "Set while the build runs, so VITE_* style variables are baked into the site. They are not set on a deployed Worker." : source.type === "compose" ? "Fills the ${VAR} references in the compose file. They are not passed to the containers unless the file lists them under environment." : node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
           <EnvEditor value={env} onChange={setEnv} />
         </Field>
       </fieldset>
 
       {error && <ErrorNote>{error}</ErrorNote>}
       <div className="flex justify-end">
-        <Button variant="primary" loading={busy} disabled={!device}>
+        <Button variant="primary" loading={busy} disabled={!device && !isCF}>
           {submitLabel}
         </Button>
       </div>

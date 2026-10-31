@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
@@ -24,7 +25,12 @@ func (s *Server) handleCancelDeployment(w http.ResponseWriter, r *http.Request) 
 	if id := identityFrom(r); id != nil {
 		who = id.Name
 	}
-	if _, err := s.store.CancelCommand(r.Context(), d.CommandID); err != nil {
+	if d.Spec.Cloudflare != nil {
+		// Built by this server rather than an agent: stop the build. Its work stops at the next check.
+		if cancel, ok := s.cfRuns.Load(d.ID); ok {
+			cancel.(context.CancelFunc)()
+		}
+	} else if _, err := s.store.CancelCommand(r.Context(), d.CommandID); err != nil {
 		s.internal(w, err)
 		return
 	}

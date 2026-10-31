@@ -26,7 +26,7 @@ func (s *Server) pollRepos(ctx context.Context) {
 		if !src.FromRepo() {
 			continue
 		}
-		if src.Type == store.SourceGitHub && s.previewSettings(ctx, p.ID).Enabled {
+		if (src.Type == store.SourceGitHub || src.Type == store.SourceCloudflare) && s.previewSettings(ctx, p.ID).Enabled {
 			s.syncPreviews(ctx, p)
 		}
 		if !src.AutoDeploy {

@@ -176,6 +176,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	for _, c := range []string{"remote_id", "url"} { // Cloudflare deployments: the remote deployment and its address
+		if err := addColumn(db, "deployments", c, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate: %w", err)
+		}
+	}
 	if err := addColumn(db, "backups", "encrypted", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)

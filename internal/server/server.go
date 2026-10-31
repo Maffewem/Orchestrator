@@ -47,6 +47,11 @@ type Config struct {
 	// PollInterval is how often GitHub projects are checked for new commits. Zero uses
 	// the default of 60s; negative disables polling.
 	PollInterval time.Duration
+	// CloudflareInterval is how often Cloudflare Pages and Workers projects are checked on.
+	// Zero uses the default of 2 minutes; negative disables it.
+	CloudflareInterval time.Duration
+	// BuildDir is where Cloudflare projects are built (default: the system temp directory).
+	BuildDir string
 	// BackupDir holds container backup archives.
 	BackupDir string
 	// DBPath and Restart let a server backup be restored: the database is swapped in at
@@ -86,6 +91,13 @@ type Server struct {
 	https        httpsState
 	ssoGitHubURL string            // overrides https://github.com in tests
 	polled       map[string]string // project ID -> last commit SHA the poller acted on
+
+	// Cloudflare deployments are built by the server itself.
+	cfRuns      sync.Map            // deployment ID -> cancel func of the build carrying it out
+	cfLocks     sync.Map            // "kind/name" -> *sync.Mutex, one build per Cloudflare target at a time
+	cfSem       chan struct{}       // limits concurrent builds
+	cfVerifyURL func(string) string // test hook: where a new deployment's URL is really fetched
+	cfWait      time.Duration       // test hook: pause between checks of a new deployment; 5s when zero
 }
 
 // New prepares the server. It returns a freshly generated admin token when one had to be
@@ -100,6 +112,9 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = 60 * time.Second
 	}
+	if cfg.CloudflareInterval == 0 {
+		cfg.CloudflareInterval = 2 * time.Minute
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -113,7 +128,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.DockerHost == "" {
 		cfg.DockerHost = "unix:///var/run/docker.sock"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted, cfSem: make(chan struct{}, cfMaxConcurrentBuilds)}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 	s.mig.persist = s.persistMigration
 
@@ -152,6 +167,8 @@ func (s *Server) offlineAfter() time.Duration { return 3 * s.cfg.HeartbeatInterv
 
 // Run performs background housekeeping until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) {
+	s.recoverCloudflare(ctx)
+	go s.cfMonitorLoop(ctx)
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
@@ -300,6 +317,9 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/settings", s.handleGetSettings)
 	admin("PUT /api/settings/github", s.handleSetGitHub)
 	admin("PUT /api/settings/cloudflare", s.handleSetCloudflare)
+	admin("PUT /api/settings/cloudflare/deploy", s.handleSetCloudflareDeploy)
+	admin("GET /api/projects/{id}/cloudflare", s.handleGetCloudflare)
+	admin("POST /api/projects/{id}/cloudflare/refresh", s.handleRefreshCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/sso", s.handleSetSSO)

@@ -73,6 +73,7 @@ func main() {
 		DownloadsDir:      *downloads,
 		PollInterval:      pollInterval(*poll),
 		BackupDir:         backupDir(*backups, *dbPath),
+		BuildDir:          os.Getenv("ORCH_BUILD_DIR"),
 		DBPath:            *dbPath,
 		Restart:           stop,
 		DockerHost:        env("DOCKER_HOST", ""),

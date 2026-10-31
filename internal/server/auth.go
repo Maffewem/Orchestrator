@@ -122,6 +122,7 @@ func routeRole(pattern string) string {
 		"PUT /api/projects/{id}/domains/urls":                true,
 		"POST /api/projects/{id}/domains":                    true,
 		"POST /api/deployments/{id}/rollback":                true,
+		"POST /api/projects/{id}/cloudflare/refresh":         true,
 		"POST /api/devices/{id}/streams":                     true,
 		"GET /api/streams/{id}/output":                       true,
 		"POST /api/streams/{id}/input":                       true,

@@ -684,7 +684,7 @@ func (s *Server) projectTunnel(ctx context.Context, p *store.Project, d *store.D
 }
 
 func (s *Server) handleGetProjectTunnel(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}
@@ -698,7 +698,7 @@ func (s *Server) handleGetProjectTunnel(w http.ResponseWriter, r *http.Request) 
 
 // handleSetProjectTunnel replaces the routes this project owns on its device's tunnel and leaves the rest alone.
 func (s *Server) handleSetProjectTunnel(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}

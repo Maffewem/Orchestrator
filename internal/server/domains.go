@@ -254,7 +254,7 @@ func (s *Server) handleGetDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) writeDomains(w http.ResponseWriter, r *http.Request, status int, warns ...string) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}
@@ -268,7 +268,7 @@ func (s *Server) writeDomains(w http.ResponseWriter, r *http.Request, status int
 }
 
 func (s *Server) handleSetURLs(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}
@@ -300,7 +300,7 @@ func (s *Server) handleSetURLs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}
@@ -351,7 +351,7 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}
@@ -371,7 +371,7 @@ func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
 
 // handleSetDomainAccess switches a hostname between the device proxy (DNS to the device) and the Cloudflare Tunnel.
 func (s *Server) handleSetDomainAccess(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}
@@ -631,7 +631,7 @@ func (s *Server) handleEnableProxy(w http.ResponseWriter, r *http.Request) {
 
 // handleSetAccess turns "visitors must sign in with an Orchestrator account" on or off.
 func (s *Server) handleSetAccess(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}

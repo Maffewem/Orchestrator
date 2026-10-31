@@ -60,7 +60,7 @@ export default function DeploymentPage() {
   if (!d) return <Loading />;
   const total = span(d.started_at ?? d.created_at, d.finished_at);
   const prod = domains.data?.production;
-  const url = prod?.enabled ? `https://${prod.hostname}` : project.data ? visitUrl(project.data, device.data) : null;
+  const url = d.url ? d.url : prod?.enabled ? `https://${prod.hostname}` : project.data && d.spec.cloudflare ? null : project.data ? visitUrl(project.data, device.data) : null;
 
   return (
     <>
@@ -73,13 +73,13 @@ export default function DeploymentPage() {
           Deployment <span className="font-mono font-normal text-neutral-400">#{shortId(d.id)}</span>
         </h1>
         <div className="flex items-center gap-4">
-          <span className="text-neutral-500 tabular-nums">{d.status === "queued" ? "Waiting for device…" : duration(total)}</span>
+          <span className="text-neutral-500 tabular-nums">{d.status === "queued" ? (d.spec.cloudflare ? "Waiting to start…" : "Waiting for device…") : duration(total)}</span>
           {isAdmin && (d.status === "queued" || d.status === "running") && (
             <Button
               variant="danger"
               icon={<XCircle className="size-4" />}
               onClick={async () => {
-                if (!(await confirmDialog({ title: "Cancel this deployment?", message: "It is marked failed and the device is told to stop. The current version keeps running unless the swap had already started, in which case it is rolled back.", confirmLabel: "Cancel deployment", danger: true }))) return;
+                if (!(await confirmDialog({ title: "Cancel this deployment?", message: d.spec.cloudflare ? "It is marked failed and the build is stopped. What is live on Cloudflare stays as it is." : "It is marked failed and the device is told to stop. The current version keeps running unless the swap had already started, in which case it is rolled back.", confirmLabel: "Cancel deployment", danger: true }))) return;
                 try {
                   await api.cancelDeployment(d.id);
                   await dep.reload();
@@ -155,7 +155,17 @@ export default function DeploymentPage() {
 function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string; url?: string | null }) {
   const [open, setOpen] = useState(false);
   const c = d.commit;
-  const settings: [string, string][] = [
+  const cf = d.spec.cloudflare;
+  const settings: [string, string][] = cf
+    ? [
+        ["Target", cf.kind === "worker" ? "Cloudflare Worker" : "Cloudflare Pages"],
+        ["Name", cf.name],
+        ["Branch", cf.kind === "pages" && cf.branch !== cf.production_branch ? `${cf.branch} (preview)` : cf.branch],
+        ["Output", cf.output || "Detected"],
+        ["Cloudflare deployment", d.remote_id || "None yet"],
+        ["Environment", d.spec.env?.length ? d.spec.env.map((e) => e.split("=")[0]).join(", ") : "None"],
+      ]
+    : [
     ["Service", d.spec.service],
     ...(d.spec.compose ? [] : ([["Image", d.spec.image]] as [string, string][])),
     ...(d.spec.compose ? ([["Compose file", `${d.spec.compose.yaml.split("\n").length} lines`]] as [string, string][]) : []),
@@ -163,7 +173,7 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
     ["Ports", d.spec.ports?.join(", ") || "None"],
     ["Environment", d.spec.env?.length ? d.spec.env.map((e) => e.split("=")[0]).join(", ") : "None"],
     ["Restart policy", d.spec.restart || "—"],
-  ];
+      ];
   return (
     <Card>
       <div className="flex flex-wrap items-center gap-3 px-4 py-4 sm:px-5">
@@ -205,13 +215,13 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
         </span>
         <span className="inline-flex items-center gap-1.5 text-neutral-900">
           {c ? <Github className="size-4" /> : <Server className="size-4" />}
-          {c ? c.repo : deviceName}
+          {c ? c.repo : cf ? "Cloudflare" : deviceName}
         </span>
       </button>
       {open && (
         <dl className="grid gap-x-8 gap-y-3 border-t border-neutral-200 px-5 py-4 text-sm sm:grid-cols-[180px_1fr]">
-          <dt className="font-medium">Device</dt>
-          <dd>{deviceName ?? d.device_id}</dd>
+          <dt className="font-medium">{cf ? "Runs on" : "Device"}</dt>
+          <dd>{cf ? "Cloudflare" : deviceName ?? d.device_id}</dd>
           {settings.map(([k, v]) => (
             <div key={k} className="contents">
               <dt className="font-medium">{k}</dt>
@@ -350,7 +360,7 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
       </div>
       <div ref={box} className="mt-2 max-h-[70vh] overflow-auto px-4 pb-4 font-mono text-[13px] leading-7 sm:px-8">
         {lines.length === 0 ? (
-          <p className="pt-2 text-neutral-500">{d.status === "queued" ? "Waiting for the device to pick up this deployment…" : "No output yet."}</p>
+          <p className="pt-2 text-neutral-500">{d.status === "queued" ? (d.spec.cloudflare ? "Waiting for the build to start…" : "Waiting for the device to pick up this deployment…") : "No output yet."}</p>
         ) : (
           shown.map((l, i) => (
             <div key={i} className={cx("flex gap-3 whitespace-pre-wrap sm:gap-6", isError(l.text) && "text-bad", l.text.startsWith("Success") && "text-ok")}>

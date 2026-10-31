@@ -12,6 +12,7 @@ import PreviewsPanel from "../components/Previews";
 import TunnelPanel from "../components/ProjectTunnel";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
+import { CloudflareMetrics, CloudflareOverview } from "../components/CloudflareProject";
 import { ago, freeSpace, usePoll } from "../lib";
 import { confirmDialog, confirmWithOption } from "../components/dialogs";
 
@@ -65,7 +66,8 @@ export default function ProjectPage() {
   const nav = useNavigate();
   const project = usePoll(() => api.project(id), 4000, [id]);
   const p = project.data;
-  const device = usePoll(() => (p ? api.device(p.device_id) : Promise.resolve(null)), 10000, [p?.device_id]);
+  const isCF = p?.source.type === "cloudflare";
+  const device = usePoll(() => (p && !isCF ? api.device(p.device_id) : Promise.resolve(null)), 10000, [p?.device_id, isCF]);
   const [deploying, setDeploying] = useState(false);
   const [shell, setShell] = useState(false);
   const isAdmin = useCan("admin");
@@ -78,7 +80,7 @@ export default function ProjectPage() {
   if (!p) return <Loading />;
   const latest = p.latest_deployment;
   const inProgress = latest && (latest.status === "queued" || latest.status === "running");
-  const url = visitUrl(p, device.data);
+  const url = isCF ? (p.cloudflare?.url ?? latest?.url ?? null) : visitUrl(p, device.data);
 
   const deploy = async () => {
     setDeploying(true);
@@ -109,8 +111,8 @@ export default function ProjectPage() {
             { to: base, label: "Overview", end: true },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/metrics`, label: "Metrics" },
-            { to: `${base}/domains`, label: "Domains" },
-            ...(p.source.type === "github" ? [{ to: `${base}/previews`, label: "Previews" }] : []),
+            ...(isCF ? [] : [{ to: `${base}/domains`, label: "Domains" }]),
+            ...(p.source.type === "github" || isCF ? [{ to: `${base}/previews`, label: "Previews" }] : []),
             ...(canOperate ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
@@ -154,7 +156,7 @@ export default function ProjectPage() {
         </div>
       )}
       <Routes>
-        <Route index element={<ProjectOverview p={p} device={device.data} url={url} />} />
+        <Route index element={isCF ? <CloudflareOverview p={p} /> : <ProjectOverview p={p} device={device.data} url={url} />} />
         <Route path="deployments" element={<ProjectDeployments p={p} />} />
         <Route
           path="domains"
@@ -167,7 +169,7 @@ export default function ProjectPage() {
           }
         />
         <Route path="previews" element={<PreviewsPanel projectId={p.id} />} />
-        <Route path="metrics" element={<ProjectMetrics p={p} />} />
+        <Route path="metrics" element={isCF ? <CloudflareMetrics p={p} /> : <ProjectMetrics p={p} />} />
         {canOperate && <Route path="settings" element={<ProjectSettings p={p} onSaved={project.reload} />} />}
       </Routes>
     </>
@@ -376,9 +378,9 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
           }}
         />
       </Card>
-      <MigrateCard p={p} onDone={onSaved} />
+      {p.source.type !== "cloudflare" && <MigrateCard p={p} onDone={onSaved} />}
       {isAdmin && <Card className="border-red-200">
-        <CardHeader title="Delete project" subtitle="Removes the project and its deployment history. You can also remove its container from the device." />
+        <CardHeader title="Delete project" subtitle={p.source.type === "cloudflare" ? "Removes the project and its deployment history here. What it deployed stays on Cloudflare; delete it there if you no longer want it." : "Removes the project and its deployment history. You can also remove its container from the device."} />
         <div className="p-5">
           <Button
             variant="danger"
@@ -389,7 +391,7 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
                 message: "The project and its deployment history are removed.",
                 confirmLabel: "Delete",
                 danger: true,
-                option: { label: "Also remove the container from the device", checked: !p.runtime?.adopted },
+                option: p.source.type === "cloudflare" ? undefined : { label: "Also remove the container from the device", checked: !p.runtime?.adopted },
               });
               if (remove === null) return;
               await api.deleteProject(p.id, remove);

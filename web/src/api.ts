@@ -116,8 +116,38 @@ export interface PreviewBuild {
   exclude?: string[];
 }
 
+export interface CloudflareTarget {
+  kind: "pages" | "worker";
+  /** Pages project or Worker script; empty means the project name. */
+  name?: string;
+  /** Pages: directory to upload. Worker: entry module. Empty: detected. */
+  output?: string;
+  compatibility_date?: string;
+}
+
+/** What the monitor last learned from Cloudflare about a project. */
+export interface CloudflareStatus {
+  kind: "pages" | "worker";
+  name: string;
+  state: "live" | "building" | "failed" | "missing" | "error";
+  detail?: string;
+  url?: string;
+  domains?: string[];
+  latest_id?: string;
+  latest_at?: string;
+  requests: number;
+  errors: number;
+  subrequests: number;
+  cpu_p50_us: number;
+  cpu_p99_us: number;
+  /** "ok", "none" (not collected for Pages) or why it could not be read. */
+  analytics: string;
+  polled_at: string;
+}
+
 export interface Source {
-  type: "github" | "image" | "compose";
+  type: "github" | "image" | "compose" | "cloudflare";
+  cloudflare?: CloudflareTarget;
   repo?: string;
   branch?: string;
   context?: string;
@@ -196,6 +226,7 @@ export interface DeploySpec {
   restart?: string;
   build?: { remote: string; dockerfile?: string };
   compose?: { yaml: string; env?: string[] };
+  cloudflare?: { kind: "pages" | "worker"; name: string; branch: string; production_branch: string; output?: string };
 }
 
 export interface TunnelRoute {
@@ -239,6 +270,9 @@ export interface Deployment {
   started_at: string | null;
   finished_at: string | null;
   steps?: Step[];
+  /** Cloudflare deployments: the deployment's ID on Cloudflare and the address it is served at. */
+  remote_id?: string;
+  url?: string;
 }
 
 export interface Preview {
@@ -275,6 +309,7 @@ export interface Project {
   created_at: string;
   updated_at: string;
   latest_deployment: Deployment | null;
+  cloudflare?: CloudflareStatus | null;
 }
 
 export interface Event {
@@ -289,6 +324,7 @@ export interface Event {
 export interface Overview {
   devices: { total: number; online: number; offline: number; warning: number; critical: number };
   containers: { total: number; running: number; stopped: number };
+  cloudflare: { projects: number; live: number; failing: number; requests: number; errors: number };
   recent_events: Event[];
 }
 
@@ -367,7 +403,7 @@ export interface DomainsView {
 export interface Settings {
   base_domain: string;
   backup_password_set: boolean;
-  cloudflare: { connected: boolean; proxied: boolean };
+  cloudflare: { connected: boolean; proxied: boolean; deploy: { configured: boolean; account_id: string; own_token: boolean } };
   ssl_mode: "http" | "dns";
   sso: SSOView;
   https: HTTPSView;
@@ -719,6 +755,10 @@ export const api = {
   migrateProject: (id: string, body: { device_id: string; with_data: boolean; stop_source: boolean; from_backup?: boolean }) =>
     request<Migration>("POST", `/api/projects/${id}/migrate`, body),
   migration: (id: string) => request<Migration>("GET", `/api/projects/${id}/migration`),
+  cloudflareStatus: (id: string) => request<CloudflareStatus | null>("GET", `/api/projects/${id}/cloudflare`),
+  refreshCloudflare: (id: string) => request<CloudflareStatus>("POST", `/api/projects/${id}/cloudflare/refresh`),
+  setCloudflareDeploy: (accountId: string, token?: string) =>
+    request<{ pages?: boolean; workers?: boolean }>("PUT", "/api/settings/cloudflare/deploy", { account_id: accountId, token: token ?? "" }),
   deployProject: (id: string, confirm = false) => request<Deployment>("POST", `/api/projects/${id}/deployments${confirm ? "?confirm=1" : ""}`),
   adopt: (deviceId: string, containers: { id: string; name?: string }[], dryRun: boolean) =>
     request<AdoptItem[]>("POST", `/api/devices/${deviceId}/adopt`, { containers, dry_run: dryRun }),

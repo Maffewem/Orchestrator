@@ -287,6 +287,8 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET /api/auth/me`, `POST /api/auth/logout`, `POST /api/auth/password` | the signed-in user |
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | accounts (admin) |
 | `PUT /api/projects/{id}/domains/access` | require login for a worker |
+| `GET /api/projects/{id}/cloudflare`, `POST .../cloudflare/refresh` | what Cloudflare reports about a Pages or Workers project |
+| `PUT /api/settings/cloudflare/deploy` | Cloudflare account ID and token for Pages and Workers |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
 
@@ -301,6 +303,20 @@ with HMAC-SHA256.
 **Stacks from GitHub.** Choose *From GitHub* to keep the compose file in a repository (repo, branch, file path). Each deploy reads the file at the pushed commit, so a merge or push to the branch redeploys the stack (webhook or polling, with optional watch paths). The agent also checks the commit out on the device (needs git) and runs `docker compose up --build` inside it, so services with `build:` and relative bind mounts work; the checkout persists between deploys. Pull request previews are not available for stacks.
 
 **Tunnel.** On a device page, paste a Cloudflare Tunnel token (or the whole connector command) to run `cloudflared` there on the host network, as the `orchestrator-tunnel` container. Any worker or stack on the device can then be published through it. With Cloudflare connected in Settings (token needs *Account > Cloudflare Tunnel > Edit*), the *Public hostnames* list is pushed to the tunnel's ingress and CNAME records are created; otherwise add the hostnames in the Cloudflare dashboard. A service is a URL like `http://localhost:3000` or `project:<name>`. Each project's *Domains* tab also has a Cloudflare Tunnel card where you pick a hostname and one of its published ports (for a stack, the ports of its services) without leaving the project; routes set there are kept apart from the device page's.
+
+## Cloudflare Pages and Workers
+
+**Deploying.** In *Settings → Cloudflare Pages & Workers*, enter your account ID and an API token with *Account → Cloudflare Pages → Edit*, *Account → Workers Scripts → Edit* and, for request counts, *Account → Account Analytics → Read*. (If the token you connected for DNS already has those, leave the token field empty.) Then create a project with the *Cloudflare* source: pick a GitHub repository and branch, choose *Pages* or *Worker*, and optionally set install and build commands, the output directory (Pages) or entry file (Worker), and the root directory. A project like this has no device.
+
+The server downloads the commit from GitHub, runs the install and build commands in a scratch directory with Node.js and npm (the server image includes them; with `make server` they must be on the `PATH`; `ORCH_BUILD_DIR` sets the scratch location), then uploads the result: Pages through the direct-upload API, a Worker as one ES module. The deployment page shows the usual step timeline (Cloning, Installing, Building, Uploading, Verifying) with logs, and the new address is fetched before the deployment is called successful. Pushes to the production branch deploy it, as for any GitHub project.
+
+**Previews.** Turn on *Builds for Preview branches* and each open same-repository pull request is deployed as a Pages preview deployment (Cloudflare serves it at a branch alias) or, for a Worker, as its own script named `<worker>-<branch>` that is deleted when the pull request closes. Fork pull requests are never built.
+
+**Rollback.** A Pages deployment is rolled back by promoting the earlier Cloudflare deployment again, with no rebuild. A Worker is built and uploaded again from that commit.
+
+**Monitoring.** Every two minutes the server asks Cloudflare for each project's latest deployment state, address and domains, and for Workers the last 24 hours of requests, errors, subrequests and CPU time (GraphQL analytics). They appear on the project page, the Projects list, *Workers & stacks* and the Overview, and a failing deployment or a Worker error rate above 5% raises an Activity event. Cloudflare has no request analytics for static Pages sites in its API, so those show status only.
+
+Limits: builds run on the control plane with the server's privileges, so only deploy repositories you trust. Build commands see only a minimal environment plus the project's environment variables, never the server's own secrets. A Worker has to build to a single bundled module; use a bundler such as `wrangler deploy --dry-run --outdir dist` in the build command. Environment variables are build-time only; Worker bindings and secrets are not managed here.
 
 ## Server backup
 

@@ -28,11 +28,16 @@ type ProjectView struct {
 	*store.Project
 	DeviceName string            `json:"device_name"`
 	Latest     *store.Deployment `json:"latest_deployment"`
+	// Cloudflare is what the monitor last saw of a Cloudflare project.
+	Cloudflare *cfStatus `json:"cloudflare,omitempty"`
 }
 
 func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView, error) {
 	v := ProjectView{Project: p}
-	if d, err := s.store.GetDevice(ctx, p.DeviceID); err == nil {
+	if p.Source.Type == store.SourceCloudflare {
+		v.DeviceName = "Cloudflare"
+		v.Cloudflare = s.cfStatusOf(ctx, p.ID)
+	} else if d, err := s.store.GetDevice(ctx, p.DeviceID); err == nil {
 		v.DeviceName = d.Name
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return v, err
@@ -114,17 +119,54 @@ func cleanNode(n *api.NodeSpec) error {
 	return nil
 }
 
+// cleanCloudflare checks a Cloudflare project's target and keeps only the build settings it uses.
+func cleanCloudflare(src *store.Source) error {
+	t := src.Cloudflare
+	if t == nil {
+		return errors.New("choose Cloudflare Pages or Cloudflare Workers")
+	}
+	if t.Kind != api.CloudflarePages && t.Kind != api.CloudflareWorker {
+		return errors.New("the Cloudflare target must be Pages or Workers")
+	}
+	t.Name, t.Output, t.CompatibilityDate = strings.TrimSpace(t.Name), strings.Trim(strings.TrimSpace(t.Output), "/"), strings.TrimSpace(t.CompatibilityDate)
+	if t.Name != "" && !cfNameRe.MatchString(t.Name) {
+		return errors.New("the Cloudflare name must be lowercase letters, digits and dashes, at most 58 characters")
+	}
+	if strings.Contains(t.Output, "..") || strings.ContainsAny(t.Output, "\n\r\x00") || strings.HasPrefix(t.Output, "/") {
+		return errors.New("the output path must stay inside the project")
+	}
+	if t.CompatibilityDate != "" && !cfDateRe.MatchString(t.CompatibilityDate) {
+		return errors.New("the compatibility date should look like 2025-01-31")
+	}
+	if t.Kind == api.CloudflarePages {
+		t.CompatibilityDate = ""
+	}
+	if src.Node != nil {
+		n := src.Node
+		if err := cleanNode(n); err != nil {
+			return err
+		}
+		n.Version, n.Start, n.Output, n.Static = "", "", "", false
+		if n.Install == "" && n.Build == "" {
+			src.Node = nil
+		}
+	}
+	return nil
+}
+
 func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if !projectNameRe.MatchString(in.Name) {
 		return errors.New("name must be lowercase letters, digits and dashes")
 	}
-	if _, err := s.store.GetDevice(ctx, in.DeviceID); err != nil {
+	src := &in.Source
+	if src.Type == store.SourceCloudflare {
+		in.DeviceID = "" // built here and uploaded to Cloudflare: no device involved
+	} else if _, err := s.store.GetDevice(ctx, in.DeviceID); err != nil {
 		return errors.New("choose a device to deploy to")
 	}
-	src := &in.Source
 	switch src.Type {
-	case store.SourceGitHub:
+	case store.SourceGitHub, store.SourceCloudflare:
 		src.Repo = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(src.Repo), githubRemote), ".git")
 		if !repoRe.MatchString(src.Repo) {
 			return errors.New("repository must look like owner/name")
@@ -142,6 +184,9 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			return errors.New("the Dockerfile setting points at a Docker Compose file; use the path of a Dockerfile (empty means \"Dockerfile\")")
 		}
 		src.Image = ""
+		if src.Type == store.SourceCloudflare {
+			src.Dockerfile = ""
+		}
 		if err := cleanWatch(&src.Watch); err != nil {
 			return err
 		}
@@ -154,13 +199,23 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 				return err
 			}
 			if src.Node == nil {
-				pv.Build, pv.Start = "", "" // only Node builds have these commands
+				pv.Build, pv.Start = "", "" // only builds with commands have these
+			}
+			if src.Type == store.SourceCloudflare {
+				pv.Start = ""
 			}
 			if pv.Context == "" && pv.Build == "" && pv.Start == "" && len(pv.Include) == 0 && len(pv.Exclude) == 0 {
 				src.Preview = nil
 			}
 		}
-		if n := src.Node; n != nil {
+		if src.Type == store.SourceCloudflare {
+			if err := cleanCloudflare(src); err != nil {
+				return err
+			}
+			rt := &in.Runtime
+			rt.Ports, rt.WebPort, rt.Volumes, rt.Command, rt.Labels, rt.Network, rt.Restart = nil, "", nil, nil, nil, "", ""
+			rt.Container, rt.Adopted, rt.Unsupported = "", false, nil
+		} else if n := src.Node; n != nil {
 			if err := cleanNode(n); err != nil {
 				return err
 			}
@@ -211,7 +266,7 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 		src.Repo, src.Branch, src.Context, src.Dockerfile, src.AutoDeploy, src.Node = "", "", "", "", false, nil
 		src.Watch, src.Preview = store.Watch{}, nil
 	default:
-		return errors.New("source type must be github, image or compose")
+		return errors.New("source type must be github, image, compose or cloudflare")
 	}
 	in.Runtime.Ports = cleanLabels(in.Runtime.Ports)
 	for _, p := range in.Runtime.Ports {
@@ -283,6 +338,17 @@ func (s *Server) lookupProject(w http.ResponseWriter, r *http.Request) (*store.P
 		return nil, false
 	}
 	return p, true
+}
+
+// lookupDeviceProject is lookupProject for features that act on a device (domains, tunnels,
+// stacks, migration), which a project deployed to Cloudflare does not have.
+func (s *Server) lookupDeviceProject(w http.ResponseWriter, r *http.Request) (*store.Project, bool) {
+	p, ok := s.lookupProject(w, r)
+	if ok && p.Source.Type == store.SourceCloudflare {
+		writeError(w, http.StatusBadRequest, "this project runs on Cloudflare, not on a device")
+		return nil, false
+	}
+	return p, ok
 }
 
 func (s *Server) handleGetProject(w http.ResponseWriter, r *http.Request) {
@@ -376,7 +442,9 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.syncProxy(context.WithoutCancel(r.Context()), p.DeviceID)
 	left := " (its container was left running)"
-	if removed {
+	if p.Source.Type == store.SourceCloudflare {
+		left = " (what it deployed to Cloudflare was left in place)"
+	} else if removed {
 		left = " (its container was removed)"
 	}
 	s.event(r.Context(), p.DeviceID, "warning", "project.deleted", "Project "+p.Name+" deleted"+left)
@@ -390,6 +458,9 @@ func (s *Server) deploy(ctx context.Context, p *store.Project, commit *store.Com
 
 // deployWith is deploy with a chance to adjust the spec before it is queued.
 func (s *Server) deployWith(ctx context.Context, p *store.Project, commit *store.Commit, trigger string, tweak func(*api.DeploySpec)) (*store.Deployment, error) {
+	if p.Source.Type == store.SourceCloudflare {
+		return s.deployCloudflare(ctx, p, commit, trigger, nil)
+	}
 	dev, err := s.store.GetDevice(ctx, p.DeviceID)
 	if err != nil {
 		return nil, errors.New("the project's device no longer exists")

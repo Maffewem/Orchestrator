@@ -6,12 +6,14 @@ import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, Empty, ErrorNote, Loading, PageHeader, Table, Td } from "../components/ui";
 import { ago, bytes, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
+import { useCan } from "../components/auth";
 
 const tone = { pending: "info", complete: "ok", failed: "bad" } as const;
 
 export default function BackupsPage() {
   useCrumbs([{ label: "Backups" }]);
   const { data, error, reload } = usePoll(api.backups, 3000);
+  const canOperate = useCan("operator");
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -74,13 +76,13 @@ export default function BackupsPage() {
                 <Td className="whitespace-nowrap text-neutral-600">{ago(b.created_at)}</Td>
                 <Td>
                   <div className="flex justify-end gap-1">
-                    {b.status === "complete" && (
+                    {canOperate && b.status === "complete" && (
                       <>
                         <Button size="sm" variant="ghost" title="Download" loading={busy === b.id + "download"} icon={<Download className="size-3.5" />} onClick={() => act(b, "download")} />
                         <Button size="sm" variant="ghost" title="Restore" loading={busy === b.id + "restore"} icon={<RotateCcw className="size-3.5" />} onClick={() => act(b, "restore")} />
                       </>
                     )}
-                    <Button size="sm" variant="ghost" title="Delete" loading={busy === b.id + "delete"} icon={<Trash2 className="size-3.5" />} onClick={() => act(b, "delete")} />
+                    {canOperate && <Button size="sm" variant="ghost" title="Delete" loading={busy === b.id + "delete"} icon={<Trash2 className="size-3.5" />} onClick={() => act(b, "delete")} />}
                   </div>
                 </Td>
               </tr>

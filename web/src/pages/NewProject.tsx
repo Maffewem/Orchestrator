@@ -2,11 +2,14 @@ import { useNavigate } from "react-router";
 import { api } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Card, PageHeader } from "../components/ui";
+import { Empty } from "../components/ui";
+import { useCan } from "../components/auth";
 import ProjectForm from "./ProjectForm";
 
 export default function NewProjectPage() {
   useCrumbs([{ label: "Projects", to: "/projects" }, { label: "Create project" }]);
   const nav = useNavigate();
+  if (!useCan("operator")) return <Empty title="Not allowed">Your role cannot create projects.</Empty>;
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader title="Create a project" back={{ to: "/projects", label: "Back to projects" }} />

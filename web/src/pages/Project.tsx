@@ -111,7 +111,7 @@ export default function ProjectPage() {
             { to: `${base}/metrics`, label: "Metrics" },
             { to: `${base}/domains`, label: "Domains" },
             ...(p.source.type === "github" ? [{ to: `${base}/previews`, label: "Previews" }] : []),
-            { to: `${base}/settings`, label: "Settings" },
+            ...(canOperate ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
         <div className="flex flex-wrap items-center gap-2">
@@ -168,7 +168,7 @@ export default function ProjectPage() {
         />
         <Route path="previews" element={<PreviewsPanel projectId={p.id} />} />
         <Route path="metrics" element={<ProjectMetrics p={p} />} />
-        <Route path="settings" element={<ProjectSettings p={p} onSaved={project.reload} />} />
+        {canOperate && <Route path="settings" element={<ProjectSettings p={p} onSaved={project.reload} />} />}
       </Routes>
     </>
   );
@@ -359,6 +359,7 @@ function ProjectMetrics({ p }: { p: Project }) {
 
 function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
   const nav = useNavigate();
+  const isAdmin = useCan("admin");
   const [saved, setSaved] = useState(false);
   return (
     <div className="space-y-6">
@@ -376,7 +377,7 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
         />
       </Card>
       <MigrateCard p={p} onDone={onSaved} />
-      <Card className="border-red-200">
+      {isAdmin && <Card className="border-red-200">
         <CardHeader title="Delete project" subtitle="Removes the project and its deployment history. You can also remove its container from the device." />
         <div className="p-5">
           <Button
@@ -398,7 +399,7 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
             Delete project
           </Button>
         </div>
-      </Card>
+      </Card>}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
@@ -301,5 +302,51 @@ func TestReconcileTunnelHostsWarnsWithoutCloudflare(t *testing.T) {
 	cfg, _ := h.srv.tunnelConfig(ctx, d.ID)
 	if len(cfg.Routes) != 1 || !cfg.Routes[0].Managed {
 		t.Fatalf("routes: %+v", cfg.Routes)
+	}
+}
+
+func TestReconcileTunnelHostsRemovesDroppedCNAME(t *testing.T) {
+	var mu sync.Mutex
+	records := []cfRecord{{ID: "r1", Type: "CNAME", Name: "feat-web.example.com", Content: "tun-1.cfargotunnel.com", Proxied: true}}
+	var deleted []string
+	cf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		ok := func(v any) { json.NewEncoder(w).Encode(map[string]any{"success": true, "result": v}) }
+		switch {
+		case r.URL.Path == "/zones":
+			ok([]cfZone{{ID: "z1", Name: "example.com"}})
+		case r.URL.Path == "/zones/z1/dns_records" && r.Method == http.MethodGet:
+			ok(records)
+		case r.Method == http.MethodDelete:
+			deleted = append(deleted, r.URL.Path)
+			ok(map[string]string{"id": "r1"})
+		case r.Method == http.MethodPut:
+			ok(map[string]any{})
+		default:
+			ok(map[string]any{})
+		}
+	}))
+	defer cf.Close()
+	h := newHarness(t)
+	ctx := context.Background()
+	h.srv.cloudflareAPI = cf.URL
+	h.srv.store.SetSetting(ctx, "cloudflare_token", "good")
+	reg := h.register("pi-4")
+	d, _ := h.st.GetDevice(ctx, reg.DeviceID)
+	p := &store.Project{Name: "web", DeviceID: d.ID, Source: store.Source{Type: store.SourceImage, Image: "nginx"}, Runtime: store.Runtime{Ports: []string{"8080:80"}}}
+	if err := h.st.CreateProject(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	tok := base64.StdEncoding.EncodeToString([]byte(`{"a":"acct","t":"tun-1","s":"x"}`))
+	h.srv.saveTunnelConfig(ctx, d.ID, &tunnelConfig{Token: tok, Via: "proxy",
+		Routes: []tunnelRoute{{Hostname: "feat-web.example.com", Service: "project:web", Managed: true}}})
+	h.srv.reconcileTunnelHosts(ctx, p)
+	cfg, _ := h.srv.tunnelConfig(ctx, d.ID)
+	if len(cfg.Routes) != 0 {
+		t.Fatalf("route should be dropped: %+v", cfg.Routes)
+	}
+	if len(deleted) != 1 || deleted[0] != "/zones/z1/dns_records/r1" {
+		t.Fatalf("CNAME not deleted: %v", deleted)
 	}
 }

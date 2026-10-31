@@ -487,11 +487,13 @@ func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) []s
 	svc := "project:" + p.Name
 	var routes []tunnelRoute
 	changed := false
+	var dropped []string
 	have := map[string]bool{}
 	for _, rt := range cfg.Routes {
 		if rt.Managed && rt.Service == svc {
 			if !want[rt.Hostname] {
 				changed = true
+				dropped = append(dropped, rt.Hostname)
 				continue
 			}
 			have[rt.Hostname] = true
@@ -536,7 +538,37 @@ func (s *Server) reconcileTunnelHosts(ctx context.Context, p *store.Project) []s
 		s.event(ctx, d.ID, "warning", "tunnel.routes", w)
 		warns = append(warns, w)
 	}
+	// Hostnames that left the tunnel (a closed pull request, a deleted preview or domain) lose their CNAME too.
+	if t, err := parseTunnelToken(cfg.Token); err == nil {
+		for _, h := range dropped {
+			if err := s.cfDeleteTunnelCNAME(ctx, tok, h, t.Tunnel+".cfargotunnel.com"); err != nil {
+				w := h + ": couldn't remove the DNS record: " + err.Error()
+				s.event(ctx, d.ID, "warning", "tunnel.routes", w)
+				warns = append(warns, w)
+			}
+		}
+	}
 	return warns
+}
+
+// cfDeleteTunnelCNAME removes the CNAME for host, but only if it still points at this tunnel.
+func (s *Server) cfDeleteTunnelCNAME(ctx context.Context, tok, host, target string) error {
+	z, err := s.cfZoneFor(ctx, tok, host)
+	if err != nil || z == nil {
+		return err
+	}
+	var recs []cfRecord
+	if err := s.cfCall(ctx, tok, http.MethodGet, "/zones/"+z.ID+"/dns_records?name="+url.QueryEscape(host), nil, &recs); err != nil {
+		return err
+	}
+	for _, rec := range recs {
+		if rec.Type == "CNAME" && rec.Content == target {
+			if err := s.cfCall(ctx, tok, http.MethodDelete, "/zones/"+z.ID+"/dns_records/"+rec.ID, nil, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // handleSetTunnelVia chooses whether tunnel traffic goes straight to workers or through the device proxy.

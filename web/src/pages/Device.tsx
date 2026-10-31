@@ -48,7 +48,7 @@ export default function DevicePage() {
             { to: `${base}/containers`, label: `Containers (${d.containers.length})` },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/activity`, label: "Activity" },
-            { to: `${base}/settings`, label: "Settings" },
+            ...(isAdmin ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
       </div>
@@ -71,7 +71,7 @@ export default function DevicePage() {
         />
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
         <Route path="activity" element={<DeviceActivity d={d} />} />
-        <Route path="settings" element={<DeviceSettings d={d} onSaved={dev.reload} />} />
+        {isAdmin && <Route path="settings" element={<DeviceSettings d={d} onSaved={dev.reload} />} />}
       </Routes>
     </>
   );

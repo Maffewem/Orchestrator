@@ -43,6 +43,7 @@ export default function DeploymentPage() {
   const device = usePoll(() => (d ? api.device(d.device_id).catch(() => null) : Promise.resolve(null)), 0, [d?.device_id]);
   const domains = usePoll(() => (d ? api.projectDomains(d.project_id).catch(() => null) : Promise.resolve(null)), 0, [d?.project_id]);
   const can = useCan("operator");
+  const isAdmin = useCan("admin");
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useTick(live ? 500 : 60000);
@@ -73,7 +74,7 @@ export default function DeploymentPage() {
         </h1>
         <div className="flex items-center gap-4">
           <span className="text-neutral-500 tabular-nums">{d.status === "queued" ? "Waiting for device…" : duration(total)}</span>
-          {can && (d.status === "queued" || d.status === "running") && (
+          {isAdmin && (d.status === "queued" || d.status === "running") && (
             <Button
               variant="danger"
               icon={<XCircle className="size-4" />}

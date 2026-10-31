@@ -73,6 +73,7 @@ function UrlLine({ label, host, enabled, row, onToggle, disabled, locked }: { la
 
 export default function DomainsPanel({ projectId }: { projectId: string }) {
   const can = useCan("admin");
+  const canOperate = useCan("operator");
   const q = usePoll(() => api.projectDomains(projectId), 15000, [projectId]);
   const [view, setView] = useState<DomainsView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -168,8 +169,8 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />
             <input className={cx(inputClass, "pl-9")} placeholder="Search domains" value={filter} onChange={(e) => setFilter(e.target.value)} />
           </div>
-          <Button icon={<Plus className="size-4" />} onClick={() => setAdding("route")}>Add Route</Button>
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding("domain")}>Add Domain</Button>
+          {canOperate && <Button icon={<Plus className="size-4" />} onClick={() => setAdding("route")}>Add Route</Button>}
+          {canOperate && <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setAdding("domain")}>Add Domain</Button>}
         </div>
         <Card>
           {rows.length === 0 ? (

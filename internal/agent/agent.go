@@ -25,12 +25,12 @@ import (
 var Version = "dev"
 
 type Config struct {
-	Server     string
-	JoinToken  string
-	Name       string
-	Labels     []string
+	Server    string
+	JoinToken string
+	Name      string
+	Labels    []string
 	// Setup is the ID of the setup plan from the Add device wizard (first registration only).
-	Setup string
+	Setup      string
 	StatePath  string
 	DockerHost string
 	// HostRoot is where the host filesystem is mounted when the agent runs in a container.

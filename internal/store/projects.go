@@ -67,7 +67,7 @@ type CloudflareTarget struct {
 // FromRepo reports whether the source is a GitHub repository: a built project, or a Compose
 // stack whose compose file lives in a repository. Pushes to its branch redeploy it.
 func (s Source) FromRepo() bool {
-	return s.Type == SourceGitHub || s.Type == SourceCloudflare || (s.Type == SourceCompose && s.Repo != "")
+	return s.Type == SourceGitHub || (s.Type == SourceCloudflare && s.Repo != "") || (s.Type == SourceCompose && s.Repo != "")
 }
 
 // Watch is a pair of path globs, relative to the repository root. A build is wanted when a

@@ -2,7 +2,7 @@ import { useCan } from "../components/auth";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { GitBranch, Github, Layers, Package, Plus, Rocket } from "lucide-react";
-import { CloudflareBadge } from "../components/CloudflareProject";
+import { CloudflareBadge, ImportCloudflare } from "../components/CloudflareProject";
 import { api, type Deployment, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, Empty, Loading, PageHeader, StatusDot, StatusIcon, deploymentLabel } from "../components/ui";
@@ -107,7 +107,7 @@ export function DeploymentRow({ d, title }: { d: Deployment; title?: string }) {
 export default function ProjectsPage() {
   useCrumbs([{ label: "Projects" }]);
   const nav = useNavigate();
-  const { data } = usePoll(api.projects, 5000);
+  const { data, reload } = usePoll(api.projects, 5000);
   const fleet = usePoll(api.containers, 5000);
   const [error, setError] = useState<string | null>(null);
   const canOperate = useCan("operator");
@@ -125,6 +125,7 @@ export default function ProjectsPage() {
           )
         }
       />
+      {canOperate && <ImportCloudflare onDone={reload} />}
       {error && <p className="mb-3 text-sm text-bad">{error}</p>}
       {!data ? (
         <Loading />

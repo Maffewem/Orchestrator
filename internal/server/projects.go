@@ -130,7 +130,7 @@ func cleanCloudflare(src *store.Source) error {
 	}
 	t.Name, t.Output, t.CompatibilityDate = strings.TrimSpace(t.Name), strings.Trim(strings.TrimSpace(t.Output), "/"), strings.TrimSpace(t.CompatibilityDate)
 	if t.Name != "" && !cfNameRe.MatchString(t.Name) {
-		return errors.New("the Cloudflare name must be lowercase letters, digits and dashes, at most 58 characters")
+		return errors.New("the Cloudflare name can use letters, digits, dashes and underscores, at most 63 characters")
 	}
 	if strings.Contains(t.Output, "..") || strings.ContainsAny(t.Output, "\n\r\x00") || strings.HasPrefix(t.Output, "/") {
 		return errors.New("the output path must stay inside the project")
@@ -168,7 +168,10 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 	switch src.Type {
 	case store.SourceGitHub, store.SourceCloudflare:
 		src.Repo = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(src.Repo), githubRemote), ".git")
-		if !repoRe.MatchString(src.Repo) {
+		// An imported Cloudflare project may have no repository yet: it is only monitored.
+		if src.Type == store.SourceCloudflare && src.Repo == "" {
+			src.AutoDeploy = false
+		} else if !repoRe.MatchString(src.Repo) {
 			return errors.New("repository must look like owner/name")
 		}
 		if src.Branch = strings.TrimSpace(src.Branch); src.Branch == "" {

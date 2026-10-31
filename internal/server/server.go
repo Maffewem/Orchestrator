@@ -318,6 +318,8 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/github", s.handleSetGitHub)
 	admin("PUT /api/settings/cloudflare", s.handleSetCloudflare)
 	admin("PUT /api/settings/cloudflare/deploy", s.handleSetCloudflareDeploy)
+	admin("GET /api/cloudflare/discover", s.handleCloudflareDiscover)
+	admin("POST /api/cloudflare/import", s.handleCloudflareImport)
 	admin("GET /api/projects/{id}/cloudflare", s.handleGetCloudflare)
 	admin("POST /api/projects/{id}/cloudflare/refresh", s.handleRefreshCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)

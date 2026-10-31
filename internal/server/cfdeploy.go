@@ -32,7 +32,7 @@ const (
 )
 
 var (
-	cfNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,57}$`)
+	cfNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
 	cfDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 )
 
@@ -58,6 +58,9 @@ func cfPreviewScript(name, slug string) string {
 func (s *Server) deployCloudflare(ctx context.Context, p *store.Project, commit *store.Commit, trigger string, pv *store.Preview) (*store.Deployment, error) {
 	if !s.cfDeployReady(ctx) {
 		return nil, errors.New("connect Cloudflare Pages & Workers in Settings first: it needs an account ID and an API token")
+	}
+	if p.Source.Repo == "" {
+		return nil, errors.New("this project was imported from Cloudflare and has no repository yet: add one in its settings to deploy from here")
 	}
 	if commit == nil {
 		return nil, errors.New("no commit to build")

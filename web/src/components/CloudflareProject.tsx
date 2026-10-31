@@ -192,3 +192,88 @@ export function CloudflareMetrics({ p }: { p: Project }) {
     </div>
   );
 }
+
+/** Offers to import Pages projects and Workers that exist in the Cloudflare account but not here. */
+export function ImportCloudflare({ onDone }: { onDone: () => void }) {
+  const settings = usePoll(api.settings, 0);
+  const configured = settings.data?.cloudflare.deploy.configured ?? false;
+  const found = usePoll(() => (configured ? api.cloudflareDiscover() : Promise.resolve([])), 0, [configured]);
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const todo = (found.data ?? []).filter((f) => !f.imported);
+  if (!configured || (todo.length === 0 && !msg)) return null;
+  const key = (f: { kind: string; name: string }) => `${f.kind}/${f.name}`;
+  const chosen = todo.filter((f) => picked[key(f)] ?? true);
+
+  const run = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await api.cloudflareImport(chosen.map((f) => ({ kind: f.kind, name: f.name })));
+      const bad = res.filter((r) => r.error);
+      setMsg(`Imported ${res.length - bad.length}.${bad.length ? " " + bad.map((r) => `${r.name}: ${r.error}`).join(" ") : ""}`);
+      setOpen(false);
+      found.reload();
+      onDone();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="mb-4 border-orange-200 bg-orange-50/40">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+        <div className="flex items-center gap-2.5 text-sm">
+          <Cloud className="size-4 text-[#f6821f]" />
+          <span>
+            {todo.length > 0 ? (
+              <>
+                Found <b>{todo.length}</b> {todo.length === 1 ? "project" : "projects"} on Cloudflare that Orchestrator isn't managing.
+              </>
+            ) : (
+              msg
+            )}
+          </span>
+        </div>
+        {todo.length > 0 && (
+          <Button size="sm" onClick={() => setOpen(!open)}>
+            {open ? "Hide" : "Review and import"}
+          </Button>
+        )}
+      </div>
+      {open && (
+        <div className="border-t border-orange-200 px-5 py-4">
+          <ul className="space-y-2 text-sm">
+            {todo.map((f) => (
+              <li key={key(f)}>
+                <label className="flex items-start gap-2.5">
+                  <input type="checkbox" className="mt-1 size-4 accent-primary" checked={picked[key(f)] ?? true} onChange={(e) => setPicked({ ...picked, [key(f)]: e.target.checked })} />
+                  <span className="min-w-0">
+                    <span className="font-medium">{f.name}</span> <span className="text-neutral-500">{f.kind === "worker" ? "Worker" : "Pages"}</span>
+                    <span className="block truncate text-xs text-neutral-500">
+                      {f.url?.replace(/^https:\/\//, "")}
+                      {f.repo ? ` · ${f.repo}${f.branch ? ` (${f.branch})` : ""}` : f.kind === "pages" ? " · no GitHub repository connected" : ""}
+                    </span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-neutral-500">
+            Importing changes nothing on Cloudflare. Each project starts out watched only: status, address and (for Workers) request counts. Automatic deploys stay off, and one without a repository needs one added in its settings before it can deploy from here.
+          </p>
+          <div className="mt-3">
+            <Button variant="primary" size="sm" loading={busy} disabled={chosen.length === 0} onClick={run}>
+              Import {chosen.length}
+            </Button>
+          </div>
+        </div>
+      )}
+      {msg && todo.length > 0 && <p className="border-t border-orange-200 px-5 py-2.5 text-xs text-neutral-600">{msg}</p>}
+    </Card>
+  );
+}

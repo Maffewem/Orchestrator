@@ -288,6 +288,7 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET/POST /api/users`, `PATCH/DELETE /api/users/{id}` | accounts (admin) |
 | `PUT /api/projects/{id}/domains/access` | require login for a worker |
 | `GET /api/projects/{id}/cloudflare`, `POST .../cloudflare/refresh` | what Cloudflare reports about a Pages or Workers project |
+| `GET /api/cloudflare/discover`, `POST /api/cloudflare/import` | Pages projects and Workers already in the account, and importing them |
 | `PUT /api/settings/cloudflare/deploy` | Cloudflare account ID and token for Pages and Workers |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
@@ -309,6 +310,8 @@ with HMAC-SHA256.
 **Deploying.** In *Settings → Cloudflare Pages & Workers*, enter your account ID and an API token with *Account → Cloudflare Pages → Edit*, *Account → Workers Scripts → Edit* and, for request counts, *Account → Account Analytics → Read*. (If the token you connected for DNS already has those, leave the token field empty.) Then create a project with the *Cloudflare* source: pick a GitHub repository and branch, choose *Pages* or *Worker*, and optionally set install and build commands, the output directory (Pages) or entry file (Worker), and the root directory. A project like this has no device.
 
 The server downloads the commit from GitHub, runs the install and build commands in a scratch directory with Node.js and npm (the server image includes them; with `make server` they must be on the `PATH`; `ORCH_BUILD_DIR` sets the scratch location), then uploads the result: Pages through the direct-upload API, a Worker as one ES module. The deployment page shows the usual step timeline (Cloning, Installing, Building, Uploading, Verifying) with logs, and the new address is fetched before the deployment is called successful. Pushes to the production branch deploy it, as for any GitHub project.
+
+**Importing what is already there.** With Cloudflare connected, the Projects page lists Pages projects and Workers in the account that Orchestrator isn't managing and offers to import them. Importing changes nothing on Cloudflare: each project starts watched only (status, address, Worker request counts) with automatic deploys off. A Pages project connected to GitHub brings its repository and branch; others need a repository added in the project settings before they can deploy from here.
 
 **Previews.** Turn on *Builds for Preview branches* and each open same-repository pull request is deployed as a Pages preview deployment (Cloudflare serves it at a branch alias) or, for a Worker, as its own script named `<worker>-<branch>` that is deleted when the pull request closes. Fork pull requests are never built.
 

@@ -51,10 +51,11 @@ type cfFake struct {
 	prs           []fakePR
 	reqs, errs    int64
 	pagesStage    string
+	gitRepos      map[string]string // Pages project -> connected GitHub repository
 }
 
 func newCFFake(t *testing.T) *cfFake {
-	f := &cfFake{t: t, pagesProjects: map[string]string{}, workerUploads: map[string]string{}, pagesStage: "success"}
+	f := &cfFake{t: t, pagesProjects: map[string]string{}, workerUploads: map[string]string{}, gitRepos: map[string]string{}, pagesStage: "success"}
 	f.gh = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/commits/main"):
@@ -95,7 +96,22 @@ func (f *cfFake) serveCF(w http.ResponseWriter, r *http.Request) {
 			"workersInvocationsAdaptive": []any{map[string]any{"sum": map[string]any{"requests": f.reqs, "errors": f.errs, "subrequests": 3},
 				"quantiles": map[string]any{"cpuTimeP50": 1200, "cpuTimeP99": 9000}}}}}}}})
 	case p == "/accounts/acct/pages/projects" && r.Method == http.MethodGet:
-		ok([]any{})
+		list := []any{}
+		for name, branch := range f.pagesProjects {
+			e := map[string]any{"name": name, "subdomain": name + ".pages.dev", "production_branch": branch}
+			if repo := f.gitRepos[name]; repo != "" {
+				o, n, _ := strings.Cut(repo, "/")
+				e["source"] = map[string]any{"type": "github", "config": map[string]any{"owner": o, "repo_name": n, "production_branch": branch}}
+			}
+			list = append(list, e)
+		}
+		ok(list)
+	case p == "/accounts/acct/workers/scripts" && r.Method == http.MethodGet:
+		list := []any{}
+		for name := range f.workerUploads {
+			list = append(list, map[string]string{"id": name})
+		}
+		ok(list)
 	case p == "/accounts/acct/workers/subdomain":
 		ok(map[string]string{"subdomain": "matt"})
 	case p == "/accounts/acct/pages/projects" && r.Method == http.MethodPost:
@@ -561,5 +577,75 @@ func TestBuildEnvHidesServerSecrets(t *testing.T) {
 	}
 	if env[len(env)-1] != "A=1" {
 		t.Errorf("project variables come last so they win: %v", env)
+	}
+}
+
+func TestCloudflareDiscoversAndImportsExisting(t *testing.T) {
+	f := newCFFake(t)
+	f.pagesProjects["blog"], f.gitRepos["blog"] = "trunk", "o/blog"
+	f.pagesProjects["Old_Docs"] = "main" // not connected to Git
+	f.workerUploads["api"] = "{}"
+	h := newHarness(t)
+	f.connect(h)
+
+	var none []cfFound
+	h.do("GET", "/api/cloudflare/discover", adminToken, nil, &none)
+	if len(none) != 0 {
+		t.Fatalf("nothing is discovered before Cloudflare is connected: %+v", none)
+	}
+	h.do("PUT", "/api/settings/cloudflare/deploy", adminToken, map[string]string{"account_id": "acct", "token": "deploytok"}, nil)
+	var found []cfFound
+	h.do("GET", "/api/cloudflare/discover", adminToken, nil, &found)
+	if len(found) != 3 {
+		t.Fatalf("discovered: %+v", found)
+	}
+	byName := map[string]cfFound{}
+	for _, x := range found {
+		byName[x.Name] = x
+	}
+	if b := byName["blog"]; b.Repo != "o/blog" || b.Branch != "trunk" || b.URL != "https://blog.pages.dev" || b.Imported != "" {
+		t.Fatalf("blog: %+v", b)
+	}
+	if a := byName["api"]; a.Kind != "worker" || a.URL != "https://api.matt.workers.dev" {
+		t.Fatalf("api: %+v", a)
+	}
+
+	items := []map[string]string{{"kind": "pages", "name": "blog"}, {"kind": "worker", "name": "api"}, {"kind": "pages", "name": "Old_Docs"}, {"kind": "pages", "name": "ghost"}}
+	var res []cfImportResult
+	if code := h.do("POST", "/api/cloudflare/import", adminToken, map[string]any{"items": items}, &res); code != http.StatusOK {
+		t.Fatalf("import: %d", code)
+	}
+	if res[0].Project != "blog" || res[1].Project != "api" || res[2].Project != "old-docs" || res[3].Error == "" {
+		t.Fatalf("results: %+v", res)
+	}
+	var projects []ProjectView
+	h.do("GET", "/api/projects", adminToken, nil, &projects)
+	got := map[string]ProjectView{}
+	for _, p := range projects {
+		got[p.Name] = p
+	}
+	blog, api, docs := got["blog"], got["api"], got["old-docs"]
+	if blog.Source.Repo != "o/blog" || blog.Source.Branch != "trunk" || blog.Source.AutoDeploy || blog.Cloudflare == nil || blog.Cloudflare.State != cfStateLive {
+		t.Fatalf("blog project: %+v %+v", blog.Source, blog.Cloudflare)
+	}
+	if api.Source.Repo != "" || api.Cloudflare == nil || api.Cloudflare.State != cfStateLive || docs.Source.Cloudflare.Name != "Old_Docs" {
+		t.Fatalf("api/docs: %+v %+v", api.Source, docs.Source.Cloudflare)
+	}
+	// Imported without a repository, so deploying says what to do instead of failing obscurely.
+	h.do("PUT", "/api/settings/cloudflare/deploy", adminToken, map[string]string{"account_id": "acct", "token": "deploytok"}, nil)
+	var e struct{ Error string }
+	if code := h.do("POST", "/api/projects/"+api.ID+"/deployments", adminToken, nil, nil); code != http.StatusBadRequest {
+		t.Fatalf("deploy without a repo: %d %s", code, e.Error)
+	}
+	// Importing again is refused; the list marks what is managed.
+	h.do("POST", "/api/cloudflare/import", adminToken, map[string]any{"items": items[:1]}, &res)
+	if !strings.Contains(res[0].Error, "already managed") {
+		t.Fatalf("second import: %+v", res)
+	}
+	h.do("GET", "/api/cloudflare/discover", adminToken, nil, &found)
+	for _, x := range found {
+		if x.Name == "blog" && x.Imported != "blog" {
+			t.Fatalf("blog should be marked imported: %+v", x)
+		}
 	}
 }

@@ -145,6 +145,17 @@ export interface CloudflareStatus {
   polled_at: string;
 }
 
+/** A Pages project or Worker that already exists in the Cloudflare account. */
+export interface CloudflareFound {
+  kind: "pages" | "worker";
+  name: string;
+  url?: string;
+  repo?: string;
+  branch?: string;
+  /** Name of the Orchestrator project that already manages it. */
+  imported?: string;
+}
+
 export interface Source {
   type: "github" | "image" | "compose" | "cloudflare";
   cloudflare?: CloudflareTarget;
@@ -759,6 +770,9 @@ export const api = {
   refreshCloudflare: (id: string) => request<CloudflareStatus>("POST", `/api/projects/${id}/cloudflare/refresh`),
   setCloudflareDeploy: (accountId: string, token?: string) =>
     request<{ pages?: boolean; workers?: boolean }>("PUT", "/api/settings/cloudflare/deploy", { account_id: accountId, token: token ?? "" }),
+  cloudflareDiscover: () => request<CloudflareFound[]>("GET", "/api/cloudflare/discover"),
+  cloudflareImport: (items: { kind: string; name: string }[]) =>
+    request<{ kind: string; name: string; project?: string; error?: string }[]>("POST", "/api/cloudflare/import", { items }),
   deployProject: (id: string, confirm = false) => request<Deployment>("POST", `/api/projects/${id}/deployments${confirm ? "?confirm=1" : ""}`),
   adopt: (deviceId: string, containers: { id: string; name?: string }[], dryRun: boolean) =>
     request<AdoptItem[]>("POST", `/api/devices/${deviceId}/adopt`, { containers, dry_run: dryRun }),

@@ -225,7 +225,7 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			return fmt.Errorf("web port %q should be a host port number", in.Runtime.WebPort)
 		}
 	}
-	in.Runtime.Env = cleanLabels(in.Runtime.Env)
+	in.Runtime.Env = cleanLabels(dropEnvComments(in.Runtime.Env))
 	for _, e := range in.Runtime.Env {
 		if k, _, ok := strings.Cut(e, "="); !ok || k == "" {
 			return fmt.Errorf("environment variable %q should look like KEY=value", e)
@@ -588,4 +588,16 @@ func (s *Server) adoptedWarning(r *http.Request, p *store.Project) string {
 		return msg + " Confirm to continue."
 	}
 	return ""
+}
+
+// dropEnvComments removes .env comment lines so pasted files with # notes save cleanly.
+func dropEnvComments(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, l := range in {
+		if strings.HasPrefix(strings.TrimSpace(l), "#") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
 }

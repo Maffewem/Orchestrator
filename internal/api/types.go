@@ -228,6 +228,36 @@ type DeploySpec struct {
 	Compose *ComposeSpec `json:"compose,omitempty"`
 	// Reuse lets the agent skip the build when Image already exists on the device (rollbacks).
 	Reuse bool `json:"reuse,omitempty"`
+	// Cloudflare, when set, makes this a deployment to Cloudflare Pages or Workers. The control
+	// plane builds and uploads it itself; no agent or device is involved and Service is the project name.
+	Cloudflare *CloudflareSpec `json:"cloudflare,omitempty"`
+}
+
+// Cloudflare deploy kinds.
+const (
+	CloudflarePages  = "pages"
+	CloudflareWorker = "worker"
+)
+
+// CloudflareSpec describes one deployment to Cloudflare.
+type CloudflareSpec struct {
+	Kind string `json:"kind"` // CloudflarePages or CloudflareWorker
+	// Name is the Pages project or Worker script the deployment goes to.
+	Name string `json:"name"`
+	// Repo and SHA say what to build; Context is the directory inside it.
+	Repo    string `json:"repo"`
+	SHA     string `json:"sha"`
+	Context string `json:"context,omitempty"`
+	// Branch is the git branch being deployed. For Pages, a branch other than ProductionBranch
+	// becomes a preview deployment.
+	Branch           string `json:"branch"`
+	ProductionBranch string `json:"production_branch"`
+	// Build holds the install and build commands (Start and Static are unused). Empty ones are detected.
+	Build NodeSpec `json:"build"`
+	// Output is the Pages directory to upload, or the Worker's entry module, relative to Context.
+	Output string `json:"output,omitempty"`
+	// CompatibilityDate is a Worker's compatibility date; empty means today.
+	CompatibilityDate string `json:"compatibility_date,omitempty"`
 }
 
 // ComposeSpec is a Docker Compose file and the values its ${VAR} references are filled from.
@@ -269,6 +299,8 @@ type NodeSpec struct {
 // control plane both derive step indexes from this list.
 func StepsFor(spec DeploySpec) []string {
 	switch {
+	case spec.Cloudflare != nil:
+		return []string{StepCloning, StepInstalling, StepBuilding, StepUpload, StepVerify}
 	case spec.Compose != nil && spec.Compose.Remote != "":
 		return []string{StepInit, StepCloning, StepPulling, StepDeploy, StepVerify}
 	case spec.Compose != nil:
@@ -301,6 +333,7 @@ const (
 	StepCloning    = "Cloning"
 	StepInstalling = "Installing"
 	StepBuilding   = "Building"
+	StepUpload     = "Uploading"
 	StepDeploy     = "Deploying"
 	StepVerify     = "Verifying"
 )

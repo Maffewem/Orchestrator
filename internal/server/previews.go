@@ -133,9 +133,10 @@ func (s *Server) wantedPreviews(ctx context.Context, p *store.Project, max int) 
 // syncPreviews makes the project's previews match its open pull requests: new ones are
 // created, moved ones rebuilt, and closed or surplus ones removed.
 func (s *Server) syncPreviews(ctx context.Context, p *store.Project) {
-	if p.Source.Type != store.SourceGitHub {
+	if p.Source.Type != store.SourceGitHub && p.Source.Type != store.SourceCloudflare {
 		return
 	}
+	cf := p.Source.Type == store.SourceCloudflare
 	s.previewMu.Lock()
 	defer s.previewMu.Unlock()
 
@@ -151,16 +152,18 @@ func (s *Server) syncPreviews(ctx context.Context, p *store.Project) {
 		}
 		return
 	}
-	d, err := s.store.GetDevice(ctx, p.DeviceID)
-	if err != nil {
-		return
-	}
-	if !hasCap(d, api.CapPreview) {
-		s.log.Warn("previews: agent too old", "device", d.Name)
-		return
-	}
-	if containerPort(p.Runtime.Ports) == "" {
-		return // nothing to publish a preview on
+	var d *store.Device
+	if !cf {
+		if d, err = s.store.GetDevice(ctx, p.DeviceID); err != nil {
+			return
+		}
+		if !hasCap(d, api.CapPreview) {
+			s.log.Warn("previews: agent too old", "device", d.Name)
+			return
+		}
+		if containerPort(p.Runtime.Ports) == "" {
+			return // nothing to publish a preview on
+		}
 	}
 	prs, err := s.wantedPreviews(ctx, p, ps.Max)
 	if err != nil {
@@ -184,7 +187,7 @@ func (s *Server) syncPreviews(ctx context.Context, p *store.Project) {
 		if w := previewWatch(p.Source); (len(w.Include) > 0 || len(w.Exclude) > 0) && !wants(w, s.pullFiles(ctx, p.Source.Repo, pr.Number)) {
 			continue // nothing the Previews tab watches changed
 		}
-		if pv == nil && d.Maintenance {
+		if pv == nil && d != nil && d.Maintenance {
 			continue // no new previews while the device is in maintenance
 		}
 		if pv == nil {
@@ -209,18 +212,21 @@ func (s *Server) syncPreviews(ctx context.Context, p *store.Project) {
 			changed = true
 		}
 	}
-	if changed {
+	if changed && !cf {
 		s.syncProxy(ctx, p.DeviceID)
 	}
 }
 
 // newPreview reserves a slug and host port for a branch.
 func (s *Server) newPreview(ctx context.Context, p *store.Project, pv *store.Preview) error {
-	port, err := s.allocatePort(ctx, p.DeviceID, p.ID+"/"+pv.Branch)
-	if err != nil {
-		return err
+	var err error
+	if p.Source.Type != store.SourceCloudflare { // a Cloudflare preview has no port on a device
+		port, err := s.allocatePort(ctx, p.DeviceID, p.ID+"/"+pv.Branch)
+		if err != nil {
+			return err
+		}
+		pv.HostPort = port
 	}
-	pv.HostPort = port
 	base := branchSlug(pv.Branch)
 	pv.Slug = base
 	for i := 0; i < 5; i++ {
@@ -269,6 +275,14 @@ func previewSource(src store.Source) store.Source {
 
 // deployPreview builds one revision of a preview on the project's device.
 func (s *Server) deployPreview(ctx context.Context, p *store.Project, pv *store.Preview, commit *store.Commit, trigger string) (*store.Deployment, error) {
+	if p.Source.Type == store.SourceCloudflare {
+		d, err := s.deployCloudflare(ctx, p, commit, trigger, pv)
+		if err != nil {
+			return nil, err
+		}
+		pv.SHA, pv.DeploymentID = commit.SHA, d.ID
+		return d, s.store.UpdatePreview(ctx, pv)
+	}
 	cp := *p
 	cp.Name = p.Name + "--" + pv.Slug
 	cp.Source = previewSource(p.Source)
@@ -299,7 +313,15 @@ func (s *Server) deployPreview(ctx context.Context, p *store.Project, pv *store.
 
 // removePreview deletes a preview's record and queues removal of its container.
 func (s *Server) removePreview(ctx context.Context, p *store.Project, pv *store.Preview, why string) {
-	if d, err := s.store.GetDevice(ctx, p.DeviceID); err == nil && hasCap(d, api.CapPreview) {
+	if p.Source.Type == store.SourceCloudflare {
+		// A Worker preview is its own script and goes with the pull request. Pages keeps its
+		// preview deployments (Cloudflare prunes them), so there is nothing to remove there.
+		if tok, acct := s.cfDeployCreds(ctx); tok != "" && acct != "" && p.Source.Cloudflare != nil && p.Source.Cloudflare.Kind == api.CloudflareWorker {
+			if err := s.cfDeleteWorker(ctx, tok, acct, cfPreviewScript(cfNameOf(p), pv.Slug)); err != nil {
+				s.log.Warn("previews: delete worker", "err", err)
+			}
+		}
+	} else if d, err := s.store.GetDevice(ctx, p.DeviceID); err == nil && hasCap(d, api.CapPreview) {
 		target := serviceName(p.Name + "--" + pv.Slug)
 		if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionRemove, target, nil); err != nil {
 			s.log.Warn("previews: queue remove", "err", err)
@@ -321,6 +343,12 @@ type previewView struct {
 }
 
 func (s *Server) previewURL(ctx context.Context, p *store.Project, pv *store.Preview, d *store.Device) string {
+	if p.Source.Type == store.SourceCloudflare {
+		if dep, err := s.store.GetDeployment(ctx, pv.DeploymentID); err == nil {
+			return dep.URL
+		}
+		return ""
+	}
 	if base := s.baseDomain(ctx); base != "" && s.urlPrefs(ctx, p.ID).Preview {
 		return "https://" + pv.Slug + "-" + slug(p.Name) + "." + base
 	}
@@ -344,7 +372,7 @@ func (s *Server) previewsResponse(ctx context.Context, p *store.Project) (*previ
 		return nil, err
 	}
 	d, _ := s.store.GetDevice(ctx, p.DeviceID)
-	out := &previewsResponse{Settings: s.previewSettings(ctx, p.ID), Previews: []previewView{}, Supported: d != nil && hasCap(d, api.CapPreview)}
+	out := &previewsResponse{Settings: s.previewSettings(ctx, p.ID), Previews: []previewView{}, Supported: p.Source.Type == store.SourceCloudflare || (d != nil && hasCap(d, api.CapPreview))}
 	for _, pv := range list {
 		v := previewView{Preview: pv, URL: s.previewURL(ctx, p, pv, d), Status: store.DeploymentQueued}
 		if dep, err := s.store.GetDeployment(ctx, pv.DeploymentID); err == nil {
@@ -373,7 +401,7 @@ func (s *Server) handleSetPreviewSettings(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if p.Source.Type != store.SourceGitHub {
+	if p.Source.Type != store.SourceGitHub && p.Source.Type != store.SourceCloudflare {
 		writeError(w, http.StatusBadRequest, "previews need a project deployed from GitHub")
 		return
 	}
@@ -385,7 +413,7 @@ func (s *Server) handleSetPreviewSettings(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "keep between 1 and 20 previews")
 		return
 	}
-	if req.Enabled {
+	if req.Enabled && p.Source.Type == store.SourceGitHub {
 		d, err := s.store.GetDevice(r.Context(), p.DeviceID)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "the project's device no longer exists")
@@ -454,6 +482,15 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	if p.Source.Type == store.SourceCloudflare {
+		d, err := s.rollbackCloudflare(r.Context(), p, old)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusAccepted, d)
+		return
+	}
 	d, err := s.deployWith(r.Context(), p, old.Commit, store.TriggerRollback, func(spec *api.DeploySpec) {
 		if p.Source.Type == store.SourceImage {
 			spec.Image = old.Spec.Image
@@ -479,7 +516,7 @@ func (s *Server) handlePullRequestEvent(ctx context.Context, repo string) int {
 	}
 	n := 0
 	for _, p := range projects {
-		if p.Source.Type == store.SourceGitHub && strings.EqualFold(p.Source.Repo, repo) && s.previewSettings(ctx, p.ID).Enabled {
+		if (p.Source.Type == store.SourceGitHub || p.Source.Type == store.SourceCloudflare) && strings.EqualFold(p.Source.Repo, repo) && s.previewSettings(ctx, p.ID).Enabled {
 			s.syncPreviews(ctx, p)
 			n++
 		}

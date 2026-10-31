@@ -19,6 +19,9 @@ const (
 	SourceImage  = "image"
 	// SourceCompose is a Docker Compose stack; its YAML is stored with the project.
 	SourceCompose = "compose"
+	// SourceCloudflare is a repository built on the server and uploaded to Cloudflare Pages or Workers.
+	// Such a project has no device.
+	SourceCloudflare = "cloudflare"
 )
 
 // Source is where a project's container image comes from.
@@ -39,6 +42,9 @@ type Source struct {
 	// Preview overrides the production build settings for preview deployments; empty
 	// fields fall back to the production ones.
 	Preview *PreviewBuild `json:"preview,omitempty"`
+	// Cloudflare source: where the build goes. Repo, Branch, Context, Node (install and build
+	// commands only), Watch and Preview behave as for a GitHub source.
+	Cloudflare *CloudflareTarget `json:"cloudflare,omitempty"`
 	// Image source: a registry reference such as nginx:1.27.
 	Image string `json:"image,omitempty"`
 	// Compose source: the docker-compose YAML. ${VAR} references are filled from the project's environment.
@@ -47,10 +53,21 @@ type Source struct {
 	ComposeFile string `json:"compose_file,omitempty"`
 }
 
+// CloudflareTarget is where a Cloudflare project deploys to.
+type CloudflareTarget struct {
+	Kind string `json:"kind"` // api.CloudflarePages or api.CloudflareWorker
+	// Name is the Pages project or Worker script; empty means the project name.
+	Name string `json:"name,omitempty"`
+	// Output is the Pages directory to upload (detected from dist, build, out, public when empty),
+	// or the Worker's entry module after the build (default dist/index.js, then src/index.js, index.js).
+	Output            string `json:"output,omitempty"`
+	CompatibilityDate string `json:"compatibility_date,omitempty"`
+}
+
 // FromRepo reports whether the source is a GitHub repository: a built project, or a Compose
 // stack whose compose file lives in a repository. Pushes to its branch redeploy it.
 func (s Source) FromRepo() bool {
-	return s.Type == SourceGitHub || (s.Type == SourceCompose && s.Repo != "")
+	return s.Type == SourceGitHub || (s.Type == SourceCloudflare && s.Repo != "") || (s.Type == SourceCompose && s.Repo != "")
 }
 
 // Watch is a pair of path globs, relative to the repository root. A build is wanted when a

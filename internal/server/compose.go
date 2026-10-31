@@ -88,7 +88,7 @@ func dedupe(in []string) []string {
 
 // handleStackAction starts, stops or tears down all containers of a compose project.
 func (s *Server) handleStackAction(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}

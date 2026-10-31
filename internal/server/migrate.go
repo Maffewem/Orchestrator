@@ -88,7 +88,7 @@ type migrateRequest struct {
 }
 
 func (s *Server) handleMigrateProject(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.lookupProject(w, r)
+	p, ok := s.lookupDeviceProject(w, r)
 	if !ok {
 		return
 	}

@@ -12,6 +12,7 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import { SSOSettings } from "../components/SSOSettings";
 import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
+import { CloudflareDeploy } from "../components/CloudflareDeploy";
 
 export default function SettingsPage() {
   useCrumbs([{ label: "Settings" }]);
@@ -101,6 +102,7 @@ export default function SettingsPage() {
     sso: "sso single sign-on oidc cloudflare access google github login",
     github: "github token webhook repositories",
     cloudflare: "cloudflare dns token zone",
+    cfdeploy: "cloudflare pages workers deploy account id wrangler",
     ssl: "ssl https certificates caddy",
     domains: "domains base domain wildcard",
     backups: "backup password encrypt",
@@ -296,6 +298,21 @@ export default function SettingsPage() {
             </ul>
             </Help>
           </div>
+        </Collapsible>
+        )}
+        {vis("cfdeploy") && (
+        <Collapsible
+          id="cfdeploy"
+          defaultOpen={false}
+          title={
+            <span className="flex items-center gap-2">
+              <Cloud className="size-4" /> Cloudflare Pages &amp; Workers
+            </span>
+          }
+          subtitle="Build projects here and deploy them to Cloudflare, then watch them from the dashboard."
+          action={s.cloudflare.deploy.configured ? <Badge tone="ok">Connected</Badge> : <Badge>Not connected</Badge>}
+        >
+          <CloudflareDeploy s={s} reload={settings.reload} />
         </Collapsible>
         )}
         {vis("ssl") && (

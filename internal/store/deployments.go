@@ -51,7 +51,10 @@ type Deployment struct {
 	Error     string         `json:"error,omitempty"`
 	CommandID string         `json:"command_id"`
 	// PreviewID is set for deployments of a preview environment rather than production.
-	PreviewID  string     `json:"preview_id,omitempty"`
+	PreviewID string `json:"preview_id,omitempty"`
+	// RemoteID and URL identify a Cloudflare deployment on Cloudflare and where it is served.
+	RemoteID   string     `json:"remote_id,omitempty"`
+	URL        string     `json:"url,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	StartedAt  *time.Time `json:"started_at"`
 	FinishedAt *time.Time `json:"finished_at"`
@@ -95,13 +98,13 @@ func formatLines(lines []api.LogLine) string {
 	return b.String()
 }
 
-const deploymentCols = `id, project_id, device_id, trigger, git_commit, spec, status, error, command_id, created_at, started_at, finished_at, preview_id`
+const deploymentCols = `id, project_id, device_id, trigger, git_commit, spec, status, error, command_id, created_at, started_at, finished_at, preview_id, remote_id, url`
 
 func scanDeployment(b *box, sc interface{ Scan(...any) error }) (*Deployment, error) {
 	var d Deployment
 	var commit, spec string
 	var created, started, finished int64
-	if err := sc.Scan(&d.ID, &d.ProjectID, &d.DeviceID, &d.Trigger, &commit, &spec, &d.Status, &d.Error, &d.CommandID, &created, &started, &finished, &d.PreviewID); err != nil {
+	if err := sc.Scan(&d.ID, &d.ProjectID, &d.DeviceID, &d.Trigger, &commit, &spec, &d.Status, &d.Error, &d.CommandID, &created, &started, &finished, &d.PreviewID, &d.RemoteID, &d.URL); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(spec), &d.Spec); err != nil {
@@ -125,6 +128,8 @@ type NewDeployment struct {
 	Commit    *Commit
 	Spec      api.DeploySpec
 	PreviewID string
+	// Local deployments are carried out by the control plane itself, so no command is queued.
+	Local bool
 }
 
 // CreateDeployment records a deployment with all its steps pending and queues the deploy
@@ -139,7 +144,9 @@ func (s *Store) CreateDeployment(ctx context.Context, in NewDeployment) (*Deploy
 	id := newID("dep_")
 	spec := in.Spec
 	cmd := newCommand(in.DeviceID, api.ActionDeploy, id, nil, &spec)
-	if err := insertCommand(ctx, tx, s.box, cmd); err != nil {
+	if in.Local {
+		cmd.ID = ""
+	} else if err := insertCommand(ctx, tx, s.box, cmd); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -325,4 +332,29 @@ func (s *Store) FinishDeployment(ctx context.Context, id string, ok bool, errMsg
 		return err
 	}
 	return tx.Commit()
+}
+
+// SetDeploymentRemote records which Cloudflare deployment a local deployment became, and its URL.
+func (s *Store) SetDeploymentRemote(ctx context.Context, id, remoteID, url string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE deployments SET remote_id = ?, url = ? WHERE id = ?`, remoteID, url, id)
+	return err
+}
+
+// UnfinishedLocal returns queued or running deployments that no device is working on, which
+// after a restart of the control plane are ones it was carrying out itself.
+func (s *Store) UnfinishedLocal(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM deployments WHERE device_id = '' AND status IN (?, ?)`, DeploymentQueued, DeploymentRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

@@ -122,6 +122,8 @@ func routeRole(pattern string) string {
 		"PUT /api/projects/{id}/domains/urls":                true,
 		"POST /api/projects/{id}/domains":                    true,
 		"POST /api/deployments/{id}/rollback":                true,
+		"POST /api/projects/{id}/cloudflare/refresh":         true,
+		"POST /api/cloudflare/import":                        true,
 		"POST /api/devices/{id}/streams":                     true,
 		"GET /api/streams/{id}/output":                       true,
 		"POST /api/streams/{id}/input":                       true,
@@ -132,6 +134,7 @@ func routeRole(pattern string) string {
 	}
 	adminGets := map[string]bool{
 		"GET /api/settings":                       true,
+		"GET /api/cloudflare/discover":            true,
 		"GET /api/users":                          true,
 		"GET /api/system/update":                  true,
 		"GET /api/github/repos":                   true,

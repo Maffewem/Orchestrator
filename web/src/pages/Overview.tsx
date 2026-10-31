@@ -57,6 +57,17 @@ export default function OverviewPage() {
         <Stat label="Projects" value={projects.data?.length ?? "—"} sub={`${deployments.data?.filter((d) => d.status === "running" || d.status === "queued").length ?? 0} deploying now`} />
       </div>
 
+      {o.cloudflare.projects > 0 && (
+        <Section title="Cloudflare" action={<Link to="/projects" className="text-sm text-primary hover:underline">View projects</Link>}>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Stat label="Pages and Workers" value={o.cloudflare.projects} sub={`${o.cloudflare.live} live`} />
+            <Stat label="Failing" value={o.cloudflare.failing} sub={o.cloudflare.failing ? "Latest deployment failed or Cloudflare unreachable" : "All healthy"} tone={o.cloudflare.failing ? "bad" : undefined} />
+            <Stat label="Worker requests, 24h" value={o.cloudflare.requests.toLocaleString()} />
+            <Stat label="Worker errors, 24h" value={o.cloudflare.errors.toLocaleString()} sub={o.cloudflare.requests ? `${((o.cloudflare.errors / o.cloudflare.requests) * 100).toFixed(1)}% of requests` : undefined} tone={o.cloudflare.requests && o.cloudflare.errors / o.cloudflare.requests > 0.05 ? "bad" : undefined} />
+          </div>
+        </Section>
+      )}
+
       <Section title="Devices" action={<Link to="/devices" className="text-sm text-primary hover:underline">View all</Link>}>
         {devices.data.length === 0 ? (
           <Card>

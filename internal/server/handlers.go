@@ -295,6 +295,7 @@ type overview struct {
 		Running int `json:"running"`
 		Stopped int `json:"stopped"`
 	} `json:"containers"`
+	Cloudflare   cfSummary     `json:"cloudflare"`
 	RecentEvents []store.Event `json:"recent_events"`
 }
 
@@ -328,6 +329,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	o.Cloudflare = s.cfOverview(r.Context())
 	if o.RecentEvents, err = s.store.ListEvents(r.Context(), "", 10); err != nil {
 		s.internal(w, err)
 		return

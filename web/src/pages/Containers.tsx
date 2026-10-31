@@ -10,6 +10,8 @@ import { ImportContainers, cleanable, isSystem } from "../components/Adopt";
 import { useCan } from "../components/auth";
 import { Card, CardHeader, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
+import { Link } from "react-router";
+import { CloudflareBadge } from "../components/CloudflareProject";
 
 const SYSTEM = "System · Orchestrator (read-only)";
 
@@ -21,6 +23,8 @@ function stackOf(c: FleetContainer) {
 export default function ContainersPage() {
   useCrumbs([{ label: "Workers" }]);
   const { data, reload } = usePoll(api.containers, 5000);
+  const projects = usePoll(api.projects, 15000);
+  const edge = (projects.data ?? []).filter((p) => p.source.type === "cloudflare" && `${p.name} ${p.cloudflare?.url ?? ""}`.toLowerCase().includes(q.toLowerCase()));
   const [q, setQ] = useState("");
   const [state, setState] = useState("all");
   const [group, setGroup] = useState(true);
@@ -97,6 +101,22 @@ export default function ContainersPage() {
           Group by stack
         </label>
       </div>
+      {edge.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader title="Cloudflare · Pages and Workers" subtitle="Built here and served from Cloudflare's network, so there is no device or port." />
+          <div className="divide-y divide-neutral-100">
+            {edge.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm">
+                <Link to={`/projects/${p.id}`} className="min-w-0 flex-1 truncate font-medium hover:underline">{p.name}</Link>
+                <CloudflareBadge p={p} />
+                {p.cloudflare?.url && (
+                  <a href={p.cloudflare.url} target="_blank" rel="noreferrer" className="truncate text-primary hover:underline">{p.cloudflare.url.replace(/^https:\/\//, "")}</a>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       {!data ? (
         <Loading />
       ) : group && rows.length ? (

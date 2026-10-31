@@ -2,6 +2,7 @@ import { useCan } from "../components/auth";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { GitBranch, Github, Layers, Package, Plus, Rocket } from "lucide-react";
+import { CloudflareBadge, ImportCloudflare } from "../components/CloudflareProject";
 import { api, type Deployment, type Project } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Button, Card, Empty, Loading, PageHeader, StatusDot, StatusIcon, deploymentLabel } from "../components/ui";
@@ -9,6 +10,16 @@ import PowerControls from "../components/PowerControls";
 import { ago, cx, duration, shortId, span, usePoll, useTick } from "../lib";
 
 export function SourceLabel({ p }: { p: Project }) {
+  if (p.source.type === "cloudflare") {
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <Github className="size-3.5 shrink-0" />
+        <span className="truncate">{p.source.repo}</span>
+        <GitBranch className="ml-1 size-3.5 shrink-0" />
+        <span className="truncate">{p.source.branch}</span>
+      </span>
+    );
+  }
   if (p.source.type === "github") {
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -96,7 +107,7 @@ export function DeploymentRow({ d, title }: { d: Deployment; title?: string }) {
 export default function ProjectsPage() {
   useCrumbs([{ label: "Projects" }]);
   const nav = useNavigate();
-  const { data } = usePoll(api.projects, 5000);
+  const { data, reload } = usePoll(api.projects, 5000);
   const fleet = usePoll(api.containers, 5000);
   const [error, setError] = useState<string | null>(null);
   const canOperate = useCan("operator");
@@ -105,7 +116,7 @@ export default function ProjectsPage() {
     <>
       <PageHeader
         title="Projects"
-        description="Services deployed to your devices from GitHub or a container registry."
+        description="Services deployed to your devices, or to Cloudflare Pages and Workers, from GitHub or a container registry."
         actions={
           canOperate && (
             <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => nav("/projects/new")}>
@@ -114,6 +125,7 @@ export default function ProjectsPage() {
           )
         }
       />
+      {canOperate && <ImportCloudflare onDone={reload} />}
       {error && <p className="mb-3 text-sm text-bad">{error}</p>}
       {!data ? (
         <Loading />
@@ -150,7 +162,7 @@ export default function ProjectsPage() {
                     <>
                       <p className="truncate text-neutral-700">{deploymentTitle(p.latest_deployment)}</p>
                       <p className="mt-1 text-xs text-neutral-500">
-                        {deploymentLabel(p.latest_deployment.status)} {ago(p.latest_deployment.created_at)} on {p.device_name || "a removed device"}
+                        {deploymentLabel(p.latest_deployment.status)} {ago(p.latest_deployment.created_at)} on {p.source.type === "cloudflare" ? "Cloudflare" : p.device_name || "a removed device"}
                       </p>
                     </>
                   ) : (
@@ -161,6 +173,14 @@ export default function ProjectsPage() {
               </Card>
             </Link>
             {(() => {
+              if (p.source.type === "cloudflare") {
+                return (
+                  <div className="absolute bottom-3 left-5 right-5 flex items-center justify-between text-xs text-neutral-600">
+                    <CloudflareBadge p={p} />
+                    {p.cloudflare?.requests ? <span className="tabular-nums">{p.cloudflare.requests.toLocaleString()} requests, 24h</span> : null}
+                  </div>
+                );
+              }
               const w = fleet.data?.find((c) => c.project_id === p.id && c.device_id === p.device_id);
               return (
                 <div className="absolute bottom-3 left-5 right-5 flex items-center justify-between">

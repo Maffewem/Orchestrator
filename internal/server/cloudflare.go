@@ -52,7 +52,10 @@ func (s *Server) sslDNSToken(ctx context.Context) string {
 }
 
 func (s *Server) cloudflareStatus(ctx context.Context) map[string]any {
-	return map[string]any{"connected": s.cloudflareToken(ctx) != "", "proxied": s.cloudflareProxied(ctx)}
+	_, acct := s.cfDeployCreds(ctx)
+	own, _ := s.store.GetSetting(ctx, settingCFDeployToken)
+	return map[string]any{"connected": s.cloudflareToken(ctx) != "", "proxied": s.cloudflareProxied(ctx),
+		"deploy": map[string]any{"configured": s.cfDeployReady(ctx), "account_id": acct, "own_token": own != ""}}
 }
 
 // withDNSChallenge makes Caddy obtain certificates with the Cloudflare DNS-01 challenge. The
@@ -61,26 +64,40 @@ func withDNSChallenge(caddyfile string) string {
 	return strings.Replace(caddyfile, "{\n\tadmin off\n", "{\n\tadmin off\n\tacme_dns cloudflare {env.CF_API_TOKEN}\n", 1)
 }
 
-// cfCall performs one Cloudflare API request and decodes result into out.
+// cfError is a failed Cloudflare API call; Status is the HTTP status (0 when none arrived).
+type cfError struct {
+	Status int
+	Msg    string
+}
+
+func (e *cfError) Error() string { return "cloudflare: " + e.Msg }
+
+// cfCall performs one Cloudflare API request with a JSON body and decodes result into out.
 func (s *Server) cfCall(ctx context.Context, token, method, path string, body, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
 	var rdr io.Reader
+	ct := ""
 	if body != nil {
 		b, _ := json.Marshal(body)
-		rdr = bytes.NewReader(b)
+		rdr, ct = bytes.NewReader(b), "application/json"
 	}
-	req, err := http.NewRequestWithContext(ctx, method, s.cloudflareAPI+path, rdr)
+	return s.cfRaw(ctx, 15*time.Second, token, method, path, ct, rdr, out)
+}
+
+// cfRaw performs one Cloudflare API request with an arbitrary body (uploads are multipart).
+func (s *Server) cfRaw(ctx context.Context, timeout time.Duration, token, method, path, contentType string, body io.Reader, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, s.cloudflareAPI+path, body)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("cloudflare: %w", err)
+		return &cfError{Msg: err.Error()}
 	}
 	defer resp.Body.Close()
 	var env struct {
@@ -94,9 +111,9 @@ func (s *Server) cfCall(ctx context.Context, token, method, path string, body, o
 		if len(env.Errors) > 0 {
 			msg = env.Errors[0].Message
 		}
-		return fmt.Errorf("cloudflare: %s", msg)
+		return &cfError{Status: resp.StatusCode, Msg: msg}
 	}
-	if out != nil {
+	if out != nil && len(env.Result) > 0 {
 		return json.Unmarshal(env.Result, out)
 	}
 	return nil

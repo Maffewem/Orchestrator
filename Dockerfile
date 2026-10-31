@@ -26,7 +26,8 @@ RUN set -e; for t in amd64:amd64: arm64:arm64: armv7:arm:7 armv6:arm:6; do \
 
 RUN mkdir -p /out/data
 
-FROM alpine:3.22
+# Node.js and npm are in the final image because Cloudflare Pages and Workers projects are built here.
+FROM node:22-alpine3.22
 ARG VERSION=dev
 LABEL org.opencontainers.image.version=$VERSION
 # CA certificates come from the build stage so this image builds without network access.

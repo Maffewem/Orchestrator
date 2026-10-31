@@ -57,7 +57,7 @@ func clone(ctx context.Context, st *steps, remote, work string) (string, error) 
 	}
 	for _, c := range [][]string{
 		{"init", "-q"},
-		{"fetch", "-q", "--depth", "1", repo, ref},
+		{"fetch", "-q", "--depth", "1", "--", repo, ref},
 		{"checkout", "-q", "FETCH_HEAD"},
 	} {
 		if err := runLogged(ctx, st, src, "git", c...); err != nil {

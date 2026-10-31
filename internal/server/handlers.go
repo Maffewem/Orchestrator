@@ -102,7 +102,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	key := "register|" + clientIP(r)
+	key := "register|" + s.clientIP(r)
 	if s.logins.locked(key) {
 		writeError(w, http.StatusTooManyRequests, "too many failed attempts; try again in a minute")
 		return

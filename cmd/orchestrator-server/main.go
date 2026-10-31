@@ -76,6 +76,7 @@ func main() {
 		DBPath:            *dbPath,
 		Restart:           stop,
 		DockerHost:        env("DOCKER_HOST", ""),
+		TrustedProxies:    os.Getenv("ORCH_TRUSTED_PROXIES"),
 	})
 	if err != nil {
 		log.Error("start server", "err", err)

@@ -4,6 +4,9 @@
 set -eu
 
 SERVER="{{SERVER}}"
+# SHA-256 of each agent binary this server holds, so a download that was swapped or damaged in
+# transit is refused. Empty when the server has no binaries to checksum.
+SUMS="{{SUMS}}"
 TOKEN=""
 NAME=""
 LABELS=""
@@ -53,6 +56,18 @@ esac
 
 echo "Downloading orchestrator-agent ($ARCH) from $SERVER"
 curl -fsSL "$SERVER/downloads/orchestrator-agent-linux-$ARCH" -o /usr/local/bin/orchestrator-agent.new
+case "$SERVER" in
+  http://*) echo "warning: $SERVER is plain HTTP; anyone on the path could alter the agent. Use the HTTPS dashboard URL where you can." >&2 ;;
+esac
+WANT=$(printf '%s\n' "$SUMS" | awk -v f="orchestrator-agent-linux-$ARCH" '$2 == f { print $1 }')
+if [ -n "$WANT" ] && command -v sha256sum >/dev/null 2>&1; then
+  GOT=$(sha256sum /usr/local/bin/orchestrator-agent.new | awk '{ print $1 }')
+  if [ "$GOT" != "$WANT" ]; then
+    rm -f /usr/local/bin/orchestrator-agent.new
+    echo "the downloaded agent does not match the checksum this server published; refusing to install it" >&2
+    exit 1
+  fi
+fi
 chmod +x /usr/local/bin/orchestrator-agent.new
 mv /usr/local/bin/orchestrator-agent.new /usr/local/bin/orchestrator-agent
 

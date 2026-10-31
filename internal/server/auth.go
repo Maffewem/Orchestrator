@@ -217,20 +217,67 @@ func (l *limiter) reset(key string) {
 	l.mu.Unlock()
 }
 
-func clientIP(r *http.Request) string {
+// clientIP is the address a request really came from. X-Forwarded-For is believed only when
+// the direct peer is a configured trusted proxy (Caddy, a tunnel); otherwise anyone could
+// pick their own address and dodge the login throttle.
+func (s *Server) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
+	}
+	if len(s.trusted) == 0 || !s.isTrusted(host) {
+		return host
+	}
+	// Walk the chain from the right: the first address that is not a trusted proxy is the client.
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		h := strings.TrimSpace(hops[i])
+		if ip := net.ParseIP(h); ip != nil && !s.isTrusted(h) {
+			return ip.String()
+		}
 	}
 	return host
+}
+
+func (s *Server) isTrusted(host string) bool {
+	ip := net.ParseIP(host)
+	for _, n := range s.trusted {
+		if ip != nil && n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseTrustedProxies reads a comma-separated list of IPs and CIDR ranges.
+func parseTrustedProxies(list string) ([]*net.IPNet, error) {
+	var out []*net.IPNet
+	for _, f := range strings.Split(list, ",") {
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		if !strings.Contains(f, "/") {
+			if strings.Contains(f, ":") {
+				f += "/128"
+			} else {
+				f += "/32"
+			}
+		}
+		_, n, err := net.ParseCIDR(f)
+		if err != nil {
+			return nil, fmt.Errorf("trusted proxy %q: %w", f, err)
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 // verifyLogin checks credentials with throttling. Scopes keep visitors of a protected worker
 // (who all arrive from the device's address) from locking people out of the dashboard. It returns the user or an error message.
 func (s *Server) verifyLogin(ctx context.Context, r *http.Request, scope, name, pw string) (*store.User, string) {
-	key := scope + "|" + strings.ToLower(name) + "|" + clientIP(r)
+	key := scope + "|" + strings.ToLower(name) + "|" + s.clientIP(r)
 	// A second, address-wide key stops one client spraying passwords across many usernames.
-	ipKey := scope + "|*|" + clientIP(r)
+	ipKey := scope + "|*|" + s.clientIP(r)
 	if s.logins.locked(key) || s.logins.locked(ipKey) {
 		return nil, "too many failed attempts; try again in a minute"
 	}
@@ -304,7 +351,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	key := "setup|" + clientIP(r)
+	key := "setup|" + s.clientIP(r)
 	if s.logins.locked(key) {
 		writeError(w, http.StatusTooManyRequests, "too many failed attempts; try again in a minute")
 		return

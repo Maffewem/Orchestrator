@@ -199,6 +199,20 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		return err
 	}
 	st.logf("Container is %s", state.Status)
+	if rerr := a.waitReachable(ctx, st, id, spec, 40*time.Second); rerr != nil {
+		if logs, lerr := a.docker.Logs(ctx, id, 40); lerr == nil && logs != "" {
+			st.logf("Last output from the container:")
+			for _, l := range strings.Split(strings.TrimRight(logs, "\n"), "\n") {
+				st.logf("  %s", l)
+			}
+		}
+		if api.IsNode(spec) || spec.Labels["orchestrator.preview"] != "" {
+			a.discard(ctx, id)
+			a.restore(ctx, st, previous, spec.Service)
+			return rerr
+		}
+		st.logf("Warning: %v", rerr)
+	}
 	if previous != "" {
 		if err := a.docker.Remove(ctx, previous); err != nil {
 			st.logf("Warning: could not remove previous container %s: %v", backup, err)

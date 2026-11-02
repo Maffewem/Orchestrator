@@ -24,10 +24,10 @@ export default function ContainersPage() {
   useCrumbs([{ label: "Workers" }]);
   const { data, reload } = usePoll(api.containers, 5000);
   const projects = usePoll(api.projects, 15000);
-  const edge = (projects.data ?? []).filter((p) => p.source.type === "cloudflare" && `${p.name} ${p.cloudflare?.url ?? ""}`.toLowerCase().includes(q.toLowerCase()));
   const [q, setQ] = useState("");
   const [state, setState] = useState("all");
   const [group, setGroup] = useState(true);
+  const edge = (projects.data ?? []).filter((p) => p.source.type === "cloudflare" && `${p.name} ${p.cloudflare?.url ?? ""}`.toLowerCase().includes(q.toLowerCase()));
   const isAdmin = useCan("admin");
   const rows = (data ?? []).filter(
     (c) =>

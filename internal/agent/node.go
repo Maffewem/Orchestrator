@@ -177,7 +177,7 @@ func planNode(dir string, n *api.NodeSpec, buildArgs []string, port string) (*no
 		fmt.Fprintf(&d, "RUN mkdir /out && %s && [ \"$(ls -A /out)\" ] || (echo 'no build output found; set the output directory' >&2; exit 1)\n", find)
 		d.WriteString("FROM nginx:alpine\nCOPY --from=build /out /usr/share/nginx/html\nEXPOSE 80\n")
 	} else {
-		fmt.Fprintf(&d, "FROM build\nENV NODE_ENV=production PORT=%s\nEXPOSE %s\nCMD [\"sh\", \"-c\", %s]\n", port, port, strconv.Quote(p.Start))
+		fmt.Fprintf(&d, "FROM build\nENV NODE_ENV=production PORT=%s HOST=0.0.0.0 HOSTNAME=0.0.0.0\nEXPOSE %s\nCMD [\"sh\", \"-c\", %s]\n", port, port, strconv.Quote(p.Start))
 	}
 	p.Dockerfile = d.String()
 	return p, nil

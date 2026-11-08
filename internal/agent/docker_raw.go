@@ -133,6 +133,12 @@ func (d *Docker) DisableRestart(ctx context.Context, id string) error {
 		map[string]any{"RestartPolicy": map[string]string{"Name": "no"}}, nil)
 }
 
+// SetRestart sets a container's restart policy (no, always, unless-stopped, on-failure).
+func (d *Docker) SetRestart(ctx context.Context, id, policy string) error {
+	return d.call(ctx, http.MethodPost, "/containers/"+id+"/update", nil,
+		map[string]any{"RestartPolicy": map[string]string{"Name": policy}}, nil)
+}
+
 // RemoveIfExists removes a container, ignoring "no such container".
 func (d *Docker) RemoveIfExists(ctx context.Context, id string) error {
 	if err := d.Remove(ctx, id); err != nil && !isStatus(err, http.StatusNotFound) {

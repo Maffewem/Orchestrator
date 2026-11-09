@@ -413,6 +413,8 @@ export interface DomainsView {
 
 export interface Settings {
   base_domain: string;
+  /** Addresses agents are told to know this server by, most preferred first. */
+  agent_urls: string[] | null;
   backup_password_set: boolean;
   cloudflare: { connected: boolean; proxied: boolean; deploy: { configured: boolean; account_id: string; own_token: boolean } };
   ssl_mode: "http" | "dns";
@@ -803,6 +805,7 @@ export const api = {
     request<{ connected: boolean; login?: string }>("PUT", "/api/settings/github", { token }),
   setCloudflare: (b: { token?: string; proxied?: boolean }) =>
     request<{ connected: boolean; zones?: string[]; proxied?: boolean }>("PUT", "/api/settings/cloudflare", { token: b.token ?? "", proxied: b.proxied }),
+  setAgentURLs: (urls: string[]) => request<{ agent_urls: string[] }>("PUT", "/api/settings/agent-urls", { urls }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   createDeviceSetup: (b: { proxy: boolean; tunnel_token?: string; tunnel_via?: "" | "proxy"; maintenance: boolean; maintenance_note?: string }) =>

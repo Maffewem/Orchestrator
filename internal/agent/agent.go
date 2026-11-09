@@ -42,19 +42,29 @@ type state struct {
 	Server     string `json:"server"`
 	DeviceID   string `json:"device_id"`
 	AgentToken string `json:"agent_token"`
+	// ServerKey is the server's public identity key, used to recognise it at a new address.
+	ServerKey string `json:"server_key,omitempty"`
+	// Servers are the addresses the server announced; Found is the last one discovery found.
+	Servers []string `json:"servers,omitempty"`
+	Found   string   `json:"found,omitempty"`
 }
 
 type Agent struct {
-	cfg      Config
-	srvMu    sync.Mutex
-	servers  []string // every configured control-plane URL; cfg.Server is the one in use
-	log      *slog.Logger
-	http     *http.Client
-	docker   *Docker
-	state    state
-	interval time.Duration
-	work     chan api.Command
-	restart  bool // set by an update: exit after reporting
+	cfg     Config
+	srvMu   sync.Mutex
+	servers []string // every known control-plane URL; cfg.Server is the one in use
+	// configured are the URLs from ORCH_SERVER; servers adds announced and discovered ones.
+	configured   []string
+	fails        int // heartbeats failed in a row
+	lastDiscover time.Time
+	scanHosts    func() []string // hosts discovery probes; nil means the local networks
+	log          *slog.Logger
+	http         *http.Client
+	docker       *Docker
+	state        state
+	interval     time.Duration
+	work         chan api.Command
+	restart      bool // set by an update: exit after reporting
 
 	cancelMu  sync.Mutex
 	cancelled map[string]bool // command ids the user gave up on
@@ -87,13 +97,14 @@ func New(cfg Config) (*Agent, error) {
 		return nil, err
 	}
 	return &Agent{
-		cfg:      cfg,
-		servers:  urls,
-		log:      cfg.Logger,
-		http:     &http.Client{Timeout: 30 * time.Second},
-		docker:   d,
-		interval: 5 * time.Second,
-		work:     make(chan api.Command, 64),
+		cfg:        cfg,
+		servers:    urls,
+		configured: urls,
+		log:        cfg.Logger,
+		http:       &http.Client{Timeout: 30 * time.Second},
+		docker:     d,
+		interval:   5 * time.Second,
+		work:       make(chan api.Command, 64),
 	}, nil
 }
 
@@ -115,7 +126,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		case errors.Is(err, errUnauthorized):
 			// The device was removed from the fleet; join again if we can.
 			a.log.Warn("agent token rejected, re-registering")
+			// Drop the saved identity too, or ensureRegistered would load the rejected token again.
 			a.state = state{}
+			os.Remove(a.cfg.StatePath)
 			if err := a.ensureRegistered(ctx); err != nil {
 				return err
 			}
@@ -124,6 +137,10 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.log.Warn("heartbeat failed", "err", err)
 			wait = backoff
 			backoff = min(backoff*2, time.Minute)
+			a.nextServer()
+			if a.maybeDiscover(ctx) {
+				wait, backoff = 0, time.Second
+			}
 		default:
 			backoff = time.Second
 		}
@@ -168,9 +185,9 @@ func (a *Agent) ensureRegistered(ctx context.Context) error {
 			if st.Server != a.server() {
 				a.log.Info("control plane URL changed", "from", st.Server, "to", a.server())
 				a.state.Server = a.server()
-				nb, _ := json.Marshal(a.state)
-				_ = os.WriteFile(a.cfg.StatePath, nb, 0o600)
+				a.saveState()
 			}
+			a.setServers("")
 			return nil
 		}
 	}
@@ -194,7 +211,7 @@ func (a *Agent) ensureRegistered(ctx context.Context) error {
 		case <-time.After(5 * time.Second):
 		}
 	}
-	a.state = state{Server: a.server(), DeviceID: res.DeviceID, AgentToken: res.AgentToken}
+	a.state = state{Server: a.server(), DeviceID: res.DeviceID, AgentToken: res.AgentToken, ServerKey: res.ServerKey}
 	if err := os.MkdirAll(filepath.Dir(a.cfg.StatePath), 0o700); err != nil {
 		return err
 	}
@@ -221,6 +238,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 		return err
 	}
 	a.confirmUpdate()
+	a.learn(res)
 	if res.IntervalSeconds > 0 {
 		a.interval = time.Duration(res.IntervalSeconds) * time.Second
 	}

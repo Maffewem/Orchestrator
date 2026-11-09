@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Archive, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon } from "lucide-react";
+import { Archive, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar } from "lucide-react";
 import { api, type Settings } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
@@ -10,6 +10,7 @@ import { getTheme, setTheme, type ThemeChoice } from "../theme";
 import { HTTPSSettings } from "../components/HTTPSSettings";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { SSOSettings } from "../components/SSOSettings";
+import { AgentAddresses } from "../components/AgentAddresses";
 import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
 import { CloudflareDeploy } from "../components/CloudflareDeploy";
@@ -108,6 +109,7 @@ export default function SettingsPage() {
     backups: "backup password encrypt",
     serverbackup: "server backup restore database schedule download",
     join: "join token devices register",
+    agents: "server address agents ip url discovery offline recover network",
   };
   const vis = (id: string) => !find.trim() || keywords[id].includes(find.trim().toLowerCase());
 
@@ -371,6 +373,20 @@ export default function SettingsPage() {
             </div>
             {baseMsg && <p className="mt-2 text-sm text-neutral-600">{baseMsg}</p>}
           </div>
+        </Collapsible>
+        )}
+        {vis("agents") && (
+        <Collapsible
+          id="agents"
+          defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <Radar className="size-4" /> Server addresses
+              </span>
+            }
+            subtitle="How devices find this server, and what happens when its address changes."
+        >
+          <AgentAddresses urls={s.agent_urls ?? []} onSaved={settings.reload} />
         </Collapsible>
         )}
         {vis("backups") && (

@@ -235,6 +235,18 @@ the `orchestrator-agent` service, so on a device that looks offline use
 `systemctl status orchestrator-agent` and `journalctl -u orchestrator-agent -n 100`. Agents
 reconnect on their own once the server is back.
 
+### When the server's address changes
+
+An agent is installed with one server URL (`ORCH_SERVER`, which may also be several
+comma-separated URLs). It also saves the addresses listed under **Settings → Server
+addresses**, so add a new address there before a planned move. If every known address
+fails three times in a row, the agent looks for the server itself: it tries this machine and
+then every host on its own local IPv4 networks, on the port it already knows, and reconnects
+only to one that signs a fresh challenge with the identity key the agent saved earlier. The
+agent only dials out. Discovery covers plain-HTTP addresses on the same LAN; devices on other
+networks need a hostname or address that does not change. To change it by hand, edit
+`ORCH_SERVER` in `/etc/orchestrator-agent/env` and restart the service.
+
 ## Development
 
 ```sh

@@ -131,7 +131,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	s.event(r.Context(), d.ID, "info", "device.registered", fmt.Sprintf("%s joined the fleet", d.Name))
 	s.applyDeviceSetup(r.Context(), d, req.Setup)
-	writeJSON(w, http.StatusCreated, api.RegisterResponse{DeviceID: d.ID, AgentToken: token})
+	writeJSON(w, http.StatusCreated, api.RegisterResponse{DeviceID: d.ID, AgentToken: token, ServerKey: s.serverKey()})
 }
 
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +150,12 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		s.event(ctx, d.ID, "info", "device.online", d.Name+" is back online")
 	}
 	s.diffContainers(r, d, req.Containers)
+	if d.Host.Server != "" && req.Host.Server != d.Host.Server {
+		// The agent found the server at a new address; the device proxy asks that address
+		// whether a visitor may enter, so its configuration has to follow.
+		s.event(ctx, d.ID, "info", "device.server_url", fmt.Sprintf("%s now reaches the server at %s (was %s)", d.Name, req.Host.Server, d.Host.Server))
+		s.syncProxy(ctx, d.ID)
+	}
 
 	s.metrics.add(d.ID, req.Metrics)
 
@@ -164,6 +170,8 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		Cancel:          cancel,
 		Commands:        cmds,
 		IntervalSeconds: int(s.cfg.HeartbeatInterval / time.Second),
+		ServerKey:       s.serverKey(),
+		ServerURLs:      s.agentURLs(ctx),
 	})
 }
 
@@ -627,6 +635,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"heartbeat_interval_seconds": int(s.cfg.HeartbeatInterval / time.Second),
 		"version":                    s.cfg.Version,
 		"base_domain":                s.baseDomain(r.Context()),
+		"agent_urls":                 s.agentURLs(r.Context()),
 		"backup_password_set":        s.backupPassword(r.Context()) != "",
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),

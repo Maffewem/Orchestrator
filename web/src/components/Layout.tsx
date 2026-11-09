@@ -35,6 +35,7 @@ const settingsSections = [
   ["backups", "Backup password"],
   ["serverbackup", "Server backup"],
   ["join", "Join token"],
+  ["agents", "Server addresses"],
 ] as const;
 
 const navGroups: { title?: string; items: NavItem[] }[] = [

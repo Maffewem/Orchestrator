@@ -103,7 +103,20 @@ type RegisterRequest struct {
 type RegisterResponse struct {
 	DeviceID   string `json:"device_id"`
 	AgentToken string `json:"agent_token"`
+	// ServerKey is the server's public identity key (base64 Ed25519). An agent keeps it so it
+	// can recognise this server again at a new address.
+	ServerKey string `json:"server_key,omitempty"`
 }
+
+// IdentifyResponse answers GET /api/agent/identify?nonce=...: the server signs
+// IdentifyMessage(nonce) with its identity key.
+type IdentifyResponse struct {
+	ServerKey string `json:"server_key"`
+	Signature string `json:"signature"`
+}
+
+// IdentifyMessage is what a server signs to prove who it is to an agent looking for it.
+func IdentifyMessage(nonce string) []byte { return []byte("orchestrator-identify:" + nonce) }
 
 type HeartbeatRequest struct {
 	Host       HostInfo    `json:"host"`
@@ -116,6 +129,11 @@ type HeartbeatResponse struct {
 	IntervalSeconds int       `json:"interval_seconds"`
 	// Cancel lists ids of recently cancelled commands, so an agent can abort one it is running.
 	Cancel []string `json:"cancel,omitempty"`
+	// ServerKey is the server's public identity key; see RegisterResponse.
+	ServerKey string `json:"server_key,omitempty"`
+	// ServerURLs are the addresses the admin listed for agents (Settings > Agents). An agent
+	// saves them and falls back to them when its own address stops answering.
+	ServerURLs []string `json:"server_urls,omitempty"`
 }
 
 // Command actions understood by the agent.

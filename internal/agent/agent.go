@@ -58,13 +58,17 @@ type Agent struct {
 	fails        int // heartbeats failed in a row
 	lastDiscover time.Time
 	scanHosts    func() []string // hosts discovery probes; nil means the local networks
-	log          *slog.Logger
-	http         *http.Client
-	docker       *Docker
-	state        state
-	interval     time.Duration
-	work         chan api.Command
-	restart      bool // set by an update: exit after reporting
+
+	netMu    sync.Mutex
+	netCache []api.NetAddr
+	netAt    time.Time
+	log      *slog.Logger
+	http     *http.Client
+	docker   *Docker
+	state    state
+	interval time.Duration
+	work     chan api.Command
+	restart  bool // set by an update: exit after reporting
 
 	cancelMu  sync.Mutex
 	cancelled map[string]bool // command ids the user gave up on

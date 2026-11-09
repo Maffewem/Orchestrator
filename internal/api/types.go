@@ -27,6 +27,20 @@ type HostInfo struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 	// Server is the control plane URL the agent talks to; the device proxy uses it to ask whether a visitor may enter.
 	Server string `json:"server,omitempty"`
+	// ServerVia says where that URL came from: configured (ORCH_SERVER), announced (the list
+	// in Settings) or discovered (found on the local network after the others failed).
+	ServerVia string `json:"server_via,omitempty"`
+	// Network details each address: its interface and, where the agent can tell, whether it
+	// was handed out by DHCP and so may change.
+	Network []NetAddr `json:"network,omitempty"`
+}
+
+// NetAddr is one IPv4 address of a device.
+type NetAddr struct {
+	Interface string `json:"interface"`
+	Address   string `json:"address"`
+	// Assigned is "dhcp", "static" or "" when the agent cannot tell.
+	Assigned string `json:"assigned,omitempty"`
 }
 
 // Agent capabilities.
@@ -41,6 +55,7 @@ const (
 	CapFileStore = "filestore" // file.store, receives server backups
 	CapCompose   = "compose"   // deploy of a Compose stack, and stack.start/stop/down
 	CapTunnel    = "tunnel"    // tunnel.sync, runs cloudflared
+	CapDiscover  = "discover"  // finds the server again by itself when its address changes
 )
 
 // DockerInfo summarises the container engine on a device.

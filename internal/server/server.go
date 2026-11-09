@@ -68,6 +68,7 @@ type Config struct {
 
 type Server struct {
 	identity      ed25519.PrivateKey // proves to agents that this is their server; see discover.go
+	netNotes      netNotices         // recent network changes per device; see connectivity.go
 	store         *store.Store
 	cfg           Config
 	log           *slog.Logger
@@ -331,6 +332,7 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/projects/{id}/cloudflare/refresh", s.handleRefreshCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/agent-urls", s.handleSetAgentURLs)
+	admin("GET /api/connectivity", s.handleConnectivity)
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/sso", s.handleSetSSO)
 	admin("PUT /api/settings/https", s.handleSetHTTPS)

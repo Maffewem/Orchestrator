@@ -185,3 +185,15 @@ func TestRunRecoversThroughFallbackAndDiscovery(t *testing.T) {
 	go b.Run(ctx2)
 	wait("discovery")
 }
+
+func TestParseAssignments(t *testing.T) {
+	got := parseAssignments([]byte(`[{"ifname":"lo","addr_info":[{"local":"127.0.0.1"}]},
+		{"ifname":"eth0","addr_info":[{"local":"192.168.0.184","dynamic":true,"noprefixroute":true}]},
+		{"ifname":"wlan0","addr_info":[{"local":"10.0.0.5"}]}]`))
+	if got["192.168.0.184"] != "dhcp" || got["10.0.0.5"] != "static" {
+		t.Fatalf("got %v", got)
+	}
+	if parseAssignments([]byte("not json")) != nil {
+		t.Fatal("garbage should give nothing")
+	}
+}

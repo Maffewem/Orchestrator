@@ -381,10 +381,10 @@ export default function SettingsPage() {
           defaultOpen={false}
             title={
               <span className="flex items-center gap-2">
-                <Radar className="size-4" /> Server addresses
+                <Radar className="size-4" /> Server connectivity
               </span>
             }
-            subtitle="How devices find this server, and what happens when its address changes."
+            subtitle="How each device reaches this server, and what happens when an address changes."
         >
           <AgentAddresses urls={s.agent_urls ?? []} onSaved={settings.reload} />
         </Collapsible>

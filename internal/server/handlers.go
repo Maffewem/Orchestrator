@@ -40,6 +40,9 @@ func (s *Server) view(d *store.Device) DeviceView {
 			v.Health = level
 		}
 	}
+	if n := s.netNotes.get(d.ID); n != "" {
+		raise("warning", n)
+	}
 	if d.Host.Docker == nil || d.Host.Docker.Error != "" {
 		raise("warning", "Docker engine is unreachable")
 	}
@@ -150,12 +153,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		s.event(ctx, d.ID, "info", "device.online", d.Name+" is back online")
 	}
 	s.diffContainers(r, d, req.Containers)
-	if d.Host.Server != "" && req.Host.Server != d.Host.Server {
-		// The agent found the server at a new address; the device proxy asks that address
-		// whether a visitor may enter, so its configuration has to follow.
-		s.event(ctx, d.ID, "info", "device.server_url", fmt.Sprintf("%s now reaches the server at %s (was %s)", d.Name, req.Host.Server, d.Host.Server))
-		s.syncProxy(ctx, d.ID)
-	}
+	s.noteNetworkChanges(ctx, d, req.Host)
 
 	s.metrics.add(d.ID, req.Metrics)
 

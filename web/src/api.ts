@@ -411,6 +411,31 @@ export interface DomainsView {
   warnings?: string[];
 }
 
+export interface ConnAddress {
+  url: string;
+  listed: boolean;
+  kind: "ip" | "name" | "loopback";
+  assigned?: "dhcp" | "static" | "";
+  devices: string[];
+}
+export interface ConnDevice {
+  id: string;
+  name: string;
+  status: "online" | "offline";
+  server: string;
+  via: "" | "configured" | "announced" | "discovered";
+  recovers: boolean;
+  network: { interface?: string; address: string; assigned?: string }[];
+}
+export interface ConnView {
+  host: string;
+  addresses: ConnAddress[];
+  suggestions: string[];
+  devices: ConnDevice[];
+  warnings: string[];
+  changes: { id: number; level: string; message: string; created_at: string }[];
+}
+
 export interface Settings {
   base_domain: string;
   /** Addresses agents are told to know this server by, most preferred first. */
@@ -805,6 +830,7 @@ export const api = {
     request<{ connected: boolean; login?: string }>("PUT", "/api/settings/github", { token }),
   setCloudflare: (b: { token?: string; proxied?: boolean }) =>
     request<{ connected: boolean; zones?: string[]; proxied?: boolean }>("PUT", "/api/settings/cloudflare", { token: b.token ?? "", proxied: b.proxied }),
+  connectivity: () => request<ConnView>("GET", "/api/connectivity"),
   setAgentURLs: (urls: string[]) => request<{ agent_urls: string[] }>("PUT", "/api/settings/agent-urls", { urls }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),

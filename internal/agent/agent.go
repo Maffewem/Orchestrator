@@ -46,6 +46,8 @@ type state struct {
 
 type Agent struct {
 	cfg      Config
+	srvMu    sync.Mutex
+	servers  []string // every configured control-plane URL; cfg.Server is the one in use
 	log      *slog.Logger
 	http     *http.Client
 	docker   *Docker
@@ -68,16 +70,25 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	cfg.Server = strings.TrimRight(cfg.Server, "/")
-	if cfg.Server == "" {
+	// The server may be several comma-separated URLs (e.g. an IP and a hostname); the agent
+	// moves to the next one whenever the current one stops answering.
+	var urls []string
+	for _, u := range strings.Split(cfg.Server, ",") {
+		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
+			urls = append(urls, u)
+		}
+	}
+	if len(urls) == 0 {
 		return nil, errors.New("server URL is required")
 	}
+	cfg.Server = urls[0]
 	d, err := NewDocker(cfg.DockerHost)
 	if err != nil {
 		return nil, err
 	}
 	return &Agent{
 		cfg:      cfg,
+		servers:  urls,
 		log:      cfg.Logger,
 		http:     &http.Client{Timeout: 30 * time.Second},
 		docker:   d,
@@ -92,7 +103,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err := a.ensureRegistered(ctx); err != nil {
 		return err
 	}
-	a.log.Info("agent running", "device", a.state.DeviceID, "server", a.cfg.Server)
+	a.log.Info("agent running", "device", a.state.DeviceID, "server", a.server())
 	go a.worker(ctx)
 	go a.streamLoop(ctx)
 
@@ -124,11 +135,42 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
+func (a *Agent) server() string {
+	a.srvMu.Lock()
+	defer a.srvMu.Unlock()
+	return a.cfg.Server
+}
+
+// nextServer switches to the next configured URL, if there is more than one.
+func (a *Agent) nextServer() {
+	a.srvMu.Lock()
+	defer a.srvMu.Unlock()
+	if len(a.servers) < 2 {
+		return
+	}
+	for i, u := range a.servers {
+		if u == a.cfg.Server {
+			a.cfg.Server = a.servers[(i+1)%len(a.servers)]
+			a.log.Info("trying the next control plane URL", "server", a.cfg.Server)
+			return
+		}
+	}
+}
+
 func (a *Agent) ensureRegistered(ctx context.Context) error {
 	if b, err := os.ReadFile(a.cfg.StatePath); err == nil {
 		var st state
-		if json.Unmarshal(b, &st) == nil && st.AgentToken != "" && st.Server == a.cfg.Server {
+		if json.Unmarshal(b, &st) == nil && st.AgentToken != "" {
+			// The server's address may have changed (new IP, moved to ethernet, new
+			// hostname). Keep the identity; if it is a different server the first
+			// heartbeat gets a 401 and the agent re-registers with its join token.
 			a.state = st
+			if st.Server != a.server() {
+				a.log.Info("control plane URL changed", "from", st.Server, "to", a.server())
+				a.state.Server = a.server()
+				nb, _ := json.Marshal(a.state)
+				_ = os.WriteFile(a.cfg.StatePath, nb, 0o600)
+			}
 			return nil
 		}
 	}
@@ -152,7 +194,7 @@ func (a *Agent) ensureRegistered(ctx context.Context) error {
 		case <-time.After(5 * time.Second):
 		}
 	}
-	a.state = state{Server: a.cfg.Server, DeviceID: res.DeviceID, AgentToken: res.AgentToken}
+	a.state = state{Server: a.server(), DeviceID: res.DeviceID, AgentToken: res.AgentToken}
 	if err := os.MkdirAll(filepath.Dir(a.cfg.StatePath), 0o700); err != nil {
 		return err
 	}
@@ -313,7 +355,7 @@ func (a *Agent) post(ctx context.Context, path, token string, body, out any) err
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.Server+path, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.server()+path, bytes.NewReader(b))
 	if err != nil {
 		return err
 	}

@@ -27,6 +27,20 @@ type HostInfo struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 	// Server is the control plane URL the agent talks to; the device proxy uses it to ask whether a visitor may enter.
 	Server string `json:"server,omitempty"`
+	// ServerVia says where that URL came from: configured (ORCH_SERVER), announced (the list
+	// in Settings) or discovered (found on the local network after the others failed).
+	ServerVia string `json:"server_via,omitempty"`
+	// Network details each address: its interface and, where the agent can tell, whether it
+	// was handed out by DHCP and so may change.
+	Network []NetAddr `json:"network,omitempty"`
+}
+
+// NetAddr is one IPv4 address of a device.
+type NetAddr struct {
+	Interface string `json:"interface"`
+	Address   string `json:"address"`
+	// Assigned is "dhcp", "static" or "" when the agent cannot tell.
+	Assigned string `json:"assigned,omitempty"`
 }
 
 // Agent capabilities.
@@ -41,6 +55,7 @@ const (
 	CapFileStore = "filestore" // file.store, receives server backups
 	CapCompose   = "compose"   // deploy of a Compose stack, and stack.start/stop/down
 	CapTunnel    = "tunnel"    // tunnel.sync, runs cloudflared
+	CapDiscover  = "discover"  // finds the server again by itself when its address changes
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -103,7 +118,20 @@ type RegisterRequest struct {
 type RegisterResponse struct {
 	DeviceID   string `json:"device_id"`
 	AgentToken string `json:"agent_token"`
+	// ServerKey is the server's public identity key (base64 Ed25519). An agent keeps it so it
+	// can recognise this server again at a new address.
+	ServerKey string `json:"server_key,omitempty"`
 }
+
+// IdentifyResponse answers GET /api/agent/identify?nonce=...: the server signs
+// IdentifyMessage(nonce) with its identity key.
+type IdentifyResponse struct {
+	ServerKey string `json:"server_key"`
+	Signature string `json:"signature"`
+}
+
+// IdentifyMessage is what a server signs to prove who it is to an agent looking for it.
+func IdentifyMessage(nonce string) []byte { return []byte("orchestrator-identify:" + nonce) }
 
 type HeartbeatRequest struct {
 	Host       HostInfo    `json:"host"`
@@ -116,6 +144,11 @@ type HeartbeatResponse struct {
 	IntervalSeconds int       `json:"interval_seconds"`
 	// Cancel lists ids of recently cancelled commands, so an agent can abort one it is running.
 	Cancel []string `json:"cancel,omitempty"`
+	// ServerKey is the server's public identity key; see RegisterResponse.
+	ServerKey string `json:"server_key,omitempty"`
+	// ServerURLs are the addresses the admin listed for agents (Settings > Agents). An agent
+	// saves them and falls back to them when its own address stops answering.
+	ServerURLs []string `json:"server_urls,omitempty"`
 }
 
 // Command actions understood by the agent.

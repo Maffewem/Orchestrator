@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
@@ -66,6 +67,8 @@ type Config struct {
 }
 
 type Server struct {
+	identity      ed25519.PrivateKey // proves to agents that this is their server; see discover.go
+	netNotes      netNotices         // recent network changes per device; see connectivity.go
 	store         *store.Store
 	cfg           Config
 	log           *slog.Logger
@@ -140,6 +143,10 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 		} else if err != nil {
 			return nil, "", err
 		}
+	}
+
+	if err := s.loadIdentity(ctx); err != nil {
+		return nil, "", err
 	}
 
 	var generated string
@@ -222,6 +229,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Agent API: register with the join token, then authenticate with the per-device token.
 	mux.HandleFunc("POST /api/agent/register", s.handleRegister)
+	mux.HandleFunc("GET /api/agent/identify", s.handleIdentify)
 	mux.Handle("POST /api/agent/heartbeat", s.agentAuth(s.handleHeartbeat))
 	mux.Handle("POST /api/agent/commands/{id}/result", s.agentAuth(s.handleCommandResult))
 	mux.Handle("POST /api/agent/deployments/{id}/steps/{idx}", s.agentAuth(s.handleStepUpdate))
@@ -323,6 +331,8 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/projects/{id}/cloudflare", s.handleGetCloudflare)
 	admin("POST /api/projects/{id}/cloudflare/refresh", s.handleRefreshCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
+	admin("PUT /api/settings/agent-urls", s.handleSetAgentURLs)
+	admin("GET /api/connectivity", s.handleConnectivity)
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/sso", s.handleSetSSO)
 	admin("PUT /api/settings/https", s.handleSetHTTPS)

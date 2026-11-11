@@ -27,7 +27,7 @@ const sealPrefix = "enc:v1:"
 var sensitiveSettings = map[string]bool{
 	"github_token": true, "github_webhook_secret": true, "cloudflare_token": true,
 	"backup_password": true, "sso_config": true, "server_backup_destinations": true,
-	"https_config": true, "join_token": true,
+	"https_config": true, "join_token": true, "server_identity_key": true,
 }
 
 // settingBackupKey carries the secret key inside a password-protected server backup so that

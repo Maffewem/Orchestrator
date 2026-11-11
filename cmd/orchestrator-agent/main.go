@@ -24,7 +24,7 @@ func env(key, def string) string {
 func main() {
 	cfg := agent.Config{}
 	var labels string
-	flag.StringVar(&cfg.Server, "server", env("ORCH_SERVER", ""), "control plane URL, e.g. http://orchestrator.local:8080")
+	flag.StringVar(&cfg.Server, "server", env("ORCH_SERVER", ""), "control plane URL, e.g. http://orchestrator.local:8080; several comma-separated URLs are tried in turn")
 	flag.StringVar(&cfg.JoinToken, "join-token", env("ORCH_JOIN_TOKEN", ""), "join token from the dashboard (first run only)")
 	flag.StringVar(&cfg.Name, "name", env("ORCH_NAME", ""), "device name (defaults to the hostname)")
 	flag.StringVar(&labels, "labels", env("ORCH_LABELS", ""), "comma-separated roles/labels, e.g. pi,edge,dns")

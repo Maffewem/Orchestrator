@@ -104,7 +104,7 @@ func (d *Docker) ExecShell(ctx context.Context, container string, cols, rows int
 
 // get fetches JSON from the control plane without the short client timeout, for long-polls.
 func (a *Agent) get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.server()+path, nil)
 	if err != nil {
 		return err
 	}

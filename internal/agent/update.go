@@ -59,7 +59,7 @@ func (a *Agent) selfUpdate(ctx context.Context) (msg string, restart bool, err e
 	}
 
 	var info api.AgentUpdateInfo
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+"/api/agent/update?arch="+archName(), nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, a.server()+"/api/agent/update?arch="+archName(), nil)
 	req.Header.Set("Authorization", "Bearer "+a.state.AgentToken)
 	resp, err := a.http.Do(req)
 	if err != nil {
@@ -99,7 +99,7 @@ func (a *Agent) selfUpdate(ctx context.Context) (msg string, restart bool, err e
 }
 
 func (a *Agent) download(ctx context.Context, path, dest, wantSum string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.server()+path, nil)
 	if err != nil {
 		return err
 	}

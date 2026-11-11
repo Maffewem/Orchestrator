@@ -21,7 +21,7 @@ func (a *Agent) storeServerBackup(ctx context.Context, name, dir, keep string) e
 	if !filepath.IsAbs(dir) {
 		return fmt.Errorf("folder %q is not an absolute path", dir)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+"/api/agent/server-backups/"+url.PathEscape(name), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.server()+"/api/agent/server-backups/"+url.PathEscape(name), nil)
 	if err != nil {
 		return err
 	}

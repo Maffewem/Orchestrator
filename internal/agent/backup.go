@@ -109,7 +109,7 @@ func (a *Agent) backup(ctx context.Context, containerID, backupID string) error 
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(a.writeArchive(ctx, pw, containerID, name, inspect, mounts)) }()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.Server+"/api/agent/backups/"+url.PathEscape(backupID), pr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.server()+"/api/agent/backups/"+url.PathEscape(backupID), pr)
 	if err != nil {
 		pr.Close()
 		return err
@@ -193,7 +193,7 @@ func copyPrefixed(tw *tar.Writer, src io.Reader, prefix string) error {
 // stopped while files are written and started again if it was running. Files in the backup
 // overwrite current ones; files created since the backup are left alone.
 func (a *Agent) restoreBackup(ctx context.Context, containerID, backupID string) (err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.cfg.Server+"/api/agent/backups/"+url.PathEscape(backupID), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.server()+"/api/agent/backups/"+url.PathEscape(backupID), nil)
 	if err != nil {
 		return err
 	}

@@ -44,8 +44,8 @@ func (a *Agent) hostInfo() api.HostInfo {
 		CPUs:         runtime.NumCPU(),
 		AgentVersion: Version,
 		InContainer:  InContainer(),
-		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapCompose, api.CapTunnel},
-		Server:       strings.TrimRight(a.cfg.Server, "/"),
+		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapCompose, api.CapTunnel, api.CapDiscover},
+		Server:       strings.TrimRight(a.server(), "/"),
 	}
 	if a.cfg.HostRoot != "" {
 		h.Hostname = readTrim(a.hostPath("/etc/hostname"))
@@ -61,6 +61,8 @@ func (a *Agent) hostInfo() api.HostInfo {
 		h.MemoryTotal = meminfo()["MemTotal"]
 	}
 	h.Addresses = addresses()
+	h.ServerVia = a.serverVia()
+	h.Network = a.network()
 	return h
 }
 

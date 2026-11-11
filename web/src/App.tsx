@@ -18,6 +18,7 @@ import UpdatesPage from "./pages/Updates";
 import WorkerPage from "./pages/Worker";
 import ActivityPage from "./pages/Activity";
 import SettingsPage from "./pages/Settings";
+import VMsDemoPage from "./pages/VMsDemo";
 import { Empty } from "./components/ui";
 
 export default function App() {
@@ -129,6 +130,7 @@ export default function App() {
           <Route path="containers" element={<ContainersPage />} />
           <Route path="backups" element={<BackupsPage />} />
           <Route path="workers/:deviceId/:name/*" element={<WorkerPage />} />
+          <Route path="vms/*" element={<VMsDemoPage />} />
           <Route path="updates" element={<UpdatesPage />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />

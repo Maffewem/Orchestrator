@@ -123,6 +123,11 @@ func Swap(ctx context.Context, d *agent.Docker, o SwapOptions) error {
 		o.Stable = 30 * time.Second
 	}
 	prev := o.Container + "-previous"
+	var orig struct {
+		HostConfig struct {
+			RestartPolicy struct{ Name string } `json:"RestartPolicy"`
+		} `json:"HostConfig"`
+	}
 
 	inspect, err := d.InspectRaw(ctx, o.Container)
 	if err != nil {
@@ -135,9 +140,15 @@ func Swap(ctx context.Context, d *agent.Docker, o SwapOptions) error {
 	if err := d.Rename(ctx, o.Container, prev); err != nil {
 		return fmt.Errorf("rename: %w", err)
 	}
+	json.Unmarshal(inspect, &orig)
+	policy := orig.HostConfig.RestartPolicy.Name
+	if policy == "" || policy == "no" {
+		policy = "unless-stopped"
+	}
 	d.DisableRestart(ctx, prev)
 	if err := d.Stop(ctx, prev); err != nil {
 		d.Rename(ctx, prev, o.Container)
+		d.SetRestart(ctx, o.Container, policy)
 		return fmt.Errorf("stop: %w", err)
 	}
 
@@ -146,6 +157,11 @@ func Swap(ctx context.Context, d *agent.Docker, o SwapOptions) error {
 		d.RemoveIfExists(ctx, o.Container)
 		var errs []error
 		if err := d.Rename(ctx, prev, o.Container); err != nil {
+			errs = append(errs, err)
+		}
+		// The retired copy had its restart policy switched off; without restoring it the
+		// server would stay down after the next reboot or crash.
+		if err := d.SetRestart(ctx, o.Container, policy); err != nil {
 			errs = append(errs, err)
 		}
 		if err := d.Start(ctx, o.Container); err != nil {

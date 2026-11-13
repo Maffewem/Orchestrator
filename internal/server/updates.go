@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -382,6 +383,45 @@ func refForChannel(ref, channel string) string {
 	return base + ":" + channel
 }
 
+func channelLabel(ref string) string {
+	if channelOf(ref) == "dev" {
+		return "Beta"
+	}
+	return "Stable"
+}
+
+// keepSnapshots is how many pre-switch database copies are kept.
+const keepSnapshots = 3
+
+// snapshotDir is where copies of the database from before a channel switch are kept, next to
+// the database so they live in the same volume.
+func (s *Server) snapshotDir() string {
+	return filepath.Join(filepath.Dir(s.cfg.DBPath), "channel-snapshots")
+}
+
+// snapshotForChannel saves the database before a channel switch and prunes old copies. It
+// returns the file's path.
+func (s *Server) snapshotForChannel(ctx context.Context, from, to string) (string, error) {
+	if s.cfg.DBPath == "" || s.cfg.DBPath == ":memory:" {
+		return "(none: in-memory database)", nil
+	}
+	dir := s.snapshotDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, fmt.Sprintf("before-%s-to-%s-%s.db", from, to, time.Now().UTC().Format("20060102-150405")))
+	if err := s.store.Snapshot(ctx, path, false); err != nil {
+		return "", err
+	}
+	if names, err := filepath.Glob(filepath.Join(dir, "before-*.db")); err == nil && len(names) > keepSnapshots {
+		sort.Strings(names) // timestamped names sort oldest first
+		for _, old := range names[:len(names)-keepSnapshots] {
+			os.Remove(old)
+		}
+	}
+	return path, nil
+}
+
 // handleSetChannel moves the server to another channel: it pulls that channel's image and
 // restarts the server on it, the same hand-over as an update.
 func (s *Server) handleSetChannel(w http.ResponseWriter, r *http.Request) {
@@ -389,8 +429,15 @@ func (s *Server) handleSetChannel(w http.ResponseWriter, r *http.Request) {
 		Channel string `json:"channel"`
 		Agents  bool   `json:"agents"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || (in.Channel != "stable" && in.Channel != "dev") {
-		writeError(w, http.StatusBadRequest, `channel must be "stable" or "dev"`)
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if in.Channel == "beta" { // Beta is the dashboard's name for the dev tag
+		in.Channel = "dev"
+	}
+	if in.Channel != "stable" && in.Channel != "dev" {
+		writeError(w, http.StatusBadRequest, `channel must be "stable" or "beta"`)
 		return
 	}
 	self, reason := s.selfInfo(r.Context())
@@ -428,6 +475,13 @@ func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool, switchT
 		// update even when both tags happen to point at the same build.
 		moved := *self
 		moved.ImageRef = switchTo
+		// A newer build may migrate the database in ways an older one can't read, so keep a
+		// copy from before the move; it is the way back if the other channel won't start.
+		snap, err := s.snapshotForChannel(ctx, channelOf(self.ImageRef), channelOf(switchTo))
+		if err != nil {
+			s.setResult(ctx, false, "Channel change not started: could not save a database snapshot first: "+err.Error())
+			return false
+		}
 		latest, err := selfupdate.Check(ctx, s.docker, &moved)
 		if err != nil {
 			s.setResult(ctx, false, "Channel change not started: "+err.Error())
@@ -438,7 +492,7 @@ func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool, switchT
 			s.store.SetSetting(ctx, settingUpdateAgents, "1")
 		}
 		s.setStage("handover")
-		s.event(ctx, "", "info", "update.started", fmt.Sprintf("Moving the server to the %s channel (%s); the dashboard restarts shortly", channelOf(switchTo), orUnknown(latest.Version)))
+		s.event(ctx, "", "info", "update.started", fmt.Sprintf("Moving the server to the %s channel (%s); the dashboard restarts shortly. Database snapshot kept at %s", channelLabel(switchTo), orUnknown(latest.Version), snap))
 		if err := selfupdate.StartHelper(ctx, s.docker, &moved, latest.ImageID); err != nil {
 			s.store.SetSetting(ctx, settingUpdatePending, "")
 			s.store.SetSetting(ctx, settingUpdateAgents, "")

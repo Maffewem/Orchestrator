@@ -28,6 +28,40 @@ function ServerSteps({ stage }: { stage?: string }) {
   );
 }
 
+function ChannelPicker({ st, busy, run }: { st: UpdateStatus; busy: boolean; run: (f: () => Promise<unknown>, updating?: boolean) => void }) {
+  const [pick, setPick] = useState<"stable" | "dev">(st.channel === "dev" ? "dev" : "stable");
+  useEffect(() => setPick(st.channel === "dev" ? "dev" : "stable"), [st.channel]);
+  const changed = pick !== st.channel;
+  return (
+    <div className="space-y-3 rounded-lg border border-neutral-200 p-4">
+      <Field label="Update channel">
+        <select className={inputClass} value={pick} disabled={busy || !st.can_update} onChange={(e) => setPick(e.target.value as "stable" | "dev")}>
+          <option value="stable">Stable (recommended)</option>
+          <option value="dev">Beta (dev builds)</option>
+        </select>
+      </Field>
+      {pick === "dev" && (
+        <p className="rounded-lg bg-amber-50 px-4 py-2 text-sm">
+          Beta builds come straight from the dev branch. They include new features that haven't been tested on real devices and may break. Use a test server, not production. A beta build can change the database so that stable can't read it afterwards; if stable then won't start, the previous container is restored.
+        </p>
+      )}
+      <p className="text-sm text-neutral-600">Agents on your devices follow the server, so changing the channel updates them to the same build.</p>
+      {changed && (
+        <Button
+          variant="primary"
+          disabled={busy || !st.can_update}
+          onClick={async () => {
+            const label = pick === "dev" ? "Beta" : "Stable";
+            if (await confirmDialog({ title: `Move this server and its agents to ${label}?`, message: "The server restarts for a few seconds, then every device's agent updates to match.", confirmLabel: `Switch to ${label}` })) run(() => api.setUpdateChannel(pick, true), true);
+          }}
+        >
+          Switch to {pick === "dev" ? "Beta" : "Stable"}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const run = async (f: () => Promise<unknown>, updating = false) => {
@@ -54,7 +88,7 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
           <div>
             <dt className="text-neutral-500">Channel</dt>
             <dd>
-              <Badge tone={st.channel === "dev" ? "warn" : "ok"}>{st.channel === "dev" ? "Dev" : st.channel === "custom" ? "Pinned tag" : "Stable"}</Badge>
+              <Badge tone={st.channel === "dev" ? "warn" : "ok"}>{st.channel === "dev" ? "Beta (dev)" : st.channel === "custom" ? "Pinned tag" : "Stable"}</Badge>
             </dd>
           </div>
           <div>
@@ -80,6 +114,7 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
             This server can't update itself: {st.reason}. Updating from the dashboard needs the server to run as a Docker container with the Docker socket mounted, which gives that container control of Docker on this machine. Re-run install-server.sh without --no-web-update to enable it (see the README, "Updates").
           </p>
         )}
+        {(st.channel === "stable" || st.channel === "dev") && <ChannelPicker st={st} busy={busy} run={run} />}
         {error && <ErrorNote>{error}</ErrorNote>}
         <div className="flex flex-wrap gap-2">
           <Button loading={st.busy === "checking"} disabled={busy || !st.can_update} icon={<RefreshCw className="size-4" />} onClick={() => run(api.checkUpdate)}>
@@ -95,21 +130,6 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
           >
             {newer ? "Update now" : "Update to latest"}
           </Button>
-          {(st.channel === "stable" || st.channel === "dev") && (
-            <Button
-              disabled={busy || !st.can_update}
-              onClick={async () => {
-                const to = st.channel === "dev" ? "stable" : "dev";
-                const message =
-                  to === "dev"
-                    ? "Dev builds are untested work in progress and may break. Use this on a test server, not production. Data is kept; the server restarts for a few seconds. Moving back to stable later can fail if the dev build changed the database."
-                    : "The server restarts on the stable build for a few seconds. If the dev build changed the database, stable may refuse to start and the previous container is restored.";
-                if (await confirmDialog({ title: `Move this server to the ${to} channel?`, message, confirmLabel: `Move to ${to}` })) run(() => api.setUpdateChannel(to, st.schedule.agents), true);
-              }}
-            >
-              {st.channel === "dev" ? "Switch to stable" : "Switch to dev"}
-            </Button>
-          )}
         </div>
       </div>
     </Card>

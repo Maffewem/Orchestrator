@@ -44,7 +44,7 @@ Hotfixes: branch from `main`, pull request into `main`, then merge `main` back i
   canary on the dev server runs dev agents and production devices stay on stable.
   Use a throwaway GitHub project and a spare domain or tunnel, not production ones.
 * **Moving an existing server between channels** is possible from the Updates page
-  (*Switch to dev* / *Switch to stable*, administrators only). Prefer a separate dev server:
+  (the Update channel selector, Stable or Beta, administrators only; agents follow the server). Prefer a separate dev server:
   a dev build may change the database in a way stable cannot read, in which case stable
   refuses to start and the previous container is restored.
 

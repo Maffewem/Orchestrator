@@ -7,16 +7,24 @@
 # (full control of Docker on this host). Opt out with: ... | sudo sh -s -- --no-web-update
 set -eu
 
-IMAGE="${ORCH_IMAGE:-ghcr.io/maffewem/orchestrator:latest}"
+CHANNEL="${ORCH_CHANNEL:-stable}"   # stable (main) or dev; see "Channels" in the README
+IMAGE="${ORCH_IMAGE:-}"
 PORT="${ORCH_PORT:-8080}"
+NAME="${ORCH_NAME:-orchestrator}"      # container name; change it (and port) to run a second server
+VOLUME="${ORCH_VOLUME:-$NAME-data}"
 WEB_UPDATE=1
 [ "${ORCH_WEB_UPDATE:-1}" = "0" ] && WEB_UPDATE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-web-update) WEB_UPDATE=0; shift ;;
+    --channel) CHANNEL="${2:-}"; shift 2 ;;
+    --channel=*) CHANNEL="${1#*=}"; shift ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
+
+case "$CHANNEL" in stable|dev) ;; *) echo "channel must be stable or dev" >&2; exit 1 ;; esac
+[ -n "$IMAGE" ] || IMAGE="ghcr.io/maffewem/orchestrator:$CHANNEL"
 
 [ "$(id -u)" -eq 0 ] || { echo "please run as root (sudo)" >&2; exit 1; }
 
@@ -33,7 +41,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 docker pull "$IMAGE"
-docker rm -f orchestrator >/dev/null 2>&1 || true
+docker rm -f "$NAME" >/dev/null 2>&1 || true
 if [ "$WEB_UPDATE" = 1 ]; then
   # The server runs as an unprivileged user, so it joins the socket's group.
   SOCK_GID="$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)"
@@ -41,8 +49,8 @@ if [ "$WEB_UPDATE" = 1 ]; then
 else
   set --
 fi
-docker run -d --name orchestrator --restart unless-stopped -p "$PORT:8080" \
-  -v orchestrator-data:/data "$@" "$IMAGE" >/dev/null
+docker run -d --name "$NAME" --restart unless-stopped -p "$PORT:8080" \
+  -v "$VOLUME:/data" "$@" "$IMAGE" >/dev/null
 
 # Repair: containers (workers) created without a restart policy stay down after a reboot.
 for id in $(docker ps -aq --filter label=orchestrator.project 2>/dev/null); do
@@ -54,8 +62,8 @@ check() { # description, command...
   desc="$1"; shift
   if "$@" >/dev/null 2>&1; then echo "  ok   $desc"; else echo "  FAIL $desc"; fail=1; fi
 }
-policy() { [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' orchestrator)" = "unless-stopped" ]; }
-running() { [ "$(docker inspect -f '{{.State.Running}}' orchestrator)" = "true" ]; }
+policy() { [ "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$NAME")" = "unless-stopped" ]; }
+running() { [ "$(docker inspect -f '{{.State.Running}}' "$NAME")" = "true" ]; }
 healthy() {
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     curl -fsS "http://localhost:$PORT/api/health" >/dev/null 2>&1 && return 0
@@ -68,7 +76,7 @@ if command -v systemctl >/dev/null 2>&1; then check "Docker starts at boot" syst
 check "restart policy is unless-stopped" policy
 check "container is running" running
 check "answers on port $PORT" healthy
-[ "$fail" -eq 0 ] || { echo "Some checks failed; see 'docker logs orchestrator'." >&2; exit 1; }
+[ "$fail" -eq 0 ] || { echo "Some checks failed; see 'docker logs $NAME'." >&2; exit 1; }
 
 if [ "$WEB_UPDATE" = 1 ]; then
   echo "Dashboard updates are on (Docker socket mounted). Re-run with --no-web-update to turn them off."
@@ -76,4 +84,4 @@ else
   echo "Dashboard updates are off. Re-run without --no-web-update to turn them on."
 fi
 echo "Orchestrator is running on port $PORT and will restart on boot. Admin token (first install only):"
-docker logs orchestrator 2>&1 | grep -i -A2 "admin token" | head -5 || true
+docker logs $NAME 2>&1 | grep -i -A2 "admin token" | head -5 || true

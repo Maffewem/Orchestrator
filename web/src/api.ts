@@ -608,6 +608,7 @@ export interface AgentProgress {
 export interface UpdateStatus {
   version: string;
   image?: string;
+  channel?: "stable" | "dev" | "custom";
   can_update: boolean;
   reason?: string;
   busy?: "checking" | "updating";
@@ -739,6 +740,7 @@ export const api = {
   updateStatus: () => request<UpdateStatus>("GET", "/api/system/update"),
   checkUpdate: () => request<UpdateStatus>("POST", "/api/system/update/check"),
   applyUpdate: (agents: boolean) => request<UpdateStatus>("POST", `/api/system/update/apply${agents ? "?agents=1" : ""}`),
+  setUpdateChannel: (channel: "stable" | "dev", agents: boolean) => request<UpdateStatus>("PUT", "/api/system/update/channel", { channel, agents }),
   updateAgents: (device?: string) =>
     request<{ queued: number }>("POST", `/api/system/update/agents${device ? `?device=${device}` : ""}`),
   setUpdateSchedule: (s: UpdateSchedule) => request<UpdateStatus>("PUT", "/api/system/update/schedule", s),

@@ -277,6 +277,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/system/update/schedule", s.handleSetUpdateSchedule)
 	admin("POST /api/system/update/check", s.handleUpdateCheck)
 	admin("POST /api/system/update/apply", s.handleUpdateApply)
+	admin("PUT /api/system/update/channel", s.handleSetChannel)
 	admin("POST /api/system/update/agents", s.handleUpdateAgents)
 	admin("GET /api/devices/{id}/workers/{name}/backup-policy", s.handleGetBackupPolicy)
 	admin("PUT /api/devices/{id}/workers/{name}/backup-policy", s.handleSetBackupPolicy)

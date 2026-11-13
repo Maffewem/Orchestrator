@@ -46,10 +46,16 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
     <Card className="mb-6">
       <CardHeader title="Control plane" subtitle="Updates pull the newest published image and restart the server on it. The previous version is kept and restored automatically if the new one doesn't come up healthy." />
       <div className="space-y-4 p-5">
-        <dl className="grid gap-4 text-sm sm:grid-cols-3">
+        <dl className="grid gap-4 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-neutral-500">Running</dt>
             <dd className="font-mono font-medium">{st.version || "unknown"}</dd>
+          </div>
+          <div>
+            <dt className="text-neutral-500">Channel</dt>
+            <dd>
+              <Badge tone={st.channel === "dev" ? "warn" : "ok"}>{st.channel === "dev" ? "Dev" : st.channel === "custom" ? "Pinned tag" : "Stable"}</Badge>
+            </dd>
           </div>
           <div>
             <dt className="text-neutral-500">Latest build</dt>
@@ -89,6 +95,21 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
           >
             {newer ? "Update now" : "Update to latest"}
           </Button>
+          {(st.channel === "stable" || st.channel === "dev") && (
+            <Button
+              disabled={busy || !st.can_update}
+              onClick={async () => {
+                const to = st.channel === "dev" ? "stable" : "dev";
+                const message =
+                  to === "dev"
+                    ? "Dev builds are untested work in progress and may break. Use this on a test server, not production. Data is kept; the server restarts for a few seconds. Moving back to stable later can fail if the dev build changed the database."
+                    : "The server restarts on the stable build for a few seconds. If the dev build changed the database, stable may refuse to start and the previous container is restored.";
+                if (await confirmDialog({ title: `Move this server to the ${to} channel?`, message, confirmLabel: `Move to ${to}` })) run(() => api.setUpdateChannel(to, st.schedule.agents), true);
+              }}
+            >
+              {st.channel === "dev" ? "Switch to stable" : "Switch to dev"}
+            </Button>
+          )}
         </div>
       </div>
     </Card>

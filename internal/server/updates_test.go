@@ -126,3 +126,27 @@ func (h *harness) queuedAgentUpdates(reg api.RegisterResponse) int {
 	}
 	return n
 }
+
+func TestChannelRefs(t *testing.T) {
+	for ref, want := range map[string]string{
+		"ghcr.io/maffewem/orchestrator:latest":   "stable",
+		"ghcr.io/maffewem/orchestrator:stable":   "stable",
+		"ghcr.io/maffewem/orchestrator":          "stable",
+		"localhost:5000/orchestrator":            "stable",
+		"ghcr.io/maffewem/orchestrator:dev":      "dev",
+		"ghcr.io/maffewem/orchestrator:sha-abc1": "custom",
+	} {
+		if got := channelOf(ref); got != want {
+			t.Errorf("channelOf(%q) = %q, want %q", ref, got, want)
+		}
+	}
+	for _, c := range []struct{ ref, ch, want string }{
+		{"ghcr.io/x/o:latest", "dev", "ghcr.io/x/o:dev"},
+		{"ghcr.io/x/o:dev", "stable", "ghcr.io/x/o:stable"},
+		{"localhost:5000/o", "dev", "localhost:5000/o:dev"},
+	} {
+		if got := refForChannel(c.ref, c.ch); got != c.want {
+			t.Errorf("refForChannel(%q,%q) = %q, want %q", c.ref, c.ch, got, c.want)
+		}
+	}
+}

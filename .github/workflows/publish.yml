@@ -2,7 +2,7 @@ name: Publish images
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ["v*"]
 
 permissions:
@@ -32,14 +32,20 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: version
         run: |
-          if [ "${{ github.ref_type }}" = tag ]; then v="${{ github.ref_name }}"; else v="${GITHUB_SHA::7}"; fi
+          if [ "${{ github.ref_type }}" = tag ]; then v="${{ github.ref_name }}"
+          elif [ "${{ github.ref_name }}" = dev ]; then v="dev-${GITHUB_SHA::7}"
+          else v="${GITHUB_SHA::7}"; fi
           echo "value=$v" >> "$GITHUB_OUTPUT"
       - uses: docker/metadata-action@v5
         id: meta
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           tags: |
+            # main is the stable channel; "latest" stays an alias of it so existing installs keep updating.
+            type=raw,value=stable,enable={{is_default_branch}}
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev,enable=${{ github.ref_name == 'dev' }}
+            type=sha,prefix=sha-
             type=ref,event=tag
           # metadata-action would otherwise label the image with its tag ("latest").
           labels: |

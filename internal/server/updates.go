@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -223,8 +224,10 @@ func orDefault(v, def string) string {
 }
 
 type updateStatus struct {
-	Version   string `json:"version"`
-	Image     string `json:"image,omitempty"`
+	Version string `json:"version"`
+	Image   string `json:"image,omitempty"`
+	// Channel is which build line the server follows: stable | dev | custom (any other tag).
+	Channel   string `json:"channel,omitempty"`
 	CanUpdate bool   `json:"can_update"`
 	Reason    string `json:"reason,omitempty"`
 	Busy      string `json:"busy,omitempty"`
@@ -243,7 +246,7 @@ func (s *Server) updateStatus(ctx context.Context) updateStatus {
 	st := updateStatus{Version: s.cfg.Version, Schedule: s.loadSchedule(ctx), Agents: []agentUpdateView{}, ServerTime: time.Now().UTC()}
 	self, reason := s.selfInfo(ctx)
 	if self != nil {
-		st.CanUpdate, st.Image = true, self.ImageRef
+		st.CanUpdate, st.Image, st.Channel = true, self.ImageRef, channelOf(self.ImageRef)
 	} else {
 		st.Reason = reason
 	}
@@ -349,20 +352,101 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	withAgents := r.URL.Query().Get("agents") == "1"
 	go func() {
 		defer s.finish()
-		s.applyServerUpdate(context.Background(), withAgents)
+		s.applyServerUpdate(context.Background(), withAgents, "")
+	}()
+	writeJSON(w, http.StatusAccepted, s.updateStatus(r.Context()))
+}
+
+// channelOf names the build line an image reference follows: the "stable" and "latest" tags
+// (and an untagged reference) are stable, "dev" is dev, anything else is a pinned custom tag.
+func channelOf(ref string) string {
+	i := strings.LastIndex(ref, ":")
+	if i < 0 || strings.Contains(ref[i:], "/") {
+		return "stable"
+	}
+	switch ref[i+1:] {
+	case "stable", "latest":
+		return "stable"
+	case "dev":
+		return "dev"
+	}
+	return "custom"
+}
+
+// refForChannel is ref with its tag swapped for the channel's tag.
+func refForChannel(ref, channel string) string {
+	base := ref
+	if i := strings.LastIndex(ref, ":"); i >= 0 && !strings.Contains(ref[i:], "/") {
+		base = ref[:i]
+	}
+	return base + ":" + channel
+}
+
+// handleSetChannel moves the server to another channel: it pulls that channel's image and
+// restarts the server on it, the same hand-over as an update.
+func (s *Server) handleSetChannel(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Channel string `json:"channel"`
+		Agents  bool   `json:"agents"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || (in.Channel != "stable" && in.Channel != "dev") {
+		writeError(w, http.StatusBadRequest, `channel must be "stable" or "dev"`)
+		return
+	}
+	self, reason := s.selfInfo(r.Context())
+	if self == nil {
+		writeError(w, http.StatusConflict, reason)
+		return
+	}
+	if channelOf(self.ImageRef) == in.Channel {
+		writeError(w, http.StatusConflict, "the server is already on the "+in.Channel+" channel")
+		return
+	}
+	if !s.begin("updating") {
+		writeError(w, http.StatusConflict, "an update task is already running")
+		return
+	}
+	ref := refForChannel(self.ImageRef, in.Channel)
+	go func() {
+		defer s.finish()
+		s.applyServerUpdate(context.Background(), in.Agents, ref)
 	}()
 	writeJSON(w, http.StatusAccepted, s.updateStatus(r.Context()))
 }
 
 // applyServerUpdate pulls the newest image and hands over to the updater helper, which
 // restarts the server on it. It returns after the helper has started (or failed to).
-func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool) bool {
+func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool, switchTo string) bool {
 	self, reason := s.selfInfo(ctx)
 	if self == nil {
 		s.setResult(ctx, false, "Update not started: "+reason)
 		return false
 	}
 	s.setStage("pulling")
+	if switchTo != "" {
+		// Moving channel: the container is recreated from another tag, so it counts as an
+		// update even when both tags happen to point at the same build.
+		moved := *self
+		moved.ImageRef = switchTo
+		latest, err := selfupdate.Check(ctx, s.docker, &moved)
+		if err != nil {
+			s.setResult(ctx, false, "Channel change not started: "+err.Error())
+			return false
+		}
+		s.setJSON(ctx, settingUpdatePending, updatePending{FromVersion: s.cfg.Version, FromImage: self.ImageID, To: latest.Version, At: time.Now().UTC()})
+		if withAgents {
+			s.store.SetSetting(ctx, settingUpdateAgents, "1")
+		}
+		s.setStage("handover")
+		s.event(ctx, "", "info", "update.started", fmt.Sprintf("Moving the server to the %s channel (%s); the dashboard restarts shortly", channelOf(switchTo), orUnknown(latest.Version)))
+		if err := selfupdate.StartHelper(ctx, s.docker, &moved, latest.ImageID); err != nil {
+			s.store.SetSetting(ctx, settingUpdatePending, "")
+			s.store.SetSetting(ctx, settingUpdateAgents, "")
+			s.setResult(ctx, false, "Channel change not started: "+err.Error())
+			return false
+		}
+		return true
+	}
 	latest, err := s.runCheck(ctx)
 	if err != nil {
 		s.setResult(ctx, false, "Update not started: "+err.Error())
@@ -568,7 +652,7 @@ func (s *Server) scheduleTick(ctx context.Context, now time.Time) {
 	defer s.finish()
 	s.store.SetSetting(ctx, settingUpdateLastAuto, now.UTC().Format(time.RFC3339))
 	s.event(ctx, "", "info", "update.scheduled", "Scheduled update check started")
-	if s.applyServerUpdate(ctx, sch.Agents) {
+	if s.applyServerUpdate(ctx, sch.Agents, "") {
 		return // the server restarts; agents follow once it is back
 	}
 	if sch.Agents {

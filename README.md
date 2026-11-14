@@ -312,12 +312,21 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET /api/projects/{id}/cloudflare`, `POST .../cloudflare/refresh` | what Cloudflare reports about a Pages or Workers project |
 | `GET /api/cloudflare/discover`, `POST /api/cloudflare/import` | Pages projects and Workers already in the account, and importing them |
 | `PUT /api/settings/cloudflare/deploy` | Cloudflare account ID and token for Pages and Workers |
+| `GET/POST /api/api-keys`, `DELETE /api/api-keys/{id}` | API keys (sign-in required; keys can't call these) |
+| `GET/POST /api/webhooks`, `PATCH/DELETE /api/webhooks/{id}`, `POST .../test`, `GET .../deliveries` | signed outbound webhooks |
+| `GET /api/openapi.json` | OpenAPI 3 description of every route and the role it needs (no sign-in) |
 | `GET /api/events` | activity feed |
 | `GET /api/settings`, `PUT /api/settings/github`, `POST /api/settings/join-token/rotate` | settings |
 
 The agent uses `POST /api/agent/register`, `/heartbeat`, `/commands/{id}/result` and
 `/deployments/{id}/steps/{n}`, plus `/backups/{id}` to upload or fetch a backup archive. GitHub calls `POST /api/github/webhook`, which is verified
 with HMAC-SHA256.
+
+## API keys and webhooks
+
+**Keys.** *API & webhooks > API keys* creates a key (`orch_...`) with a role (viewer, operator or admin) and an expiry. It is shown once and stored only as a hash. Send it as `Authorization: Bearer <key>`; it works on every route its role allows, except the key, webhook and user routes, which need a signed-in person. Use `last used` to spot stale keys and revoke them in one click.
+
+**Webhooks.** Each webhook gets a URL, a set of events (`deployment.*`, `device.*`, `backup.*`, a single kind such as `device.offline`, or `*`) and a secret. Every matching activity event is POSTed as JSON (`id`, `type`, `level`, `message`, `device_id`, `created_at`) with `X-Orchestrator-Event`, `X-Orchestrator-Delivery`, `X-Orchestrator-Timestamp` and `X-Orchestrator-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<body>">`. A 5xx, 429 or network failure is retried after 2 s and 10 s; other 4xx answers are not. The last 50 deliveries per webhook (with payloads) are listed, and *Send test event* sends a `ping`. Redirects are not followed.
 
 ## Compose stacks and Cloudflare Tunnel
 

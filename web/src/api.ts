@@ -367,6 +367,43 @@ export interface User {
   created_at: string;
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  role: Role;
+  created_by: string;
+  created_at: string;
+  expires_at?: string;
+  last_used?: string;
+}
+
+export interface Webhook {
+  id: string;
+  name: string;
+  url: string;
+  events: string[];
+  enabled: boolean;
+  created_at: string;
+  secret_hint: string;
+}
+
+export interface Delivery {
+  id: number;
+  event: string;
+  ok: boolean;
+  http_status: number;
+  error?: string;
+  attempts: number;
+  duration_ms: number;
+  payload?: string;
+  created_at: string;
+}
+
+export interface OpenApiDoc {
+  paths: Record<string, Record<string, { "x-required-role": Role; "x-api-key-access": boolean }>>;
+}
+
 export interface DnsRecord {
   type: string;
   name: string;
@@ -760,6 +797,17 @@ export const api = {
   users: () => request<User[]>("GET", "/api/users"),
   createUser: (u: { username: string; password: string; role: Role }) => request<User>("POST", "/api/users", u),
   updateUser: (id: string, u: { role?: Role; password?: string; disabled?: boolean }) => request<User>("PATCH", `/api/users/${id}`, u),
+  apiKeys: () => request<ApiKey[]>("GET", "/api/api-keys"),
+  createApiKey: (k: { name: string; role: Role; expiry_days: number }) => request<{ key: ApiKey; token: string }>("POST", "/api/api-keys", k),
+  deleteApiKey: (id: string) => request<void>("DELETE", `/api/api-keys/${id}`),
+  webhooks: () => request<Webhook[]>("GET", "/api/webhooks"),
+  createWebhook: (w: { name: string; url: string; events: string[] }) => request<{ webhook: Webhook; secret: string }>("POST", "/api/webhooks", w),
+  updateWebhook: (id: string, w: { name?: string; url?: string; events?: string[]; enabled?: boolean; rotate_secret?: boolean }) =>
+    request<{ webhook: Webhook; secret?: string }>("PATCH", `/api/webhooks/${id}`, w),
+  deleteWebhook: (id: string) => request<void>("DELETE", `/api/webhooks/${id}`),
+  testWebhook: (id: string) => request<Delivery>("POST", `/api/webhooks/${id}/test`),
+  deliveries: (id: string) => request<Delivery[]>("GET", `/api/webhooks/${id}/deliveries`),
+  openapi: () => request<OpenApiDoc>("GET", "/api/openapi.json"),
   deleteUser: (id: string) => request<void>("DELETE", `/api/users/${id}`),
   setAccess: (id: string, protectedAccess: boolean) =>
     request<DomainsView>("PUT", `/api/projects/${id}/domains/access`, { protected: protectedAccess }),

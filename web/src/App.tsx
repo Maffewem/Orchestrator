@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { api, ApiError, getToken, setToken, setUnauthorizedHandler, type Me } from "./api";
 import { MeProvider } from "./components/auth";
+import ApiPage from "./pages/Api";
 import UsersPage from "./pages/Users";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
@@ -133,6 +134,7 @@ export default function App() {
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="api" element={<ApiPage />} />
           <Route path="*" element={<Empty title="Page not found" />} />
         </Route>
       </Routes>

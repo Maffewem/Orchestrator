@@ -173,9 +173,9 @@ docker logs orchestrator   # copy the admin token printed on first start
 ```
 
 Pre-built images follow two channels: `:stable` (the same as `:latest`, built from `main`) and
-`:dev` (built from `dev`, untested work in progress). Production should stay on stable; to
-run a separate test server on the dev channel, see [docs/RELEASING.md](docs/RELEASING.md).
-The install script takes `--channel dev` (or `ORCH_CHANNEL=dev`), and `ORCH_NAME` and
+`:dev` (Beta, built from `dev`, untested work in progress). Production should stay on stable; to
+run a separate Beta test server, see [docs/RELEASING.md](docs/RELEASING.md).
+The install script takes `--channel beta` (or `ORCH_CHANNEL=beta`; `--channel stable` goes back, `--restore-snapshot` restores the database saved before a switch), and `ORCH_NAME` and
 `ORCH_PORT` to run a second server beside the first. Administrators can also move a running
 server between channels from the Updates page.
 

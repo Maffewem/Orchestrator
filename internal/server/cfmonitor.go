@@ -190,7 +190,9 @@ func (s *Server) cfMonitorLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.cfPollAll(ctx)
+			if !s.movePaused() {
+				s.cfPollAll(ctx)
+			}
 		}
 	}
 }

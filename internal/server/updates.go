@@ -678,7 +678,9 @@ func (s *Server) updateLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.scheduleTick(ctx, time.Now())
+			if !s.movePaused() {
+				s.scheduleTick(ctx, time.Now())
+			}
 		}
 	}
 }

@@ -15,6 +15,7 @@ import DevicePage from "./pages/Device";
 import ContainersPage from "./pages/Containers";
 import BackupsPage from "./pages/Backups";
 import UpdatesPage from "./pages/Updates";
+import MoveServerPage from "./pages/MoveServer";
 import WorkerPage from "./pages/Worker";
 import ActivityPage from "./pages/Activity";
 import SettingsPage from "./pages/Settings";
@@ -130,6 +131,7 @@ export default function App() {
           <Route path="backups" element={<BackupsPage />} />
           <Route path="workers/:deviceId/:name/*" element={<WorkerPage />} />
           <Route path="updates" element={<UpdatesPage />} />
+          <Route path="move" element={<MoveServerPage />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="users" element={<UsersPage />} />

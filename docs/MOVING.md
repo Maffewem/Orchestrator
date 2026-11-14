@@ -1,6 +1,6 @@
 # Moving the main server
 
-Dashboard: **Settings > Main server** (admin; the old /move address redirects there). The panel walks through five steps: choose the device, copy and start, check it, switch devices, confirm.
+Dashboard: **Settings > Move the server** (admin; the old /move address redirects there). The panel walks through five steps: choose the device, copy and start, check it, switch devices, confirm.
 
 ## How it works
 1. The old server pauses dashboard changes, copies its database (including the key that seals secrets) into an encrypted one-off bundle and asks the chosen device's agent to run `server.install`.
@@ -16,5 +16,5 @@ Until you shut the old server down, either side can hand control back: **Move ba
 Point your domain or Cloudflare Tunnel at the new device when you switch so bookmarks and the GitHub webhook keep working. This is manual.
 
 ## By hand
-Settings: Main server > Moving by hand downloads a password-protected copy. On the new machine: `sudo sh install-server.sh --import FILE [--import-password-file F]`.
+Settings: Move the server > Moving by hand downloads a password-protected copy. On the new machine: `sudo sh install-server.sh --import FILE [--import-password-file F]`.
 If `ORCH_SECRET_KEY` is set on the new server it wins over the key in the copy.

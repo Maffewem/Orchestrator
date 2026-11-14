@@ -34,7 +34,7 @@ const settingsSections = [
   ["domains", "Domains"],
   ["backups", "Backup password"],
   ["serverbackup", "Server backup"],
-  ["mainserver", "Main server"],
+  ["mainserver", "Move the server"],
   ["join", "Join token"],
   ["agents", "Server connectivity"],
 ] as const;
@@ -104,7 +104,7 @@ function MoveBanner() {
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
       <span>{msg}</span>
-      <Link to="/settings#mainserver" className="font-medium underline">Open Main server</Link>
+      <Link to="/settings#mainserver" className="font-medium underline">Open Move the server</Link>
     </div>
   );
 }

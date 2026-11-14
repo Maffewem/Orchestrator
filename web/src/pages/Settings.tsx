@@ -458,10 +458,10 @@ export default function SettingsPage() {
             defaultOpen={false}
             title={
               <span className="flex items-center gap-2">
-                <ArrowRightLeft className="size-4" /> Main server
+                <ArrowRightLeft className="size-4" /> Move the server
               </span>
             }
-            subtitle="Move the dashboard and its data to another device."
+            subtitle="Promote another device to run the dashboard and its data."
           >
             <MoveServerPanel />
           </Collapsible>

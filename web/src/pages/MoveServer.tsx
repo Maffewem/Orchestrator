@@ -130,7 +130,7 @@ export function MoveServerPanel() {
                 </Button>
               )}
             </div>
-            {!m && <p className="text-neutral-500">To use this server again, open Main server on the new dashboard and choose Move back, or run the install command for this server again.</p>}
+            {!m && <p className="text-neutral-500">To use this server again, open Move the server on the new dashboard and choose Move back, or run the install command for this server again.</p>}
           </div>
         </Card>
       )}

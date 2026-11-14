@@ -1,6 +1,6 @@
 # Moving the main server
 
-Dashboard: **Main server** (admin). The page walks through five steps: choose the device, copy and start, check it, switch devices, confirm.
+Dashboard: **Settings > Main server** (admin; the old /move address redirects there). The panel walks through five steps: choose the device, copy and start, check it, switch devices, confirm.
 
 ## How it works
 1. The old server pauses dashboard changes, copies its database (including the key that seals secrets) into an encrypted one-off bundle and asks the chosen device's agent to run `server.install`.

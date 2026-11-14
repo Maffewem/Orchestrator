@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
-import { Archive, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar } from "lucide-react";
+import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar } from "lucide-react";
 import { api, type Settings } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
@@ -11,6 +11,7 @@ import { HTTPSSettings } from "../components/HTTPSSettings";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { SSOSettings } from "../components/SSOSettings";
 import { AgentAddresses } from "../components/AgentAddresses";
+import { MoveServerPanel } from "./MoveServer";
 import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
 import { CloudflareDeploy } from "../components/CloudflareDeploy";
@@ -108,6 +109,7 @@ export default function SettingsPage() {
     domains: "domains base domain wildcard",
     backups: "backup password encrypt",
     serverbackup: "server backup restore database schedule download",
+    mainserver: "main server move migrate promote device new server hand over standby",
     join: "join token devices register",
     agents: "server address agents ip url discovery offline recover network",
   };
@@ -448,6 +450,20 @@ export default function SettingsPage() {
             subtitle="Back up Orchestrator itself: users, projects, settings and history."
           >
             <ServerBackupsPanel />
+          </Collapsible>
+        )}
+        {vis("mainserver") && (
+          <Collapsible
+            id="mainserver"
+            defaultOpen={false}
+            title={
+              <span className="flex items-center gap-2">
+                <ArrowRightLeft className="size-4" /> Main server
+              </span>
+            }
+            subtitle="Move the dashboard and its data to another device."
+          >
+            <MoveServerPanel />
           </Collapsible>
         )}
         {vis("join") && (

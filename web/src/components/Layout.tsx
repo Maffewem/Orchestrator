@@ -1,6 +1,6 @@
 import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { Activity, Archive, ArrowRightLeft, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
+import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
 import { api, type Device, type FleetContainer, type Project } from "../api";
 import { cx, usePoll } from "../lib";
 import { useMe } from "./auth";
@@ -34,6 +34,7 @@ const settingsSections = [
   ["domains", "Domains"],
   ["backups", "Backup password"],
   ["serverbackup", "Server backup"],
+  ["mainserver", "Main server"],
   ["join", "Join token"],
   ["agents", "Server connectivity"],
 ] as const;
@@ -53,7 +54,6 @@ const navGroups: { title?: string; items: NavItem[] }[] = [
       { to: "/devices", label: "Devices", icon: Server },
       { to: "/backups", label: "Backups", icon: Archive },
       { to: "/updates", label: "Updates", icon: RefreshCw, admin: true },
-      { to: "/move", label: "Main server", icon: ArrowRightLeft, admin: true },
     ],
   },
   { title: "Monitor", items: [{ to: "/activity", label: "Activity", icon: Activity }] },
@@ -92,7 +92,7 @@ export function Logo({ iconOnly }: { iconOnly?: boolean }) {
 function MoveBanner() {
   const { data } = usePoll(() => api.serverMove(), 15000);
   const loc = useLocation();
-  if (!data || loc.pathname === "/move") return null;
+  if (!data || loc.pathname === "/settings") return null;
   const msg = data.standby_to
     ? `This server has handed over to ${data.standby_to}. Dashboard changes are paused here.`
     : data.moved_from
@@ -104,7 +104,7 @@ function MoveBanner() {
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
       <span>{msg}</span>
-      <Link to="/move" className="font-medium underline">Open Main server</Link>
+      <Link to="/settings#mainserver" className="font-medium underline">Open Main server</Link>
     </div>
   );
 }

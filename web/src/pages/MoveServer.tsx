@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { CheckCircle2, Circle, Loader2, Server } from "lucide-react";
 import { api, type MoveCandidate, type MoveView, type ServerMove } from "../api";
-import { useCrumbs } from "../components/Layout";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, inputClass } from "../components/ui";
 import { confirmDialog, notify } from "../components/dialogs";
 import { usePoll } from "../lib";
 
@@ -52,8 +51,7 @@ function Lines({ m }: { m: ServerMove }) {
   );
 }
 
-export default function MoveServerPage() {
-  useCrumbs([{ label: "Main server" }]);
+export function MoveServerPanel() {
   const { data: v, error, reload } = usePoll(() => api.serverMove(), 2000);
   const [busy, setBusy] = useState(false);
   if (error && !v) return <ErrorNote>{error}</ErrorNote>;
@@ -76,11 +74,10 @@ export default function MoveServerPage() {
 
   const m = v.move;
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Main server"
-        description="Promote another device to be the main server. Your projects, accounts, tokens and settings are copied across, devices switch over by themselves, and this server stays untouched until you say the move worked."
-      />
+    <div className="space-y-5 p-4">
+      <p className="text-sm text-neutral-600">
+        Promote another device to be the main server. Your projects, accounts, tokens and settings are copied across, devices switch over by themselves, and this server stays untouched until you say the move worked.
+      </p>
       <Card className="p-5">
         <Journey at={stage(v)} done={m?.phase === "done"} />
       </Card>

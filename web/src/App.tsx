@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Route, Routes } from "react-router";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { api, ApiError, getToken, setToken, setUnauthorizedHandler, type Me } from "./api";
 import { MeProvider } from "./components/auth";
 import UsersPage from "./pages/Users";
@@ -15,7 +15,6 @@ import DevicePage from "./pages/Device";
 import ContainersPage from "./pages/Containers";
 import BackupsPage from "./pages/Backups";
 import UpdatesPage from "./pages/Updates";
-import MoveServerPage from "./pages/MoveServer";
 import WorkerPage from "./pages/Worker";
 import ActivityPage from "./pages/Activity";
 import SettingsPage from "./pages/Settings";
@@ -131,7 +130,7 @@ export default function App() {
           <Route path="backups" element={<BackupsPage />} />
           <Route path="workers/:deviceId/:name/*" element={<WorkerPage />} />
           <Route path="updates" element={<UpdatesPage />} />
-          <Route path="move" element={<MoveServerPage />} />
+          <Route path="move" element={<Navigate to="/settings#mainserver" replace />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="users" element={<UsersPage />} />

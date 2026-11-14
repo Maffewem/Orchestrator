@@ -1,6 +1,6 @@
 import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
+import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Plug, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
 import { api, type Device, type FleetContainer, type Project } from "../api";
 import { cx } from "../lib";
 import { useMe } from "./auth";
@@ -60,6 +60,7 @@ const navGroups: { title?: string; items: NavItem[] }[] = [
     title: "Admin",
     items: [
       { to: "/users", label: "Users", icon: Users, admin: true },
+      { to: "/api", label: "API & webhooks", icon: Plug, admin: true },
       { to: "/settings", label: "Settings", icon: Settings, admin: true },
     ],
   },

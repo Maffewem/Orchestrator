@@ -69,6 +69,7 @@ type Config struct {
 type Server struct {
 	identity      ed25519.PrivateKey // proves to agents that this is their server; see discover.go
 	netNotes      netNotices         // recent network changes per device; see connectivity.go
+	routes        []routeInfo        // the registered API routes, for the OpenAPI document
 	store         *store.Store
 	cfg           Config
 	log           *slog.Logger
@@ -218,6 +219,7 @@ func (s *Server) event(ctx context.Context, deviceID, level, kind, msg string) {
 	if err := s.store.AddEvent(ctx, deviceID, level, kind, msg); err != nil {
 		s.log.Error("add event", "err", err)
 	}
+	s.dispatch(deviceID, level, kind, msg)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -245,7 +247,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/github/webhook", s.handleGitHubWebhook)
 
 	// Admin API used by the dashboard.
-	admin := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, s.authed(pattern, h)) }
+	s.routes = nil
+	admin := func(pattern string, h http.HandlerFunc) {
+		s.routes = append(s.routes, routeInfo{pattern, routeRole(pattern)})
+		mux.Handle(pattern, s.authed(pattern, h))
+	}
+	mux.HandleFunc("GET /api/openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/auth/setup", s.handleSetup)
@@ -348,6 +355,15 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/server-backups/{name}/restore", s.handleRestoreServerBackup)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
+	admin("GET /api/api-keys", s.handleListAPIKeys)
+	admin("POST /api/api-keys", s.handleCreateAPIKey)
+	admin("DELETE /api/api-keys/{id}", s.handleDeleteAPIKey)
+	admin("GET /api/webhooks", s.handleListWebhooks)
+	admin("POST /api/webhooks", s.handleCreateWebhook)
+	admin("PATCH /api/webhooks/{id}", s.handleUpdateWebhook)
+	admin("DELETE /api/webhooks/{id}", s.handleDeleteWebhook)
+	admin("POST /api/webhooks/{id}/test", s.handleTestWebhook)
+	admin("GET /api/webhooks/{id}/deliveries", s.handleListDeliveries)
 
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)
 	if s.cfg.DownloadsDir != "" {

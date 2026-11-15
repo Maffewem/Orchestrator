@@ -133,7 +133,9 @@ func (s *Server) backupLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.backupTick(ctx, time.Now())
+			if !s.movePaused() {
+				s.backupTick(ctx, time.Now())
+			}
 		}
 	}
 }

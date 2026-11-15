@@ -59,7 +59,7 @@ func (a *Agent) setServers(current string) {
 	defer a.srvMu.Unlock()
 	seen := map[string]bool{}
 	var all []string
-	for _, u := range append(append(append([]string{}, a.configured...), a.state.Servers...), a.state.Found) {
+	for _, u := range append(append(append([]string{a.moved}, a.configured...), a.state.Servers...), a.state.Found) {
 		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" && !seen[u] {
 			seen[u] = true
 			all = append(all, u)
@@ -75,6 +75,9 @@ func (a *Agent) setServers(current string) {
 // addresses the admin listed for agents.
 func (a *Agent) learn(res api.HeartbeatResponse) {
 	a.fails = 0
+	if res.MoveTo != "" {
+		a.followMove(res.MoveTo)
+	}
 	changed := false
 	if res.ServerKey != "" && res.ServerKey != a.state.ServerKey {
 		a.state.ServerKey = res.ServerKey
@@ -268,4 +271,37 @@ func hostsIn(ipn *net.IPNet, seen map[string]bool) []string {
 		}
 	}
 	return out
+}
+
+// followMove obeys a server in standby: it has handed its role to another server, so the
+// agent connects there. The old address stays in the list as the way back; if the new
+// one does not answer, the agent returns to the old one and waits before trying again.
+func (a *Agent) followMove(to string) {
+	to = strings.TrimRight(strings.TrimSpace(to), "/")
+	if u, err := url.Parse(to); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return
+	}
+	a.srvMu.Lock()
+	skip := to == a.cfg.Server || time.Now().Before(a.moveHold)
+	a.srvMu.Unlock()
+	if skip {
+		return
+	}
+	a.log.Info("the control plane handed over to another server; switching", "to", to)
+	a.srvMu.Lock()
+	a.moved = to
+	a.srvMu.Unlock()
+	a.setServers(to)
+}
+
+func (a *Agent) movedTo() string {
+	a.srvMu.Lock()
+	defer a.srvMu.Unlock()
+	return a.moved
+}
+
+func (a *Agent) holdMove() {
+	a.srvMu.Lock()
+	a.moveHold = time.Now().Add(5 * time.Minute)
+	a.srvMu.Unlock()
 }

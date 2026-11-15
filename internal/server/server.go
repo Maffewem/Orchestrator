@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/agent"
@@ -83,6 +84,9 @@ type Server struct {
 	mig           migrations
 	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
 	migratePoll   time.Duration // test hook; 2s when zero
+	moveTick      time.Duration // test hook: how often a server move polls; 2s when zero
+	moveFrozen    atomic.Bool   // a server move is under way: dashboard changes are paused
+	standbyTo     atomic.Pointer[string]
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState
@@ -149,6 +153,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if err := s.loadIdentity(ctx); err != nil {
 		return nil, "", err
 	}
+	s.loadMoveState(ctx)
 
 	var generated string
 	switch {
@@ -176,6 +181,7 @@ func (s *Server) offlineAfter() time.Duration { return 3 * s.cfg.HeartbeatInterv
 // Run performs background housekeeping until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) {
 	s.recoverCloudflare(ctx)
+	s.recoverMove(ctx)
 	go s.cfMonitorLoop(ctx)
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
@@ -341,6 +347,16 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/agent-urls", s.handleSetAgentURLs)
 	admin("GET /api/connectivity", s.handleConnectivity)
+	admin("GET /api/server-move", s.handleGetMove)
+	admin("POST /api/server-move", s.handleStartMove)
+	admin("POST /api/server-move/switch", s.handleMoveSwitch)
+	admin("POST /api/server-move/finish", s.handleMoveFinish)
+	admin("POST /api/server-move/cancel", s.handleMoveCancel)
+	admin("POST /api/server-move/accept", s.handleMoveAccept)
+	admin("POST /api/server-move/back", s.handleMoveBack)
+	admin("POST /api/server-move/export", s.handleMoveExport)
+	mux.HandleFunc("POST /api/server-move/peer", s.handlePeer)
+	mux.Handle("GET "+moveBundlePath, s.agentAuth(s.handleMoveBundle))
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/sso", s.handleSetSSO)
 	admin("PUT /api/settings/https", s.handleSetHTTPS)
@@ -374,7 +390,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
 	mux.Handle("/", s.uiHandler())
-	return securityHeaders(s.httpsRedirect(mux))
+	return securityHeaders(s.httpsRedirect(s.pausedMiddleware(mux)))
 }
 
 type ctxKey int

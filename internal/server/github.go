@@ -34,6 +34,10 @@ func (s *Server) githubToken(ctx context.Context) string {
 
 // handleGitHubWebhook deploys projects that track the pushed branch.
 func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
+	if s.movePaused() {
+		writeError(w, http.StatusServiceUnavailable, "this server is being moved or has handed over; GitHub should deliver to the main server")
+		return
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 25<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "could not read body")

@@ -55,7 +55,9 @@ type Agent struct {
 	servers []string // every known control-plane URL; cfg.Server is the one in use
 	// configured are the URLs from ORCH_SERVER; servers adds announced and discovered ones.
 	configured   []string
-	fails        int // heartbeats failed in a row
+	moved        string    // address a server in standby sent us to (a server move)
+	moveHold     time.Time // do not follow a redirect again before this time
+	fails        int       // heartbeats failed in a row
 	lastDiscover time.Time
 	scanHosts    func() []string // hosts discovery probes; nil means the local networks
 
@@ -127,6 +129,13 @@ func (a *Agent) Run(ctx context.Context) error {
 		err := a.heartbeat(ctx)
 		wait := a.interval
 		switch {
+		case errors.Is(err, errUnauthorized) && a.movedTo() != "" && a.server() == a.movedTo():
+			// A server we were redirected to does not know us. Never re-register against it
+			// on the old server's say-so: go back to the address that did.
+			a.log.Warn("the server we were moved to rejected this agent; going back")
+			a.holdMove()
+			a.nextServer()
+			wait = backoff
 		case errors.Is(err, errUnauthorized):
 			// The device was removed from the fleet; join again if we can.
 			a.log.Warn("agent token rejected, re-registering")
@@ -141,6 +150,9 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.log.Warn("heartbeat failed", "err", err)
 			wait = backoff
 			backoff = min(backoff*2, time.Minute)
+			if a.movedTo() != "" && a.server() == a.movedTo() {
+				a.holdMove() // the new server is not answering: stay on the old one for a while
+			}
 			a.nextServer()
 			if a.maybeDiscover(ctx) {
 				wait, backoff = 0, time.Second
@@ -329,6 +341,10 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 			b, err = json.Marshal(spec)
 			output = string(b)
 		}
+	case api.ActionServerInstall:
+		ictx, icancel := context.WithTimeout(ctx, 20*time.Minute)
+		output, err = a.installServer(ictx, c.Args)
+		icancel()
 	case api.ActionFileStore:
 		err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
 	case api.ActionStackStart, api.ActionStackStop, api.ActionStackDown:

@@ -104,7 +104,9 @@ func (s *Server) pollLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.pollRepos(ctx)
+			if !s.movePaused() {
+				s.pollRepos(ctx)
+			}
 		}
 	}
 }

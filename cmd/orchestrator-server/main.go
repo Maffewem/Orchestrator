@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,6 +39,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "decrypt-backup" {
 		os.Exit(runDecryptBackup(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "import-backup" {
+		os.Exit(runImportBackup(os.Args[2:]))
 	}
 	addr := flag.String("addr", env("ORCH_ADDR", ":8080"), "listen address")
 	dbPath := flag.String("db", env("ORCH_DB", "orchestrator.db"), "SQLite database path")
@@ -181,4 +185,77 @@ func decryptBackup(in, out, password string) error {
 		return err
 	}
 	return dst.Close()
+}
+
+// runImportBackup stages a server backup or transfer bundle as the next database, the way a
+// restore from the dashboard does: the server swaps it in on its next start and keeps the
+// database it had as .pre-restore. It is what "install-server.sh --import" and the "promote a
+// device" flow use to seed a new server.
+func runImportBackup(args []string) int {
+	fs := flag.NewFlagSet("import-backup", flag.ExitOnError)
+	in := fs.String("in", "", "the backup file (.db, or .db.enc when it is password-protected)")
+	db := fs.String("db", env("ORCH_DB", "orchestrator.db"), "the database path of the server that will use it")
+	pwFile := fs.String("password-file", "", "file holding the password of a protected backup (or set ORCH_BACKUP_PASSWORD)")
+	fs.Parse(args)
+	if *in == "" {
+		fmt.Fprintln(os.Stderr, "usage: orchestrator-server import-backup -in FILE [-db PATH] [-password-file FILE]")
+		return 2
+	}
+	pw := os.Getenv("ORCH_BACKUP_PASSWORD")
+	if *pwFile != "" {
+		b, err := os.ReadFile(*pwFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "import-backup:", err)
+			return 1
+		}
+		pw = strings.TrimSpace(string(b))
+	}
+	if err := importBackup(*in, *db, pw); err != nil {
+		fmt.Fprintln(os.Stderr, "import-backup:", err)
+		return 1
+	}
+	fmt.Fprintln(os.Stderr, "backup staged; it is applied when the server starts")
+	return 0
+}
+
+func importBackup(in, dbPath, password string) error {
+	src, err := os.Open(in)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	var r io.Reader = src
+	if strings.HasSuffix(in, ".enc") || password != "" {
+		if password == "" {
+			return errors.New("this backup is password-protected: give its password")
+		}
+		if r, err = backupcrypt.NewReader(src, password); err != nil {
+			return fmt.Errorf("could not open the backup (wrong password?): %w", err)
+		}
+	}
+	pending := store.PendingRestorePath(dbPath)
+	check := pending + ".check"
+	defer func() {
+		for _, sfx := range []string{"", "-wal", "-shm", ".key", ".key.pre-restore"} {
+			os.Remove(check + sfx)
+		}
+	}()
+	out, err := os.OpenFile(check, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, r)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := store.CheckSnapshot(check); err != nil {
+		return fmt.Errorf("not a usable Orchestrator backup: %w", err)
+	}
+	for _, sfx := range []string{"-wal", "-shm"} {
+		os.Remove(check + sfx)
+	}
+	return os.Rename(check, pending)
 }

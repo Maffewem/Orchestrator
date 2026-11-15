@@ -45,17 +45,18 @@ type NetAddr struct {
 
 // Agent capabilities.
 const (
-	CapBackup    = "backup"    // container.backup and container.restore
-	CapUpdate    = "update"    // agent.update
-	CapProxy     = "proxy"     // proxy.sync
-	CapProxyDNS  = "proxy-dns" // proxy.sync with a Cloudflare token (DNS challenge)
-	CapPreview   = "preview"   // container.remove
-	CapStream    = "stream"    // live log following and container shells
-	CapInspect   = "inspect"   // container.inspect, used to adopt existing containers
-	CapFileStore = "filestore" // file.store, receives server backups
-	CapCompose   = "compose"   // deploy of a Compose stack, and stack.start/stop/down
-	CapTunnel    = "tunnel"    // tunnel.sync, runs cloudflared
-	CapDiscover  = "discover"  // finds the server again by itself when its address changes
+	CapBackup        = "backup"         // container.backup and container.restore
+	CapUpdate        = "update"         // agent.update
+	CapProxy         = "proxy"          // proxy.sync
+	CapProxyDNS      = "proxy-dns"      // proxy.sync with a Cloudflare token (DNS challenge)
+	CapPreview       = "preview"        // container.remove
+	CapStream        = "stream"         // live log following and container shells
+	CapInspect       = "inspect"        // container.inspect, used to adopt existing containers
+	CapFileStore     = "filestore"      // file.store, receives server backups
+	CapCompose       = "compose"        // deploy of a Compose stack, and stack.start/stop/down
+	CapTunnel        = "tunnel"         // tunnel.sync, runs cloudflared
+	CapDiscover      = "discover"       // finds the server again by itself when its address changes
+	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -149,6 +150,9 @@ type HeartbeatResponse struct {
 	// ServerURLs are the addresses the admin listed for agents (Settings > Agents). An agent
 	// saves them and falls back to them when its own address stops answering.
 	ServerURLs []string `json:"server_urls,omitempty"`
+	// MoveTo is set by a server that has handed its role to another one (a server move). An
+	// agent that can reach MoveTo switches to it and keeps this address as its way back.
+	MoveTo string `json:"move_to,omitempty"`
 }
 
 // Command actions understood by the agent.
@@ -174,6 +178,9 @@ const (
 	ActionInspect = "container.inspect"
 	// ActionFileStore downloads the server backup Args["name"] into the folder Args["dir"], keeping the newest Args["keep"].
 	ActionFileStore = "file.store"
+	// ActionServerInstall sets up a new Orchestrator server on this device from the transfer
+	// bundle the current server offers (Args: name, image, port, bundle, password).
+	ActionServerInstall = "server.install"
 	// ActionStackStart, ActionStackStop and ActionStackDown act on every container of the Compose
 	// stack named Target. Down removes the containers and networks; Args["volumes"] == "delete" also removes its volumes.
 	ActionStackStart = "stack.start"

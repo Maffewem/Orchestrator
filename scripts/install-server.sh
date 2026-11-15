@@ -3,15 +3,24 @@
 # running after you log out and comes back after a reboot. Safe to re-run: it recreates
 # the container (data lives in the orchestrator-data volume) and repairs restart policies.
 #   curl -fsSL https://raw.githubusercontent.com/Maffewem/Orchestrator/main/scripts/install-server.sh | sudo sh
+# Back from Beta to Stable (data is kept): ... | sudo sh -s -- --channel stable
+#   add --restore-snapshot if Stable can't read a database a Beta build changed.
+# Move an existing server onto this machine (export it first: Settings > Move the server):
+#   sudo sh install-server.sh --import orchestrator-move.db.enc [--import-password-file FILE]
+# The copy carries the data and the key that seals secrets, so accounts, projects, tokens and
+# settings come across. Agents are then pointed at this machine from the old dashboard.
 # The dashboard can update the server, which needs the Docker socket inside the container
 # (full control of Docker on this host). Opt out with: ... | sudo sh -s -- --no-web-update
 set -eu
 
-CHANNEL="${ORCH_CHANNEL:-stable}"   # stable (main) or dev; see "Channels" in the README
+CHANNEL="${ORCH_CHANNEL:-stable}"   # stable (main) or beta (dev branch); see docs/RELEASING.md
 IMAGE="${ORCH_IMAGE:-}"
 PORT="${ORCH_PORT:-8080}"
 NAME="${ORCH_NAME:-orchestrator}"      # container name; change it (and port) to run a second server
 VOLUME="${ORCH_VOLUME:-$NAME-data}"
+RESTORE=0
+IMPORT=""
+IMPORT_PW_FILE=""
 WEB_UPDATE=1
 [ "${ORCH_WEB_UPDATE:-1}" = "0" ] && WEB_UPDATE=0
 while [ $# -gt 0 ]; do
@@ -19,11 +28,16 @@ while [ $# -gt 0 ]; do
     --no-web-update) WEB_UPDATE=0; shift ;;
     --channel) CHANNEL="${2:-}"; shift 2 ;;
     --channel=*) CHANNEL="${1#*=}"; shift ;;
+    --restore-snapshot) RESTORE=1; shift ;;
+    --import) IMPORT="${2:-}"; shift 2 ;;
+    --import=*) IMPORT="${1#*=}"; shift ;;
+    --import-password-file) IMPORT_PW_FILE="${2:-}"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-case "$CHANNEL" in stable|dev) ;; *) echo "channel must be stable or dev" >&2; exit 1 ;; esac
+[ "$CHANNEL" = beta ] && CHANNEL=dev   # Beta is the dashboard's name for the dev image tag
+case "$CHANNEL" in stable|dev) ;; *) echo "channel must be stable or beta" >&2; exit 1 ;; esac
 [ -n "$IMAGE" ] || IMAGE="ghcr.io/maffewem/orchestrator:$CHANNEL"
 
 [ "$(id -u)" -eq 0 ] || { echo "please run as root (sudo)" >&2; exit 1; }
@@ -42,6 +56,33 @@ fi
 
 docker pull "$IMAGE"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
+if [ "$RESTORE" = 1 ]; then
+  # The way back when a Beta build changed the database and Stable can't read it: the server
+  # saves a copy before every channel switch; put the newest one back (the server swaps it in
+  # on start and keeps the current database next to it as .pre-restore).
+  docker run --rm --user 10001 --entrypoint sh -v "$VOLUME:/data" "$IMAGE" -c \
+    'f=$(ls -1 /data/channel-snapshots/before-*.db 2>/dev/null | sort | tail -n 1); [ -n "$f" ] || { echo "no snapshot found in the data volume" >&2; exit 1; }; cp "$f" /data/orchestrator.db.restore && echo "restoring $f"' \
+    || { echo "could not stage a snapshot" >&2; exit 1; }
+fi
+if [ -n "$IMPORT" ]; then
+  [ -f "$IMPORT" ] || { echo "import file not found: $IMPORT" >&2; exit 1; }
+  IMPORT_DIR="$(cd "$(dirname "$IMPORT")" && pwd)"; IMPORT_NAME="$(basename "$IMPORT")"
+  if [ -n "$IMPORT_PW_FILE" ]; then
+    [ -f "$IMPORT_PW_FILE" ] || { echo "password file not found: $IMPORT_PW_FILE" >&2; exit 1; }
+    IMPORT_PW="$(cat "$IMPORT_PW_FILE")"
+  elif [ -r /dev/tty ]; then
+    printf "Password of the exported copy: " >/dev/tty; stty -echo </dev/tty 2>/dev/null || true
+    IFS= read -r IMPORT_PW </dev/tty; stty echo </dev/tty 2>/dev/null || true; echo >/dev/tty
+  else
+    IMPORT_PW=""
+  fi
+  # Seeds the data volume the same way a dashboard restore does: the server swaps the copy in
+  # on its first start (and adopts the secret key it carries).
+  docker run --rm --user 10001 --network none --entrypoint orchestrator-server \
+    -e ORCH_BACKUP_PASSWORD="$IMPORT_PW" -v "$VOLUME:/data" -v "$IMPORT_DIR:/in:ro" "$IMAGE" \
+    import-backup -in "/in/$IMPORT_NAME" -db /data/orchestrator.db \
+    || { echo "could not import $IMPORT (wrong password?)" >&2; exit 1; }
+fi
 if [ "$WEB_UPDATE" = 1 ]; then
   # The server runs as an unprivileged user, so it joins the socket's group.
   SOCK_GID="$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 0)"
@@ -76,7 +117,11 @@ if command -v systemctl >/dev/null 2>&1; then check "Docker starts at boot" syst
 check "restart policy is unless-stopped" policy
 check "container is running" running
 check "answers on port $PORT" healthy
-[ "$fail" -eq 0 ] || { echo "Some checks failed; see 'docker logs $NAME'." >&2; exit 1; }
+if [ "$fail" -ne 0 ]; then
+  echo "Some checks failed; see 'docker logs $NAME'." >&2
+  [ "$CHANNEL" = stable ] && [ "$RESTORE" = 0 ] && echo "If the Beta build changed the database and Stable can't read it, re-run with --channel stable --restore-snapshot to put back the copy saved before the switch." >&2
+  exit 1
+fi
 
 if [ "$WEB_UPDATE" = 1 ]; then
   echo "Dashboard updates are on (Docker socket mounted). Re-run with --no-web-update to turn them off."

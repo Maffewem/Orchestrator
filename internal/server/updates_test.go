@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
+	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
 func TestUpdateStatusScheduleAndAgents(t *testing.T) {
@@ -148,5 +149,37 @@ func TestChannelRefs(t *testing.T) {
 		if got := refForChannel(c.ref, c.ch); got != c.want {
 			t.Errorf("refForChannel(%q,%q) = %q, want %q", c.ref, c.ch, got, c.want)
 		}
+	}
+}
+
+func TestChannelSnapshotKeepsNewestCopies(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "o.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv, _, err := New(context.Background(), st, Config{AdminToken: adminToken, HeartbeatInterval: time.Second, DBPath: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last string
+	for i := 0; i < keepSnapshots+2; i++ {
+		last, err = srv.snapshotForChannel(context.Background(), "stable", "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.CheckSnapshot(last); err != nil {
+			t.Fatalf("snapshot unusable: %v", err)
+		}
+		time.Sleep(1100 * time.Millisecond) // names carry second-resolution timestamps
+	}
+	names, _ := filepath.Glob(filepath.Join(srv.snapshotDir(), "before-*.db"))
+	if len(names) != keepSnapshots {
+		t.Fatalf("kept %d snapshots, want %d", len(names), keepSnapshots)
+	}
+	if _, err := os.Stat(last); err != nil {
+		t.Fatalf("newest snapshot pruned: %v", err)
 	}
 }

@@ -197,3 +197,29 @@ func TestParseAssignments(t *testing.T) {
 		t.Fatal("garbage should give nothing")
 	}
 }
+
+func TestFollowMoveSwitchesAndFallsBack(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.json")
+	a := &Agent{cfg: Config{Server: "http://old:8080", StatePath: p}, servers: []string{"http://old:8080"}, configured: []string{"http://old:8080"}, log: nopLogger()}
+	a.learn(api.HeartbeatResponse{ServerKey: "k", MoveTo: "http://new:8080"})
+	if a.server() != "http://new:8080" || a.servers[len(a.servers)-1] != "http://old:8080" && a.servers[1] != "http://old:8080" {
+		t.Fatalf("server %q list %v", a.server(), a.servers)
+	}
+	// The new server stops answering: the agent returns to the old address and does not
+	// bounce straight back when the old one repeats the redirect.
+	a.holdMove()
+	a.nextServer()
+	if a.server() != "http://old:8080" {
+		t.Fatalf("did not fall back: %q", a.server())
+	}
+	a.learn(api.HeartbeatResponse{ServerKey: "k", MoveTo: "http://new:8080"})
+	if a.server() != "http://old:8080" {
+		t.Fatalf("followed the redirect during the hold: %q", a.server())
+	}
+	// Junk redirects are ignored.
+	a.moveHold = time.Time{}
+	a.learn(api.HeartbeatResponse{ServerKey: "k", MoveTo: "ftp://evil"})
+	if a.server() != "http://old:8080" {
+		t.Fatalf("followed a bad redirect: %q", a.server())
+	}
+}

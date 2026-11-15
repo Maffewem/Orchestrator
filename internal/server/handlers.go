@@ -157,6 +157,14 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	s.metrics.add(d.ID, req.Metrics)
 
+	// A server in standby has handed over: it gives out no work, only the new address.
+	if to := s.standby(); to != "" {
+		writeJSON(w, http.StatusOK, api.HeartbeatResponse{
+			IntervalSeconds: int(s.cfg.HeartbeatInterval / time.Second),
+			ServerKey:       s.serverKey(), ServerURLs: s.agentURLs(ctx), MoveTo: to,
+		})
+		return
+	}
 	cmds, err := s.store.DispatchCommands(ctx, d.ID)
 	if err != nil {
 		s.internal(w, err)

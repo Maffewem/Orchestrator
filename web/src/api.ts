@@ -719,7 +719,75 @@ async function restoreServerUpload(file: File, encrypted: boolean) {
   }
 }
 
+export interface ServerMove {
+  phase: "preparing" | "installing" | "verifying" | "ready" | "switched" | "done" | "failed";
+  device_id: string;
+  device_name: string;
+  new_url: string;
+  old_url: string;
+  port: number;
+  error?: string;
+  steps: string[];
+  started_at: string;
+  updated_at: string;
+}
+export interface MoveCandidate {
+  id: string;
+  name: string;
+  online: boolean;
+  eligible: boolean;
+  reason?: string;
+  addresses: string[];
+  arch: string;
+}
+export interface MoveView {
+  move?: ServerMove;
+  standby_to?: string;
+  moved_from?: { old_url: string; new_url: string; at: string };
+  devices: MoveCandidate[];
+  on_this_server: number;
+  image?: string;
+  can_move: boolean;
+  cannot_why?: string;
+}
+export interface MoveResult {
+  view: MoveView;
+  note?: string;
+}
+
+/** Downloads a password-protected copy of this server for moving it by hand. */
+async function exportServerCopy(password: string) {
+  const res = await fetch("/api/server-move/export", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(res.status, msg);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "orchestrator-move.db.enc";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export const api = {
+  serverMove: () => request<MoveView>("GET", "/api/server-move"),
+  startServerMove: (b: { device_id: string; port: number; address: string; old_url: string }) => request<MoveView>("POST", "/api/server-move", b),
+  switchServerMove: () => request<MoveView>("POST", "/api/server-move/switch"),
+  finishServerMove: () => request<MoveView>("POST", "/api/server-move/finish"),
+  cancelServerMove: () => request<MoveResult>("POST", "/api/server-move/cancel"),
+  acceptServerMove: () => request<MoveResult>("POST", "/api/server-move/accept"),
+  moveServerBack: () => request<MoveResult>("POST", "/api/server-move/back"),
+  exportServerCopy,
   setBackupDests: (d: BackupDest[]) => request<ServerBackups>("PUT", "/api/server-backups/destinations", d),
   testBackupDest: (id: string) => request<{ status: string }>("POST", `/api/server-backups/destinations/${encodeURIComponent(id)}/test`),
   ssoProviders: () => request<{ providers: { id: string; name: string }[]; hide_password: boolean }>("GET", "/api/auth/sso/providers", undefined, null),

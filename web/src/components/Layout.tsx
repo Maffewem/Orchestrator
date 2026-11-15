@@ -2,7 +2,7 @@ import { Fragment, createContext, useContext, useEffect, useState, type ReactNod
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
 import { api, type Device, type FleetContainer, type Project } from "../api";
-import { cx } from "../lib";
+import { cx, usePoll } from "../lib";
 import { useMe } from "./auth";
 import { Button, ErrorNote, Field, Modal, inputClass } from "./ui";
 
@@ -34,6 +34,7 @@ const settingsSections = [
   ["domains", "Domains"],
   ["backups", "Backup password"],
   ["serverbackup", "Server backup"],
+  ["mainserver", "Move the server"],
   ["join", "Join token"],
   ["agents", "Server connectivity"],
 ] as const;
@@ -84,6 +85,27 @@ export function Logo({ iconOnly }: { iconOnly?: boolean }) {
       </svg>
       {!iconOnly && "Orchestrator"}
     </span>
+  );
+}
+
+/** Tells an admin when this server has just taken over, or has handed over, so it is never a surprise. */
+function MoveBanner() {
+  const { data } = usePoll(() => api.serverMove(), 15000);
+  const loc = useLocation();
+  if (!data || loc.pathname === "/settings") return null;
+  const msg = data.standby_to
+    ? `This server has handed over to ${data.standby_to}. Dashboard changes are paused here.`
+    : data.moved_from
+      ? `This server just took over from ${data.moved_from.old_url}. Check that everything works, then confirm the move.`
+      : data.move && ["preparing", "installing", "verifying", "ready", "switched"].includes(data.move.phase)
+        ? "A server move is in progress. Dashboard changes are paused until it is finished or cancelled."
+        : "";
+  if (!msg) return null;
+  return (
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+      <span>{msg}</span>
+      <Link to="/settings#mainserver" className="font-medium underline">Open Move the server</Link>
+    </div>
   );
 }
 
@@ -240,6 +262,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             </button>
           </header>
           <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
+            {me?.role === "admin" && <MoveBanner />}
             <Outlet />
           </main>
         </div>

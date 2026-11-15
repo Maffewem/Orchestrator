@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { Globe, Lock, Plus, Search, Trash2 } from "lucide-react";
 import { api, type DomainRow, type DomainsView } from "../api";
-import { Badge, Button, Card, CardHeader, CopyButton, Empty, ErrorNote, Field, Loading, Modal, Table, Td, inputClass } from "./ui";
+import { Badge, Button, Card, CardHeader, CopyButton, Empty, ErrorNote, Field, Loading, Modal, Table, Td, inputClass, rowProps } from "./ui";
 import { cx, usePoll } from "../lib";
 import { useCan } from "./auth";
 import { confirmDialog, notify } from "./dialogs";
@@ -180,7 +180,7 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
           ) : (
             <Table head={["Name", "Type", "Zone", "Status", ""]}>
               {rows.flatMap((d) => [
-                <tr key={d.id} className="cursor-pointer hover:bg-neutral-50" onClick={() => setOpen(open === d.id ? null : (d.id ?? null))}>
+                <tr key={d.id} className="cursor-pointer hover:bg-neutral-50 focus-visible:bg-neutral-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" aria-expanded={open === d.id} {...rowProps(() => setOpen(open === d.id ? null : (d.id ?? null)))}>
                   <Td className="font-medium">{d.hostname}{d.path}</Td>
                   <Td>{d.type === "route" ? "Route" : "Domain"}</Td>
                   <Td className="text-neutral-500">{d.zone}</Td>

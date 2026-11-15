@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(" ");
@@ -61,32 +61,70 @@ export function shortId(id: string): string {
   return id.replace(/^[a-z]+_/, "").slice(0, 8);
 }
 
-/** Loads data and refreshes it every `interval` ms (0 = once). */
+// Polls that already showed data but have since failed. The layout reads this to warn that what is on screen may be stale.
+const failing = new Set<symbol>();
+const failListeners = new Set<() => void>();
+let failSnapshot = 0;
+function setFailing(id: symbol, bad: boolean) {
+  if (bad === failing.has(id)) return;
+  if (bad) failing.add(id);
+  else failing.delete(id);
+  failSnapshot++;
+  failListeners.forEach((f) => f());
+}
+/** True while any on-screen poll is failing after having loaded successfully. */
+export function useStaleData(): boolean {
+  useSyncExternalStore(
+    (f) => (failListeners.add(f), () => void failListeners.delete(f)),
+    () => failSnapshot,
+  );
+  return failing.size > 0;
+}
+
+/** Loads data and refreshes it every `interval` ms (0 = once). Pauses while the tab is hidden and refreshes when it returns. */
 export function usePoll<T>(load: () => Promise<T>, interval: number, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadRef = useRef(load);
   loadRef.current = load;
+  const id = useRef(Symbol("poll")).current;
+  const loaded = useRef(false);
 
   const reload = useCallback(async () => {
     try {
       setData(await loadRef.current());
       setError(null);
+      loaded.current = true;
+      setFailing(id, false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      if (loaded.current) setFailing(id, true);
     }
-  }, []);
+  }, [id]);
+
+  useEffect(() => () => setFailing(id, false), [id]);
 
   useEffect(() => {
     setData(null);
+    loaded.current = false;
+    setFailing(id, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
   useEffect(() => {
     reload();
     if (!interval) return;
-    const t = setInterval(reload, interval);
-    return () => clearInterval(t);
+    const t = setInterval(() => {
+      if (!document.hidden) reload();
+    }, interval);
+    const onVisible = () => {
+      if (!document.hidden) reload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interval, reload, ...deps]);
 

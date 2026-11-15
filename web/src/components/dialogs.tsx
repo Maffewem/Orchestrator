@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { AlertTriangle, CircleAlert, X } from "lucide-react";
+import { AlertTriangle, CircleAlert, CircleCheck, X } from "lucide-react";
 import { Button } from "./ui";
 
 type ConfirmOptions = {
@@ -12,7 +12,7 @@ type ConfirmOptions = {
   option?: { label: string; checked: boolean };
 };
 type Pending = ConfirmOptions & { resolve: (ok: boolean, checked: boolean) => void };
-type Toast = { id: number; message: string; tone: "error" | "info" };
+type Toast = { id: number; message: string; tone: "error" | "info" | "success" };
 
 // Module-level store so call sites can `await confirmDialog(...)` from any handler, no hook needed.
 let pending: Pending[] = [];
@@ -43,7 +43,7 @@ export function notify(message: string, tone: Toast["tone"] = "error") {
   const id = nextId++;
   toasts = [...toasts, { id, message, tone }];
   emit();
-  setTimeout(() => dismiss(id), 6000);
+  setTimeout(() => dismiss(id), tone === "error" ? 8000 : 5000);
 }
 
 function dismiss(id: number) {
@@ -131,16 +131,21 @@ export function DialogHost() {
   return (
     <>
       {snapshot[0] && <ConfirmModal key={snapshot.length + snapshot[0].title} p={snapshot[0]} />}
-      <div className="fixed bottom-4 right-4 z-[70] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+      {/* Sits above the mobile tab bar; full width minus the gutter on phones. */}
+      <div className="fixed inset-x-4 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-[70] flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:w-80 lg:bottom-4">
         {toastSnapshot.map((t) => (
           <div
             key={t.id}
-            role="alert"
+            role={t.tone === "error" ? "alert" : "status"}
             className="flex items-start gap-2 rounded-lg border border-neutral-200 bg-white p-3 text-sm shadow-lg"
           >
-            <CircleAlert className={t.tone === "error" ? "mt-0.5 size-4 shrink-0 text-bad" : "mt-0.5 size-4 shrink-0 text-primary"} />
+            {t.tone === "success" ? (
+              <CircleCheck className="mt-0.5 size-4 shrink-0 text-ok" />
+            ) : (
+              <CircleAlert className={t.tone === "error" ? "mt-0.5 size-4 shrink-0 text-bad" : "mt-0.5 size-4 shrink-0 text-primary"} />
+            )}
             <span className="min-w-0 flex-1 break-words">{t.message}</span>
-            <button onClick={() => dismiss(t.id)} className="text-neutral-400 hover:text-neutral-700" aria-label="Dismiss">
+            <button onClick={() => dismiss(t.id)} className="-m-1.5 rounded-md p-1.5 text-neutral-500 hover:text-neutral-800" aria-label="Dismiss">
               <X className="size-4" />
             </button>
           </div>

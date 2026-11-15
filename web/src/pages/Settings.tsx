@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useLocation } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar } from "lucide-react";
 import { api, type Settings } from "../api";
-import { useCrumbs } from "../components/Layout";
+import { settingsSections, useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
 import { usePoll } from "../lib";
 import { copyText } from "../clipboard";
@@ -31,6 +31,8 @@ export default function SettingsPage() {
   const [bkPw, setBkPw] = useState("");
   const [bkMsg, setBkMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [find, setFind] = useState("");
+  const navigate = useNavigate();
+  const { hash } = useLocation();
 
   const s = settings.data;
   if (!s) return <Loading />;
@@ -118,7 +120,24 @@ export default function SettingsPage() {
   return (
     <div className="max-w-3xl">
       <PageHeader title="Settings" />
-      <input className={`${inputClass} mb-4 max-w-xs`} type="search" placeholder="Search settings" aria-label="Search settings" value={find} onChange={(e) => setFind(e.target.value)} />
+      {/* The section list lives in the sidebar on wide screens; on phones and tablets it is a native picker here. */}
+      <select
+        aria-label="Jump to section"
+        className={`${inputClass} mb-3 lg:hidden`}
+        value={settingsSections.some(([id]) => hash === `#${id}`) ? hash.slice(1) : ""}
+        onChange={(e) => {
+          const id = e.target.value;
+          if (!id) return;
+          navigate({ hash: `#${id}` }, { replace: true });
+          requestAnimationFrame(() => document.getElementById(`sec-${id}`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+        }}
+      >
+        <option value="">Jump to section…</option>
+        {settingsSections.filter(([id]) => vis(id)).map(([id, name]) => (
+          <option key={id} value={id}>{name}</option>
+        ))}
+      </select>
+      <input className={`${inputClass} mb-4 sm:max-w-xs`} type="search" placeholder="Search settings" aria-label="Search settings" value={find} onChange={(e) => setFind(e.target.value)} />
       {Object.keys(keywords).every((k) => !vis(k)) && <p className="mb-4 text-sm text-neutral-500">No settings match. Try a word such as token, domain or theme.</p>}
       <div className="space-y-6">
         {vis("appearance") && (

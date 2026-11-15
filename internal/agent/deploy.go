@@ -100,7 +100,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		return a.deployCompose(ctx, st, deploymentID, spec)
 	}
 	st.begin(ctx, api.StepIndex(spec, api.StepInit))
-	st.logf("Initializing deployment %s on %s", deploymentID, a.hostInfo().Hostname)
+	st.logf("Initialising deployment %s on %s", deploymentID, a.hostInfo().Hostname)
 	st.logf("Service: %s", spec.Service)
 	st.logf("Image: %s", spec.Image)
 	if len(spec.Ports) > 0 {
@@ -130,7 +130,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		st.logf("%s is already on this device; skipping the build", spec.Image)
 	case spec.Build != nil:
 		st.begin(ctx, api.StepIndex(spec, api.StepBuilding))
-		st.logf("Cloning repository and building %s on this device...", spec.Image)
+		st.logf("Cloning repository and building %s on this device…", spec.Image)
 		if err := a.docker.Build(ctx, spec.Build.Remote, spec.Build.Dockerfile, spec.Image, func(l string) { st.logf("%s", l) }); err != nil {
 			if strings.Contains(err.Error(), "git") {
 				return fmt.Errorf("build failed: %w (the device needs git installed for Docker to clone the repository)", err)
@@ -140,7 +140,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		st.logf("Success: built %s", spec.Image)
 	default:
 		st.begin(ctx, api.StepIndex(spec, api.StepPulling))
-		st.logf("Pulling %s...", spec.Image)
+		st.logf("Pulling %s…", spec.Image)
 		if err := a.docker.Pull(ctx, spec.Image, func(l string) { st.logf("%s", l) }); err != nil {
 			return fmt.Errorf("pull failed: %w", err)
 		}
@@ -182,7 +182,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	st.logf("Started container %.12s", id)
 
 	st.begin(ctx, api.StepIndex(spec, api.StepVerify))
-	st.logf("Waiting for the container to stay up...")
+	st.logf("Waiting for the container to stay up…")
 	state, err := a.docker.waitRunning(ctx, id, 8*time.Second)
 	if err == nil && (!state.Running || state.Restarting) {
 		if logs, lerr := a.docker.Logs(ctx, id, 40); lerr == nil && logs != "" {

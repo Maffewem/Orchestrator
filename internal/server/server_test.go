@@ -205,7 +205,7 @@ func TestImageProjectDeployment(t *testing.T) {
 			t.Fatalf("step update %d: %d", idx, code)
 		}
 	}
-	step(0, api.StepRunning, "Initializing")
+	step(0, api.StepRunning, "Initialising")
 	step(0, api.StepSucceeded, "")
 	step(1, api.StepRunning, "Pulling pihole/pihole:latest")
 	step(1, "", "abc: Pull complete")

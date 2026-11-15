@@ -105,8 +105,8 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
           <Field label="Device name" hint="Defaults to the hostname.">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="pi-kitchen" />
           </Field>
-          <Field label="Labels" hint="Comma-separated roles, e.g. pi,edge.">
-            <input className={inputClass} value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="pi,edge" />
+          <Field label="Labels" hint="Comma-separated roles, for example pi, edge.">
+            <input className={inputClass} value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="pi, edge" />
           </Field>
           <Choice on={installDocker} set={setInstallDocker} title="Install Docker if it is missing">
             Turn off if Docker must already be installed; the script then stops instead of installing it.

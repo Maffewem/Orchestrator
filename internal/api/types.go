@@ -368,7 +368,7 @@ func StepIndex(spec DeploySpec, name string) int {
 
 // Deployment stage names, as shown on the deployment page.
 const (
-	StepInit       = "Initializing"
+	StepInit       = "Initialising"
 	StepPulling    = "Pulling image"
 	StepCloning    = "Cloning"
 	StepInstalling = "Installing"

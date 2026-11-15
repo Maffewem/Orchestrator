@@ -86,7 +86,7 @@ func TestComposeStackDeploy(t *testing.T) {
 	for _, s := range dep.Steps {
 		names = append(names, s.Name)
 	}
-	if strings.Join(names, ",") != "Initializing,Pulling image,Deploying,Verifying" {
+	if strings.Join(names, ",") != "Initialising,Pulling image,Deploying,Verifying" {
 		t.Fatalf("steps: %v", names)
 	}
 
@@ -197,7 +197,7 @@ func TestComposeStackFromGitHub(t *testing.T) {
 	for _, s := range dep.Steps {
 		names = append(names, s.Name)
 	}
-	if strings.Join(names, ",") != "Initializing,Cloning,Pulling image,Deploying,Verifying" {
+	if strings.Join(names, ",") != "Initialising,Cloning,Pulling image,Deploying,Verifying" {
 		t.Fatalf("steps: %v", names)
 	}
 	// Credentials are added on the way out, never stored.

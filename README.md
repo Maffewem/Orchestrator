@@ -32,10 +32,10 @@ agent install on each new device.
   connections, so devices behind NAT work with no port forwarding. It talks to the local
   Docker engine over its socket and uses only the Go standard library.
 - **Deployments** run on the device in four steps that the dashboard shows as a timeline:
-  **Initializing → Building / Pulling image → Deploying → Verifying**. Logs stream back
+  **Initialising → Building / Pulling image → Deploying → Verifying**. Logs stream back
   with timestamps. Each rollout is a blue/green swap: the previous container is kept and
   restored automatically if the new one fails to start or doesn't stay up.
-- **GitHub projects** are built on the device itself. The Docker engine clones the repo at
+- **GitHub projects** are built on the device itself. The Docker engine clones the repository at
   the exact commit and builds the Dockerfile, so images are native to the Pi's
   architecture and no registry is needed. Pushes to the production branch deploy
   automatically through the webhook.
@@ -191,7 +191,7 @@ Open http://localhost:8080 and sign in with that token. Then:
 1. **Devices → Add device.** Copy the install command and run it on a Pi or VM. The device
    appears within a few seconds.
 2. **Settings → GitHub.** Paste a fine-grained token with read-only *Contents* and
-   *Metadata* access, and add the webhook URL and secret shown there to your repo.
+   *Metadata* access, and add the webhook URL and secret shown there to your repository.
 3. **Projects → Create project.** Pick a repository (or a container image), a device,
    ports and environment variables. Save to start the first deployment.
 

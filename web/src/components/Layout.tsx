@@ -1,6 +1,6 @@
 import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
+import { Activity, Archive, Boxes, ShieldCheck, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
 import { api, type Device, type FleetContainer, type Project } from "../api";
 import { cx, usePoll } from "../lib";
 import { useMe } from "./auth";
@@ -52,6 +52,7 @@ const navGroups: { title?: string; items: NavItem[] }[] = [
     title: "Infrastructure",
     items: [
       { to: "/devices", label: "Devices", icon: Server },
+      { to: "/failover", label: "Failover (demo)", icon: ShieldCheck },
       { to: "/backups", label: "Backups", icon: Archive },
       { to: "/updates", label: "Updates", icon: RefreshCw, admin: true },
     ],

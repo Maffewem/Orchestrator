@@ -18,6 +18,7 @@ import UpdatesPage from "./pages/Updates";
 import WorkerPage from "./pages/Worker";
 import ActivityPage from "./pages/Activity";
 import SettingsPage from "./pages/Settings";
+import FailoverDemoPage from "./pages/FailoverDemo";
 import { Empty } from "./components/ui";
 
 export default function App() {
@@ -129,6 +130,7 @@ export default function App() {
           <Route path="containers" element={<ContainersPage />} />
           <Route path="backups" element={<BackupsPage />} />
           <Route path="workers/:deviceId/:name/*" element={<WorkerPage />} />
+          <Route path="failover" element={<FailoverDemoPage />} />
           <Route path="updates" element={<UpdatesPage />} />
           <Route path="move" element={<Navigate to="/settings#mainserver" replace />} />
           <Route path="activity" element={<ActivityPage />} />

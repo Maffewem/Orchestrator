@@ -90,6 +90,39 @@ CREATE TABLE IF NOT EXISTS commands (
 	updated_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS commands_device_status ON commands(device_id, status);
+CREATE TABLE IF NOT EXISTS api_keys (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	prefix     TEXT NOT NULL,
+	role       TEXT NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL DEFAULT 0,
+	last_used  INTEGER NOT NULL DEFAULT 0,
+	token_hash TEXT NOT NULL UNIQUE
+);
+CREATE TABLE IF NOT EXISTS webhooks (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	url        TEXT NOT NULL,
+	events     TEXT NOT NULL DEFAULT '',
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	created_at INTEGER NOT NULL,
+	secret     TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	webhook_id  TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+	event       TEXT NOT NULL,
+	ok          INTEGER NOT NULL,
+	http_status INTEGER NOT NULL DEFAULT 0,
+	error       TEXT NOT NULL DEFAULT '',
+	attempts    INTEGER NOT NULL DEFAULT 1,
+	duration_ms INTEGER NOT NULL DEFAULT 0,
+	payload     TEXT NOT NULL DEFAULT '',
+	created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS webhook_deliveries_hook ON webhook_deliveries(webhook_id, id);
 CREATE TABLE IF NOT EXISTS events (
 	id          INTEGER PRIMARY KEY AUTOINCREMENT,
 	device_id   TEXT NOT NULL DEFAULT '',

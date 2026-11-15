@@ -79,6 +79,8 @@ type identity struct {
 	Role string `json:"role"`
 	// Token is true for the legacy admin token, which always acts as an administrator.
 	Token bool `json:"token_login"`
+	// Key is true for an API key, which cannot manage keys, webhooks or accounts.
+	Key bool `json:"api_key,omitempty"`
 }
 
 const identityKey ctxKey = 100
@@ -94,6 +96,12 @@ func (s *Server) identify(ctx context.Context, tok string) *identity {
 		return nil
 	}
 	h := store.HashToken(tok)
+	if strings.HasPrefix(tok, store.KeyPrefix) {
+		if k, err := s.store.APIKeyByHash(ctx, h); err == nil {
+			return &identity{Name: "key:" + k.Name, Role: k.Role, Key: true}
+		}
+		return nil
+	}
 	if subtle.ConstantTimeCompare([]byte(h), []byte(s.adminHash)) == 1 {
 		return &identity{Name: "admin token", Role: store.RoleAdmin, Token: true}
 	}
@@ -136,6 +144,9 @@ func routeRole(pattern string) string {
 		"GET /api/settings":                       true,
 		"GET /api/cloudflare/discover":            true,
 		"GET /api/users":                          true,
+		"GET /api/api-keys":                       true,
+		"GET /api/webhooks":                       true,
+		"GET /api/webhooks/{id}/deliveries":       true,
 		"GET /api/system/update":                  true,
 		"GET /api/github/repos":                   true,
 		"GET /api/server-backups":                 true,
@@ -163,6 +174,10 @@ func (s *Server) authed(pattern string, h http.HandlerFunc) http.Handler {
 		}
 		if store.RoleRank(id.Role) < store.RoleRank(need) {
 			writeError(w, http.StatusForbidden, fmt.Sprintf("your role (%s) can't do this; it needs %s", id.Role, need))
+			return
+		}
+		if id.Key && keyForbidden(pattern) {
+			writeError(w, http.StatusForbidden, "API keys can't manage keys, webhooks or accounts; sign in to the dashboard")
 			return
 		}
 		h(w, r.WithContext(context.WithValue(r.Context(), identityKey, id)))

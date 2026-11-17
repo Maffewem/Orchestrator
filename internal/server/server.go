@@ -189,7 +189,6 @@ func (s *Server) Run(ctx context.Context) {
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
-	go s.tunnelUpdateLoop(ctx)
 	s.startHTTPS(ctx)
 	s.recoverMigrations(ctx)
 	go s.afterBoot(ctx)

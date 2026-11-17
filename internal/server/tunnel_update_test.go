@@ -151,3 +151,49 @@ func TestManualTunnelUpdate(t *testing.T) {
 		t.Fatalf("config %+v", cfg)
 	}
 }
+
+func TestTunnelAutoUpdateFollowsUpdateSchedule(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	reg := h.register("pi-a")
+	tok := base64.StdEncoding.EncodeToString([]byte(`{"a":"acct","t":"t1"}`))
+	h.srv.saveTunnelConfig(ctx, reg.DeviceID, &tunnelConfig{Token: tok, AutoUpdate: true})
+	d, _ := h.st.GetDevice(ctx, reg.DeviceID)
+	host := d.Host
+	host.Capabilities = []string{api.CapTunnel, api.CapTunnelUpdate}
+	host.Tunnel = &api.TunnelInfo{Version: "2025.2.0"}
+	h.st.UpdateDeviceState(ctx, reg.DeviceID, host, d.Metrics, nil)
+	h.srv.cfdLatest, h.srv.cfdTried = "2025.11.1", time.Now()
+
+	count := func() int {
+		cmds, _ := h.st.DispatchCommands(ctx, reg.DeviceID)
+		n := 0
+		for _, c := range cmds {
+			if c.Action == api.ActionTunnelSync && c.Args["update"] == "1" {
+				n++
+			}
+		}
+		return n
+	}
+	now := time.Date(2026, 11, 18, 4, 0, 0, 0, time.UTC)
+	h.srv.store.SetSetting(ctx, settingUpdateSetAt, now.Add(-48*time.Hour).Format(time.RFC3339))
+
+	// Schedule off: nothing runs, and the view says why.
+	h.srv.scheduleTick(ctx, now)
+	if count() != 0 || h.srv.tunnelUpdateWhen(ctx) != "" {
+		t.Fatal("ran with the schedule off")
+	}
+	h.srv.setJSON(ctx, settingUpdateSchedule, Schedule{Mode: "daily", Time: "03:00", TZ: "UTC"})
+	if got := h.srv.tunnelUpdateWhen(ctx); got != "daily at 03:00 UTC" {
+		t.Fatalf("when %q", got)
+	}
+	// Before the slot nothing happens; once it has passed the tunnel update is queued.
+	h.srv.scheduleTick(ctx, time.Date(2026, 11, 16, 2, 0, 0, 0, time.UTC))
+	if count() != 0 {
+		t.Fatal("ran before the slot")
+	}
+	h.srv.scheduleTick(ctx, now)
+	if count() != 1 {
+		t.Fatal("not queued when the schedule fired")
+	}
+}

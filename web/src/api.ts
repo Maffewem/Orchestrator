@@ -289,6 +289,8 @@ export interface TunnelView {
   /** False when the device's agent predates tunnel updates. */
   can_update: boolean;
   auto_update: boolean;
+  /** When automatic updates run (the server update schedule); empty when that schedule is off. */
+  auto_update_when?: string;
 }
 
 export interface ProjectTunnelView extends TunnelView {

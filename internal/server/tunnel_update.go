@@ -24,8 +24,6 @@ const (
 	latestRetry           = 10 * time.Minute
 	// autoUpdateRetry spaces automatic attempts on one device, so a failing update is not repeated every pass.
 	autoUpdateRetry = 6 * time.Hour
-	// tunnelUpdateEvery is how often the server looks for opted-in devices that are behind.
-	tunnelUpdateEvery = 15 * time.Minute
 )
 
 // parseVersion turns "2025.11.1" (or "v2025.11.1") into its numeric parts.
@@ -94,6 +92,25 @@ func (s *Server) cloudflaredLatest(ctx context.Context, refresh bool) string {
 		}()
 	}
 	return latest
+}
+
+// freshCloudflaredLatest is cloudflaredLatest that waits for the lookup when the cached answer is stale.
+func (s *Server) freshCloudflaredLatest() string {
+	s.cfdMu.Lock()
+	latest, tried := s.cfdLatest, s.cfdTried
+	s.cfdMu.Unlock()
+	if latest != "" && time.Since(tried) < latestTTL {
+		return latest
+	}
+	v, err := s.fetchCloudflaredLatest()
+	if err != nil {
+		s.log.Debug("cloudflared release lookup failed", "err", err)
+		return latest // an older answer beats none
+	}
+	s.cfdMu.Lock()
+	s.cfdLatest, s.cfdTried = v, time.Now()
+	s.cfdMu.Unlock()
+	return v
 }
 
 func (s *Server) fetchCloudflaredLatest() (string, error) {
@@ -187,31 +204,11 @@ func (s *Server) handleSetTunnelAutoUpdate(w http.ResponseWriter, r *http.Reques
 
 func tunnelAutoKey(deviceID string) string { return "tunnel-auto-update:" + deviceID }
 
-// tunnelUpdateLoop installs newer cloudflared releases on devices that opted in.
-func (s *Server) tunnelUpdateLoop(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(2 * time.Minute):
-	}
-	t := time.NewTicker(tunnelUpdateEvery)
-	defer t.Stop()
-	for {
-		if !s.movePaused() {
-			s.tunnelUpdatePass(ctx, time.Now())
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
-// tunnelUpdatePass queues an update for each opted-in device that is online, not in maintenance
-// mode, reports a version older than the latest release and has not been tried recently.
+// tunnelUpdatePass runs when the Orchestrator update schedule fires (see scheduleTick), so
+// unattended changes all land in the window the admin chose. It queues an update for each
+// opted-in device that is online, not in maintenance mode, reports a version older than the latest release and has not been tried recently.
 func (s *Server) tunnelUpdatePass(ctx context.Context, now time.Time) {
-	latest := s.cloudflaredLatest(ctx, true)
+	latest := s.freshCloudflaredLatest()
 	if latest == "" {
 		return
 	}
@@ -239,4 +236,17 @@ func (s *Server) tunnelUpdatePass(ctx context.Context, now time.Time) {
 		}
 		s.event(ctx, d.ID, "info", "tunnel.update", fmt.Sprintf("Updating cloudflared on %s automatically (%s to %s)", d.Name, d.Host.Tunnel.Version, latest))
 	}
+}
+
+// tunnelUpdateWhen describes when automatic tunnel updates run: with the Orchestrator update
+// schedule, or never while that schedule is off.
+func (s *Server) tunnelUpdateWhen(ctx context.Context) string {
+	sch := s.loadSchedule(ctx)
+	switch sch.Mode {
+	case "daily":
+		return fmt.Sprintf("daily at %s %s", sch.Time, sch.TZ)
+	case "weekly":
+		return fmt.Sprintf("every %s at %s %s", time.Weekday(sch.Weekday), sch.Time, sch.TZ)
+	}
+	return ""
 }

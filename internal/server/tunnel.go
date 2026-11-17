@@ -102,6 +102,8 @@ type tunnelView struct {
 	// CanUpdate is false for an agent that predates tunnel updates.
 	CanUpdate  bool `json:"can_update"`
 	AutoUpdate bool `json:"auto_update"`
+	// AutoUpdateWhen says when automatic updates run (the Orchestrator update schedule); empty means that schedule is off, so they never run.
+	AutoUpdateWhen string `json:"auto_update_when,omitempty"`
 }
 
 func (s *Server) tunnelView(ctx context.Context, d *store.Device) tunnelView {
@@ -113,6 +115,7 @@ func (s *Server) tunnelView(ctx context.Context, d *store.Device) tunnelView {
 	v.Enabled = true
 	v.Via = cfg.Via
 	v.AutoUpdate = cfg.AutoUpdate
+	v.AutoUpdateWhen = s.tunnelUpdateWhen(ctx)
 	v.CanUpdate = hasCap(d, api.CapTunnelUpdate)
 	if d.Host.Tunnel != nil {
 		v.Version = d.Host.Tunnel.Version

@@ -163,7 +163,7 @@ export default function DomainsPanel({ projectId }: { projectId: string }) {
       </Card>
 
       <section>
-        <h2 className="mb-3 text-lg font-medium">Custom Domains and Routes</h2>
+        <h2 className="mb-3 text-lg font-medium">Custom domains and routes</h2>
         <div className="mb-3 flex flex-wrap gap-2">
           <div className="relative min-w-48 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-neutral-400" />

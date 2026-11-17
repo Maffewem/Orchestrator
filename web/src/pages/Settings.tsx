@@ -219,7 +219,7 @@ export default function SettingsPage() {
                 <Help title="How to create the token">
                   <p>
                     Create a fine-grained personal access token with read-only <b>Contents</b> and <b>Metadata</b> access to the repositories you want to
-                    deploy. It is used to list repositories, read commits and clone private repos on your devices. Public repos work without one.
+                    deploy. It is used to list repositories, read commits and clone private repositories on your devices. Public repositories work without one.
                   </p>
                 </Help>
               </div>

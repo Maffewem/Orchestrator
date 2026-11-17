@@ -66,7 +66,7 @@ func (a *Agent) waitReachable(ctx context.Context, st *steps, id string, spec ap
 	}
 	for _, p := range ports {
 		addr := net.JoinHostPort(ip, p)
-		st.logf("Checking that %s answers...", addr)
+		st.logf("Checking that %s answers…", addr)
 		deadline := time.Now().Add(wait)
 		for {
 			c, derr := net.DialTimeout("tcp", addr, 2*time.Second)

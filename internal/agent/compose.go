@@ -71,7 +71,7 @@ func (a *Agent) stackContainers(ctx context.Context, name string) ([]dockerConta
 // a single container there is no blue/green swap: Compose recreates only the services that changed.
 func (a *Agent) deployCompose(ctx context.Context, st *steps, deploymentID string, spec api.DeploySpec) error {
 	st.begin(ctx, api.StepIndex(spec, api.StepInit))
-	st.logf("Initializing deployment %s on %s", deploymentID, a.hostInfo().Hostname)
+	st.logf("Initialising deployment %s on %s", deploymentID, a.hostInfo().Hostname)
 	st.logf("Stack: %s", spec.Service)
 	info := a.docker.Info(ctx)
 	if info.Error != "" {
@@ -138,7 +138,7 @@ func (a *Agent) deployCompose(ctx context.Context, st *steps, deploymentID strin
 	}
 
 	st.begin(ctx, api.StepIndex(spec, api.StepVerify))
-	st.logf("Waiting for the services to stay up...")
+	st.logf("Waiting for the services to stay up…")
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

@@ -136,7 +136,7 @@ export default function ProjectForm({
             <div className="grid gap-4 sm:grid-cols-2">
               <Field
                 label="Repository"
-                hint={connected ? "Repositories your GitHub token can see." : "Public repos work as-is. Connect GitHub in Settings for private repos."}
+                hint={connected ? "Repositories your GitHub token can see." : "Public repositories work without it. Connect GitHub in Settings for private repositories."}
               >
                 {connected && repos.data?.length ? (
                   <select
@@ -386,7 +386,7 @@ export default function ProjectForm({
             {source.repo ? (
               <>
                 <div className="grid gap-4 sm:grid-cols-3">
-                  <Field label="Repository" hint="Public repos work as-is. Connect GitHub in Settings for private repos.">
+                  <Field label="Repository" hint="Public repositories work without it. Connect GitHub in Settings for private repositories.">
                     <input className={inputClass} placeholder="owner/repository" value={source.repo.trim()} onChange={(e) => set({ repo: e.target.value || " " })} />
                   </Field>
                   <Field label="Branch">

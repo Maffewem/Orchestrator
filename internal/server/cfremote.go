@@ -572,5 +572,11 @@ func (s *Server) handleGetCloudflareRemote(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "this project is not deployed to Cloudflare")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.cfRemoteOf(r.Context(), p.ID))
+	rem := s.cfRemoteOf(r.Context(), p.ID)
+	if rem == nil {
+		// Nothing fetched yet (a project imported or an update installed since the last poll): fetch now.
+		s.cfPollProject(r.Context(), p)
+		rem = s.cfRemoteOf(r.Context(), p.ID)
+	}
+	writeJSON(w, http.StatusOK, rem)
 }

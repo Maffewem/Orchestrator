@@ -1,6 +1,8 @@
 import { ExternalLink, GitBranch, GitPullRequest, Globe, Info, Rocket } from "lucide-react";
 import { api, type CloudflareRemote, type Project } from "../api";
-import { Badge, Card, CardHeader, Empty, Skeleton } from "./ui";
+import { useState } from "react";
+import { Badge, Card, CardHeader, Empty, RefreshButton, Skeleton } from "./ui";
+import { useCan } from "./auth";
 import { ago, usePoll } from "../lib";
 
 type Dep = CloudflareRemote["deployments"][number];
@@ -17,6 +19,47 @@ const STATUS: Record<string, { label: string; tone: "ok" | "warn" | "bad" | unde
   canceled: { label: "Canceled", tone: undefined },
   building: { label: "Building", tone: "warn" },
 };
+
+/** One line per section saying whether it was read from Cloudflare, or why not, plus a Sync button. */
+export function SyncStatus({ p, q }: { p: Project; q: ReturnType<typeof useCloudflareRemote> }) {
+  const can = useCan("operator");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const r = q.data;
+  const sync = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.refreshCloudflare(p.id);
+      await q.reload();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const worker = p.source.cloudflare?.kind === "worker";
+  const sections = [["deployments", "Deployments"], ["previews", "Previews"], ["domains", "Domains"], ...(worker ? [["routes", "Routes"]] : []), ["settings", "Settings"]] as const;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-5 py-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+        {r ? (
+          sections.map(([k, label]) => (
+            <span key={k} title={r.notes?.[k]} className="inline-flex items-center gap-1.5">
+              <Badge tone={r.notes?.[k] ? "warn" : "ok"}>{r.notes?.[k] ? "Needs attention" : "Synced"}</Badge>
+              {label}
+            </span>
+          ))
+        ) : (
+          <span className="text-neutral-500">{q.error ?? "Not synced from Cloudflare yet."}</span>
+        )}
+        {r && <span className="text-neutral-500">Last synced {ago(r.fetched_at)}</span>}
+        {err && <span className="text-bad">{err}</span>}
+      </div>
+      {can && <RefreshButton onClick={sync} busy={busy} label="Sync from Cloudflare" />}
+    </div>
+  );
+}
 
 function Note({ children }: { children: React.ReactNode }) {
   return (
@@ -90,6 +133,7 @@ export function CloudflareHistory({ p, subtitle }: { p: Project; subtitle?: stri
   return (
     <Card>
       <CardHeader title="On Cloudflare" subtitle={subtitle ?? "Deployment history read from Cloudflare. Read-only: deployments made here appear above."} />
+      <SyncStatus p={p} q={q} />
       {!r && !q.error ? (
         <Rows />
       ) : !r || r.deployments.length === 0 ? (
@@ -104,6 +148,7 @@ export function CloudflareHistory({ p, subtitle }: { p: Project; subtitle?: stri
         </div>
       )}
       {r?.notes?.deployments && r.deployments.length > 0 && <Note>{r.notes.deployments}</Note>}
+      {r && Object.entries(r.notes ?? {}).filter(([k]) => k !== "deployments").map(([k, v]) => <Note key={k}><b className="capitalize">{k}:</b> {v}</Note>)}
     </Card>
   );
 }

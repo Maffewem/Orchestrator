@@ -205,7 +205,9 @@ function TunnelCard({ d }: { d: Device }) {
                     <span>
                       Update cloudflared automatically
                       <span className="block text-xs text-neutral-500">
-                        When a newer release is out, the server updates the tunnel on this device, at most once every six hours. Skipped while the device is in maintenance mode.
+                        {t.auto_update_when
+                          ? `Runs with the server's update schedule (${t.auto_update_when}): if a newer release is out, the tunnel on this device is updated then. Skipped while the device is in maintenance mode.`
+                          : "Follows the server's update schedule, which is off, so nothing runs automatically until you set one on the Updates page. Use Update tunnel for a manual update."}
                       </span>
                     </span>
                   </label>

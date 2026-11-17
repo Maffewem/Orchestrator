@@ -39,7 +39,7 @@ export function SyncStatus({ p, q }: { p: Project; q: ReturnType<typeof useCloud
     }
   };
   const worker = p.source.cloudflare?.kind === "worker";
-  const sections = [["deployments", "Deployments"], ["previews", "Previews"], ["domains", "Domains"], ...(worker ? [["routes", "Routes"]] : []), ["settings", "Settings"]] as const;
+  const sections = [["deployments", "Deployments"], ["previews", "Previews"], ["domains", "Domains"], ...(worker ? [["routes", "Routes"], ["build", "Build config"]] : []), ["settings", "Settings"]] as const;
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-5 py-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
@@ -148,7 +148,7 @@ export function CloudflareHistory({ p, subtitle }: { p: Project; subtitle?: stri
         </div>
       )}
       {r?.notes?.deployments && r.deployments.length > 0 && <Note>{r.notes.deployments}</Note>}
-      {r && Object.entries(r.notes ?? {}).filter(([k]) => k !== "deployments").map(([k, v]) => <Note key={k}><b className="capitalize">{k}:</b> {v}</Note>)}
+      {r && Object.entries(r.notes ?? {}).filter(([k]) => k !== "deployments" && k !== "build").map(([k, v]) => <Note key={k}><b className="capitalize">{k}:</b> {v}</Note>)}
     </Card>
   );
 }
@@ -283,6 +283,8 @@ export function CloudflareSettings({ p }: { p: Project }) {
   const q = useCloudflareRemote(p);
   const r = q.data;
   const s = r?.settings;
+  const b = s?.build;
+  const hasBuild = !!s && !!(b || s.repo || s.build_command || s.output_dir || s.root_dir);
   const row = (k: string, v?: string | boolean | null) =>
     v === undefined || v === "" || v === null ? null : (
       <div key={k} className="flex justify-between gap-4 py-1.5 text-sm">
@@ -309,12 +311,30 @@ export function CloudflareSettings({ p }: { p: Project }) {
             {row("Compatibility flags", s.compatibility_flags?.join(", "))}
             {row("Usage model", s.usage_model)}
             {row("Observability", s.observability)}
-            {row("Repository", s.repo)}
-            {row("Production branch", s.production_branch)}
-            {row("Build command", s.build_command)}
-            {row("Output directory", s.output_dir)}
-            {row("Root directory", s.root_dir)}
           </dl>
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Build configuration</h4>
+            {hasBuild ? (
+              <dl className="mt-2 divide-y divide-neutral-100">
+                {row("Repository", b?.repo ?? s.repo)}
+                {row("Git provider", b?.provider)}
+                {row("Production branch", s.production_branch)}
+                {row("Branches built", b?.branches?.join(", "))}
+                {row("Branches excluded", b?.exclude_branches?.join(", "))}
+                {row("Root directory", b?.root_dir ?? s.root_dir)}
+                {row("Build command", b?.build_command ?? s.build_command)}
+                {row("Deploy command", b?.deploy_command)}
+                {row("Output directory", s.output_dir)}
+                {row("Paths watched", b?.path_includes?.join(", "))}
+                {row("Paths ignored", b?.path_excludes?.join(", "))}
+                {row("Build cache", b?.build_caching)}
+              </dl>
+            ) : (
+              <p className="mt-2 text-sm text-neutral-500">
+                {r?.notes?.build ?? (p.source.cloudflare?.kind === "pages" ? "Cloudflare has no build settings for this Pages project: it is deployed by direct upload rather than built from Git." : "Cloudflare did not report build settings.")}
+              </p>
+            )}
+          </div>
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Variables and secrets</h4>
             {s.variables.length === 0 ? (

@@ -52,6 +52,18 @@ func (f *cfFake) serveRemote(w http.ResponseWriter, p string, r *http.Request, o
 			map[string]any{"id": "w-deploy-0", "created_on": "2026-11-01T10:05:00Z", "source": "dash",
 				"versions": []any{map[string]any{"version_id": "bbbbbbbb-2222", "percentage": 100}}},
 		}})
+	case p == "/accounts/acct/workers/scripts" && r.Method == http.MethodGet:
+		var l []any
+		for n := range f.workerUploads {
+			l = append(l, map[string]string{"id": n, "tag": "tag-" + n})
+		}
+		ok(l)
+	case p == "/accounts/acct/builds/workers/tag-aurora/triggers":
+		ok([]any{map[string]any{"trigger_name": "Deploy default branch", "build_command": "npm run build", "deploy_command": "npx wrangler deploy", "root_directory": "/worker",
+			"branch_includes": []string{"main"}, "build_caching_enabled": true,
+			"repo_connection": map[string]string{"provider_type": "github", "provider_account_name": "Maffewem", "repo_name": "aurora"}}})
+	case strings.HasPrefix(p, "/accounts/acct/builds/workers/"):
+		notFound()
 	case strings.HasPrefix(p, wk) && strings.HasSuffix(p, "/settings"):
 		ok(map[string]any{"compatibility_date": "2026-01-15", "compatibility_flags": []string{"nodejs_compat"}, "observability": map[string]bool{"enabled": true},
 			"bindings": []any{
@@ -108,6 +120,9 @@ func TestCloudflareWorkerHistorySettingsAndDomains(t *testing.T) {
 	set := rem.Settings
 	if set == nil || set.CompatibilityDate != "2026-01-15" || len(set.Bindings) != 2 || len(set.Variables) != 2 {
 		t.Fatalf("settings: %+v", set)
+	}
+	if b := set.Build; b == nil || b.BuildCommand != "npm run build" || b.DeployCommand != "npx wrangler deploy" || b.RootDir != "/worker" || b.Repo != "Maffewem/aurora" || len(b.Branches) != 1 || b.Branches[0] != "main" {
+		t.Fatalf("workers builds config: %+v", b)
 	}
 	raw, _ := json.Marshal(rem)
 	if strings.Contains(string(raw), "super-secret-value") {

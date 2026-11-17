@@ -1,6 +1,6 @@
 # Orchestrator
 
-A self-hosted manager for a fleet of Raspberry Pis, VMs and servers. Think Portainer
+A self-hosted manager for a group of Raspberry Pis, VMs and servers. Think Portainer
 across many machines, with a Cloudflare Pages-style dashboard: projects, step-by-step
 deployments with live logs, GitHub push-to-deploy, and Server Manager-style health for
 every device.
@@ -283,11 +283,11 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 
 | | |
 | --- | --- |
-| `GET /api/overview` | fleet counts and recent activity |
+| `GET /api/overview` | device counts and recent activity |
 | `GET /api/devices`, `GET/PATCH/DELETE /api/devices/{id}` | devices with health and status |
 | `GET /api/devices/{id}/metrics` | the last hour of CPU/memory/disk samples |
 | `POST /api/devices/{id}/commands` | `container.start/stop/restart/logs` |
-| `GET /api/containers` | every container in the fleet |
+| `GET /api/containers` | every container across all devices |
 | `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}` | projects |
 | `POST /api/devices/{id}/adopt` | read containers and create projects from them (`dry_run` previews) |
 | `POST /api/projects/{id}/deployments` | deploy (GitHub projects use the branch head) |

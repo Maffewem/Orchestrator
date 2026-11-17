@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Download, RotateCcw, Trash2, Upload } from "lucide-react";
 import { api, type BackupDest, type ServerBackupPolicy } from "../api";
-import { Badge, Button, ErrorNote, Field, Loading, inputClass } from "./ui";
+import { Badge, Button, ErrorNote, Field, Loading, inputClass, SecretInput } from "./ui";
 import { confirmDialog } from "./dialogs";
 import { ago, bytes, usePoll } from "../lib";
 
@@ -11,11 +11,9 @@ export function ServerBackupsPanel() {
   const list = usePoll(api.serverBackups, 0);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState("");
-  const [pol, setPol] = useState<ServerBackupPolicy | null>(null);
   const file = useRef<HTMLInputElement>(null);
   const v = list.data;
   if (!v) return <Loading />;
-  const policy = pol ?? v.policy;
 
   const run = async (key: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(key);
@@ -52,44 +50,11 @@ export function ServerBackupsPanel() {
           Restore from file
         </Button>
       </div>
+      {msg && (msg.ok ? <p role="status" className="text-sm text-ok">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
 
-      <div className="space-y-3 border-t border-neutral-200 pt-4">
-        <p className="text-sm font-medium">Schedule</p>
-        <div className="flex flex-wrap items-end gap-3">
-          <Field label="Run">
-            <select className={inputClass} value={policy.mode} onChange={(e) => setPol({ ...policy, mode: e.target.value as ServerBackupPolicy["mode"] })}>
-              <option value="off">Never</option>
-              <option value="daily">Every day</option>
-              <option value="weekly">Every week</option>
-            </select>
-          </Field>
-          {policy.mode === "weekly" && (
-            <Field label="On">
-              <select className={inputClass} value={policy.weekday} onChange={(e) => setPol({ ...policy, weekday: Number(e.target.value) })}>
-                {weekdays.map((d, i) => (
-                  <option key={d} value={i}>{d}</option>
-                ))}
-              </select>
-            </Field>
-          )}
-          {policy.mode !== "off" && (
-            <Field label={`At (${policy.tz})`}>
-              <input className={`${inputClass} w-28`} value={policy.time} onChange={(e) => setPol({ ...policy, time: e.target.value })} placeholder="03:00" />
-            </Field>
-          )}
-          <Field label="Keep last">
-            <input className={`${inputClass} w-24`} type="number" min={1} max={365} value={policy.keep} onChange={(e) => setPol({ ...policy, keep: Number(e.target.value) })} />
-          </Field>
-          <Button loading={busy === "policy"} onClick={() => run("policy", () => api.setServerBackupPolicy(policy).then(() => setPol(null)), "Schedule saved.")}>
-            Save schedule
-          </Button>
-        </div>
-        {v.next_run && v.policy.mode !== "off" && <p className="text-sm text-neutral-500">Next backup {new Date(v.next_run).toLocaleString()}. Stored in <code>{v.dir}</code>.</p>}
-      </div>
+      <Schedule saved={v.policy} nextRun={v.next_run} dir={v.dir} onSaved={() => list.reload()} />
 
       <Destinations dests={v.destinations ?? []} onChanged={() => list.reload()} />
-
-      {msg && (msg.ok ? <p className="text-sm text-ok">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
 
       <div className="overflow-x-auto border-t border-neutral-200 pt-4">
         {(v.backups ?? []).length === 0 ? (
@@ -129,18 +94,84 @@ export function ServerBackupsPanel() {
   );
 }
 
+function Schedule({ saved, nextRun, dir, onSaved }: { saved: ServerBackupPolicy; nextRun?: string; dir: string; onSaved: () => void }) {
+  const [draft, setDraft] = useState<ServerBackupPolicy | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const policy = draft ?? saved;
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(saved);
+  const edit = (patch: Partial<ServerBackupPolicy>) => {
+    setMsg(null);
+    setDraft({ ...policy, ...patch });
+  };
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.setServerBackupPolicy(policy);
+      setDraft(null);
+      setMsg({ ok: true, text: "Schedule saved." });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section aria-labelledby="backup-schedule" className="space-y-3 border-t border-neutral-200 pt-4">
+      <h3 id="backup-schedule" className="text-sm font-medium">Schedule</h3>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Field label="Run">
+          <select className={inputClass} value={policy.mode} onChange={(e) => edit({ mode: e.target.value as ServerBackupPolicy["mode"] })}>
+            <option value="off">Never</option>
+            <option value="daily">Every day</option>
+            <option value="weekly">Every week</option>
+          </select>
+        </Field>
+        {policy.mode === "weekly" && (
+          <Field label="On">
+            <select className={inputClass} value={policy.weekday} onChange={(e) => edit({ weekday: Number(e.target.value) })}>
+              {weekdays.map((d, i) => (
+                <option key={d} value={i}>{d}</option>
+              ))}
+            </select>
+          </Field>
+        )}
+        {policy.mode !== "off" && (
+          <Field label={`At (${policy.tz})`}>
+            <input className={inputClass} value={policy.time} onChange={(e) => edit({ time: e.target.value })} placeholder="03:00" />
+          </Field>
+        )}
+        <Field label="Keep last" hint="Number of backups">
+          <input className={inputClass} type="number" min={1} max={365} value={policy.keep} onChange={(e) => edit({ keep: Number(e.target.value) })} />
+        </Field>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="primary" loading={busy} disabled={!dirty} onClick={save}>Save schedule</Button>
+        <Button variant="ghost" disabled={!dirty || busy} onClick={() => { setDraft(null); setMsg(null); }}>Discard</Button>
+        {dirty && <span className="text-sm text-amber-700">Unsaved changes</span>}
+        {msg && (msg.ok ? <span role="status" className="text-sm text-ok">{msg.text}</span> : <ErrorNote>{msg.text}</ErrorNote>)}
+      </div>
+      {nextRun && saved.mode !== "off" && !dirty && <p className="text-sm text-neutral-500">Next backup {new Date(nextRun).toLocaleString()}. Stored in <code>{dir}</code>.</p>}
+    </section>
+  );
+}
+
 const kinds: Record<BackupDest["kind"], string> = { s3: "S3 compatible (AWS, R2, B2, MinIO)", folder: "Folder on this server (mount a NAS here)", device: "Another device running an agent" };
 
 function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: () => void }) {
   const devices = usePoll(api.devices, 0);
   const [draft, setDraft] = useState<BackupDest[] | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
   const list = draft ?? dests;
   const set = (i: number, patch: Partial<BackupDest>) => setDraft(list.map((d, j) => (j === i ? { ...d, ...patch } : d)));
   const add = (kind: BackupDest["kind"]) =>
     setDraft([...list, { id: "", kind, name: kind === "s3" ? "Bucket" : kind === "folder" ? "Folder" : "Device", enabled: true, region: "auto", path: kind === "device" ? "/srv/orchestrator-backups" : "" }]);
   const save = async () => {
     setMsg(null);
+    setSaving(true);
     try {
       await api.setBackupDests(list);
       setDraft(null);
@@ -148,6 +179,8 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
       onChanged();
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSaving(false);
     }
   };
   const test = async (d: BackupDest) => {
@@ -161,7 +194,7 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
   };
   return (
     <div className="space-y-3 border-t border-neutral-200 pt-4">
-      <p className="text-sm font-medium">Send copies elsewhere</p>
+      <h3 className="text-sm font-medium">Send copies elsewhere</h3>
       <p className="text-sm text-neutral-500">A backup on the same disk does not survive the disk. Every new backup is copied to each enabled destination. Folders and devices keep the same number of copies; expire S3 objects with a bucket lifecycle rule.</p>
       {list.map((d, i) => (
         <div key={d.id || i} className="space-y-3 rounded-lg border border-neutral-200 p-3">
@@ -185,7 +218,7 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
               <Field label="Bucket"><input className={inputClass} value={d.bucket ?? ""} onChange={(e) => set(i, { bucket: e.target.value })} /></Field>
               <Field label="Folder in bucket"><input className={inputClass} value={d.prefix ?? ""} onChange={(e) => set(i, { prefix: e.target.value })} placeholder="orchestrator" /></Field>
               <Field label="Access key ID"><input className={inputClass} value={d.access_key ?? ""} onChange={(e) => set(i, { access_key: e.target.value })} /></Field>
-              <Field label="Secret access key"><input className={inputClass} type="password" value={d.secret_key ?? ""} placeholder={d.secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => set(i, { secret_key: e.target.value })} /></Field>
+              <Field label="Secret access key"><SecretInput className={inputClass} value={d.secret_key ?? ""} placeholder={d.secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => set(i, { secret_key: e.target.value })} /></Field>
             </div>
           )}
           {d.kind === "folder" && (
@@ -206,14 +239,18 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
           )}
         </div>
       ))}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-neutral-500">Add a destination:</span>
         {(Object.keys(kinds) as BackupDest["kind"][]).map((k) => (
-          <Button key={k} size="sm" onClick={() => add(k)}>Add {k === "s3" ? "S3" : k === "folder" ? "folder" : "device"}</Button>
+          <Button key={k} size="sm" onClick={() => add(k)}>{k === "s3" ? "S3 bucket" : k === "folder" ? "Folder" : "Device"}</Button>
         ))}
-        {draft && <Button variant="primary" onClick={save}>Save destinations</Button>}
-        {draft && <Button variant="ghost" onClick={() => setDraft(null)}>Discard</Button>}
       </div>
-      {msg && (msg.ok ? <p className="text-sm text-ok">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
+      <div className="flex flex-wrap items-center gap-3 border-t border-neutral-100 pt-3">
+        <Button variant="primary" loading={saving} disabled={!draft} onClick={save}>Save destinations</Button>
+        <Button variant="ghost" disabled={!draft || saving} onClick={() => { setDraft(null); setMsg(null); }}>Discard</Button>
+        {draft && <span className="text-sm text-amber-700">Unsaved changes</span>}
+      </div>
+      {msg && (msg.ok ? <p role="status" className="text-sm text-ok">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
     </div>
   );
 }

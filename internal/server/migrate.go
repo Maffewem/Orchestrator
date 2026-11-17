@@ -112,8 +112,12 @@ func (s *Server) startMigration(ctx context.Context, p *store.Project, req migra
 	if isStack {
 		withData = false // volumes of a stack are not copied
 	}
-	if req.DeviceID == p.DeviceID {
-		return none, http.StatusBadRequest, errors.New("the project is already on that device")
+	if req.DeviceID != "" && req.DeviceID == p.DeviceID {
+		name := "that device"
+		if cur, err := s.store.GetDevice(ctx, p.DeviceID); err == nil {
+			name = cur.Name
+		}
+		return none, http.StatusBadRequest, errors.New(p.Name + " already runs on " + name + ". Choose a different device to move it to")
 	}
 	src, err := s.store.GetDevice(ctx, p.DeviceID)
 	if err != nil {

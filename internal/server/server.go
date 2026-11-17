@@ -80,6 +80,10 @@ type Server struct {
 	logins        limiter
 	trusted       []*net.IPNet
 	sums          sync.Map // agent binary name -> [stamp, sha256]
+	cfdMu         sync.Mutex
+	cfdLatest     string    // newest cloudflared release, see tunnel_update.go
+	cfdTried      time.Time // last lookup, successful or not
+	cfdURL        string    // release lookup URL; tests point it elsewhere
 	mig           migrations
 	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
 	migratePoll   time.Duration // test hook; 2s when zero
@@ -185,6 +189,7 @@ func (s *Server) Run(ctx context.Context) {
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
+	go s.tunnelUpdateLoop(ctx)
 	s.startHTTPS(ctx)
 	s.recoverMigrations(ctx)
 	go s.afterBoot(ctx)
@@ -305,6 +310,8 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/projects/{id}/tunnel", s.handleGetProjectTunnel)
 	admin("PUT /api/projects/{id}/tunnel", s.handleSetProjectTunnel)
 	admin("PUT /api/devices/{id}/tunnel/via", s.handleSetTunnelVia)
+	admin("POST /api/devices/{id}/tunnel/update", s.handleUpdateTunnel)
+	admin("PUT /api/devices/{id}/tunnel/auto-update", s.handleSetTunnelAutoUpdate)
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
 	admin("POST /api/projects/{id}/migrate", s.handleMigrateProject)
 	admin("GET /api/projects/{id}/migration", s.handleGetMigration)

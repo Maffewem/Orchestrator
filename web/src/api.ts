@@ -259,6 +259,13 @@ export interface TunnelView {
   routes: TunnelRoute[];
   can_route: boolean;
   warnings?: string[];
+  /** cloudflared version running on the device, the newest release, and whether the first is behind. */
+  version?: string;
+  latest?: string;
+  update_available: boolean;
+  /** False when the device's agent predates tunnel updates. */
+  can_update: boolean;
+  auto_update: boolean;
 }
 
 export interface ProjectTunnelView extends TunnelView {
@@ -839,6 +846,8 @@ export const api = {
     request<Device>("PATCH", `/api/devices/${id}`, patch),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),
+  updateTunnel: (id: string) => request<TunnelView>("POST", `/api/devices/${id}/tunnel/update`),
+  setTunnelAutoUpdate: (id: string, enabled: boolean) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/auto-update`, { enabled }),
   setTunnelVia: (id: string, via: "" | "proxy") => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/via`, { via }),
   setTunnelRoutes: (id: string, routes: TunnelRoute[]) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel/routes`, { routes }),
   projectTunnel: (id: string) => request<ProjectTunnelView>("GET", `/api/projects/${id}/tunnel`),

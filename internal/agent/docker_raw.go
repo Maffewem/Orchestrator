@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -183,4 +184,49 @@ func (d *Docker) LabelOf(ctx context.Context, id, label string) (string, error) 
 		return "", err
 	}
 	return v.Config.Labels[label], nil
+}
+
+// ImageID returns the ID of the local image for ref, or "" when it is not present.
+func (d *Docker) ImageID(ctx context.Context, ref string) (string, error) {
+	var v struct {
+		ID string `json:"Id"`
+	}
+	err := d.call(ctx, http.MethodGet, "/images/"+ref+"/json", nil, nil, &v)
+	if isStatus(err, http.StatusNotFound) {
+		return "", nil
+	}
+	return v.ID, err
+}
+
+// ContainerImage returns the ID of the image a container was created from and the image
+// reference it was created with.
+func (d *Docker) ContainerImage(ctx context.Context, id string) (imageID, ref string, err error) {
+	var v struct {
+		Image  string `json:"Image"`
+		Config struct {
+			Image string `json:"Image"`
+		} `json:"Config"`
+	}
+	if err = d.call(ctx, http.MethodGet, "/containers/"+id+"/json", nil, nil, &v); err != nil {
+		return "", "", err
+	}
+	return v.Image, v.Config.Image, nil
+}
+
+// ExecOutput runs a command in a running container without a TTY and returns its combined output.
+func (d *Docker) ExecOutput(ctx context.Context, container string, cmd ...string) (string, error) {
+	var created struct {
+		ID string `json:"Id"`
+	}
+	if err := d.call(ctx, http.MethodPost, "/containers/"+container+"/exec", nil, map[string]any{
+		"AttachStdout": true, "AttachStderr": true, "Cmd": cmd,
+	}, &created); err != nil {
+		return "", err
+	}
+	resp, err := d.request(ctx, http.MethodPost, "/exec/"+created.ID+"/start", nil, map[string]any{"Detach": false, "Tty": false})
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	return demux(io.LimitReader(resp.Body, 64<<10))
 }

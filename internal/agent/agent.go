@@ -61,6 +61,10 @@ type Agent struct {
 	lastDiscover time.Time
 	scanHosts    func() []string // hosts discovery probes; nil means the local networks
 
+	tunMu   sync.Mutex
+	tunInfo *api.TunnelInfo // cloudflared details for the heartbeat, refreshed by tunnelInfo
+	tunAt   time.Time
+
 	netMu    sync.Mutex
 	netCache []api.NetAddr
 	netAt    time.Time
@@ -352,7 +356,7 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		output, err = a.stackAction(sctx, c.Action, c.Target, c.Args["volumes"])
 		scancel()
 	case api.ActionTunnelSync:
-		err = a.syncTunnel(cctx, c.Args["token"])
+		err = a.syncTunnel(cctx, c.Args["token"], c.Args["update"] == "1")
 	case api.ActionProxySync:
 		err = a.syncProxy(cctx, c.Args["caddyfile"], c.Args["cloudflare_token"])
 	case api.ActionBackup, api.ActionRestore:

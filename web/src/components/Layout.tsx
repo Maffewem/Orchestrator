@@ -1,7 +1,7 @@
-import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, WifiOff, X } from "lucide-react";
-import { api, type Device, type FleetContainer, type Project } from "../api";
+import { api, type Device, type Me, type FleetContainer, type Project } from "../api";
 import { cx, usePoll, useStaleData } from "../lib";
 import { useMe } from "./auth";
 import { Button, ErrorNote, Field, Modal, inputClass } from "./ui";
@@ -197,32 +197,6 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           </div>
         );
       })}
-      <div className="mt-auto">
-        {me && !compact && (
-          <div className="mb-1 px-2.5 py-2 text-sm">
-            <p className="truncate font-medium">{me.username}</p>
-            <p className="text-xs capitalize text-neutral-500">{me.role}</p>
-          </div>
-        )}
-        {me && !me.token_login && (
-          <button
-            onClick={() => setPw(true)}
-            title="Change password"
-            className={cx("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900", compact && "justify-center")}
-          >
-            <KeyRound className="size-4 shrink-0" />
-            {!compact && "Change password"}
-          </button>
-        )}
-        <button
-          onClick={onLogout}
-          title="Sign out"
-          className={cx("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900", compact && "justify-center")}
-        >
-          <LogOut className="size-4 shrink-0" />
-          {!compact && "Sign out"}
-        </button>
-      </div>
     </nav>
   );
 
@@ -262,6 +236,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
               </span>
               <kbd className="hidden rounded border border-neutral-300 px-1.5 text-xs sm:inline">Ctrl K</kbd>
             </button>
+            {me && <UserMenu me={me} onChangePassword={() => setPw(true)} onLogout={onLogout} />}
           </header>
           <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
             <StaleBanner />
@@ -293,6 +268,81 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
       {palette && <CommandPalette onClose={() => setPalette(false)} admin={me?.role === "admin"} />}
       {pw && <ChangePassword onClose={() => setPw(false)} />}
     </CrumbContext.Provider>
+  );
+}
+
+/** One avatar button in the top bar that holds the signed-in user's name, role and account actions. */
+function UserMenu({ me, onChangePassword, onLogout }: { me: Me; onChangePassword: () => void; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const items = [
+    ...(me.token_login ? [] : [{ label: "Change password", icon: KeyRound, run: onChangePassword }]),
+    { label: "Sign out", icon: LogOut, run: onLogout },
+  ];
+  useEffect(() => {
+    if (!open) return;
+    wrap.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const away = (e: MouseEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  const onKey = (e: React.KeyboardEvent) => {
+    const els = Array.from(wrap.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    const i = els.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "Escape") {
+      setOpen(false);
+      btn.current?.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const n = e.key === "ArrowDown" ? (i + 1) % els.length : (i - 1 + els.length) % els.length;
+      els[n]?.focus();
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      els[e.key === "Home" ? 0 : els.length - 1]?.focus();
+    } else if (e.key === "Tab") setOpen(false);
+  };
+  return (
+    <div ref={wrap} className="relative" onKeyDown={onKey}>
+      <button
+        ref={btn}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Account menu for ${me.username}`}
+        title={me.username}
+        className="inline-flex size-9 items-center justify-center rounded-full bg-primary text-sm font-semibold uppercase text-white hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
+        {me.username.charAt(0) || "?"}
+      </button>
+      {open && (
+        <div role="menu" aria-label="Account" className="absolute right-0 top-11 z-50 w-56 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl">
+          <div className="border-b border-neutral-100 px-2.5 pb-2 pt-1.5">
+            <p className="truncate text-sm font-medium">{me.username}</p>
+            <p className="text-xs capitalize text-neutral-500">{me.role}</p>
+          </div>
+          <div className="pt-1">
+            {items.map(({ label, icon: Icon, run }) => (
+              <button
+                key={label}
+                role="menuitem"
+                tabIndex={-1}
+                onClick={() => {
+                  setOpen(false);
+                  run();
+                }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 focus:bg-neutral-100 focus:outline-none"
+              >
+                <Icon className="size-4 shrink-0" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

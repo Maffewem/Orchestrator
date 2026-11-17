@@ -235,7 +235,7 @@ func (s *Server) handleRefreshCloudflare(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, st)
 }
 
-// cfSummary is the fleet-wide Cloudflare line on the overview.
+// cfSummary is the Cloudflare line on the overview.
 type cfSummary struct {
 	Projects int   `json:"projects"`
 	Live     int   `json:"live"`

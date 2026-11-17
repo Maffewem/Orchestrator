@@ -43,7 +43,7 @@ export default function ActivityPage() {
   const devices = usePoll(api.devices, 30000);
   return (
     <>
-      <PageHeader title="Activity" description="Registrations, deployments, container changes and alerts from across the fleet." />
+      <PageHeader title="Activity" description="Registrations, deployments, container changes and alerts from across all your devices." />
       <Card>{!events.data ? <Loading /> : <EventList events={events.data} devices={devices.data ?? []} />}</Card>
     </>
   );

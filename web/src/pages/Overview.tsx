@@ -29,22 +29,23 @@ export default function OverviewPage() {
   if (!o || !devices.data) return <Loading />;
   const projectName = (id: string) => projects.data?.find((p) => p.id === id)?.name ?? "project";
 
+  const inMaint = devices.data.filter((d) => d.maintenance);
+
   return (
     <>
-      <PageHeader title="Overview" description="Health of every device, container and deployment in your fleet." />
+      <PageHeader title="Overview" description="Health of all your devices, containers and deployments." />
 
-      {devices.data.some((d) => d.maintenance) && (
+      {inMaint.length > 0 && (
         <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          In maintenance, so nothing new is placed on them:{" "}
-          {devices.data
-            .filter((d) => d.maintenance)
+          {inMaint.length === 1 ? "1 device is in maintenance mode. No new workloads will be scheduled on it:" : `${inMaint.length} devices are in maintenance mode. No new workloads will be scheduled on them:`}{" "}
+          {inMaint
             .map((d, i) => (
               <span key={d.id}>
                 {i > 0 && ", "}
                 <Link className="font-medium underline" to={`/devices/${d.id}`}>
                   {d.name}
                 </Link>
-                {d.maintenance_note ? ` (${d.maintenance_note})` : ""}
+                {d.maintenance_note && d.maintenance_note !== "Set up in maintenance mode" ? ` (${d.maintenance_note})` : ""}
               </span>
             ))}
         </div>

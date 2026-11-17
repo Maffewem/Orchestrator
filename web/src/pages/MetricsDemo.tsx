@@ -95,7 +95,7 @@ const SECTIONS = [
   { id: "proxy", label: "Proxy traffic", icon: Globe },
   { id: "cloudflare", label: "Cloudflare", icon: Cloud },
   { id: "deploys", label: "Deployments", icon: Rocket },
-  { id: "more", label: "More ideas", icon: Lightbulb },
+  { id: "more", label: "Customise", icon: Lightbulb },
 ] as const;
 type Section = (typeof SECTIONS)[number]["id"];
 
@@ -291,38 +291,100 @@ export default function MetricsDemo() {
           </>
         )}
 
-        {section === "more" && (
-          <Card>
-            <CardHeader title="Other metrics worth considering" subtitle="Feasibility and the storage each would need" />
-            <Table head={["Metric", "Source", "Feasible", "Storage (SQLite)"]}>
-              {IDEAS.map((r) => (
-                <tr key={r[0]}>
-                  <Td className="min-w-48"><span className="font-medium">{r[0]}</span><p className="text-xs text-neutral-500">{r[1]}</p></Td>
-                  <Td className="whitespace-nowrap text-xs">{r[2]}</Td>
-                  <Td><Badge tone={r[3] === "Yes" ? "ok" : r[3] === "Partly" ? "warn" : "bad"}>{r[3]}</Badge></Td>
-                  <Td className="min-w-48 text-xs text-neutral-600">{r[4]}</Td>
-                </tr>
-              ))}
-            </Table>
-          </Card>
-        )}
+        {section === "more" && <Customise busy={busy} d={d} />}
       </div>
     </div>
   );
 }
 
-const IDEAS: string[][] = [
-  ["CPU throttling", "Time the container hit its CPU limit.", "Docker stats API", "Yes", "Counter, 1 sample/min."],
-  ["OOM kill count", "Memory-limit kills; explains restarts.", "Docker events / inspect", "Yes", "Event row per kill, keep 90 days."],
-  ["Health check history", "Pass/fail timeline with last output.", "Docker inspect", "Yes", "One row per state change."],
-  ["Log volume and error lines", "Lines/min, count matching error or panic.", "Docker logs API", "Yes", "Per-minute counts only, not the text."],
-  ["Time to first byte per route", "Latency split by path or domain.", "Caddy access logs", "Partly", "Needs JSON logs on; aggregate per minute and route."],
-  ["Bandwidth by domain", "Bytes served per hostname.", "Caddy metrics (Prometheus)", "Yes", "Counter per host, 1 sample/min."],
-  ["Unique visitors", "Distinct client IPs (hashed).", "Caddy logs", "Partly", "HyperLogLog per day; privacy decision needed."],
-  ["Cache hit ratio", "Cloudflare edge cache hits.", "Cloudflare GraphQL (zone)", "Yes", "Hourly rollup, zone token needed."],
-  ["Worker CPU limit exceeded", "Invocations ended for CPU or memory limits.", "GraphQL invocations (status)", "Yes", "Counts per hour."],
-  ["Durable Object / KV / D1 usage", "Reads, writes, storage per binding.", "GraphQL per product", "Partly", "Separate datasets; hourly rollup."],
-  ["Cost estimate", "Billable requests and CPU against the plan.", "GraphQL + plan limits", "Partly", "Derived at read time; no extra storage."],
-  ["Pages request analytics", "Pages traffic.", "Not in the GraphQL API", "No", "Link out to Web Analytics."],
-  ["GPU, temperature, power", "Device-level, not per container.", "Agent sysfs/vcgencmd", "Partly", "Per device, not per worker."],
+type Kind = "container" | "cloudflare";
+type Metric = { id: string; label: string; kinds: Kind[]; ok: "Yes" | "Partly" | "No"; source: string; storage: string; def: boolean; value: string };
+const CATALOG: Metric[] = [
+  { id: "cpu", label: "CPU", kinds: ["container"], ok: "Yes", source: "Docker stats", storage: "1 sample/min, 30 days", def: true, value: "37%" },
+  { id: "mem", label: "Memory vs limit", kinds: ["container"], ok: "Yes", source: "Docker stats", storage: "1 sample/min, 30 days", def: true, value: "61%" },
+  { id: "net", label: "Network in/out", kinds: ["container"], ok: "Yes", source: "Docker stats", storage: "1 sample/min, 30 days", def: true, value: "0.9 MB/s" },
+  { id: "restarts", label: "Restarts and OOM kills", kinds: ["container"], ok: "Yes", source: "Docker events", storage: "One row per event, 90 days", def: true, value: "2" },
+  { id: "health", label: "Health check history", kinds: ["container"], ok: "Yes", source: "Docker inspect", storage: "One row per change", def: false, value: "Healthy" },
+  { id: "throttle", label: "CPU throttling", kinds: ["container"], ok: "Yes", source: "Docker stats", storage: "Counter, 1 sample/min", def: false, value: "0.4%" },
+  { id: "logs", label: "Log volume and error lines", kinds: ["container"], ok: "Yes", source: "Docker logs", storage: "Per-minute counts only", def: false, value: "12 err/h" },
+  { id: "proxy", label: "Proxy requests and status codes", kinds: ["container"], ok: "Yes", source: "Caddy metrics", storage: "Counters per minute", def: true, value: "92k" },
+  { id: "latency", label: "Latency p50/p95 by route", kinds: ["container"], ok: "Partly", source: "Caddy JSON access logs (must be on)", storage: "Per-minute aggregate per route", def: false, value: "14 / 62 ms" },
+  { id: "bandwidth", label: "Bandwidth by domain", kinds: ["container"], ok: "Yes", source: "Caddy metrics", storage: "Counter per host", def: false, value: "3.2 GB" },
+  { id: "visitors", label: "Unique visitors (hashed)", kinds: ["container"], ok: "Partly", source: "Caddy logs; privacy decision", storage: "HyperLogLog per day", def: false, value: "1.4k" },
+  { id: "req", label: "Requests and errors", kinds: ["cloudflare"], ok: "Yes", source: "GraphQL invocations", storage: "Hourly rollup, 30 days", def: true, value: "298k" },
+  { id: "cpuwall", label: "CPU and wall time p50/p99", kinds: ["cloudflare"], ok: "Yes", source: "GraphQL invocations", storage: "Hourly rollup", def: true, value: "1.8 / 12 ms" },
+  { id: "split", label: "By status, country, version", kinds: ["cloudflare"], ok: "Yes", source: "GraphQL dimensions", storage: "Hourly rollup", def: false, value: "UK 46%" },
+  { id: "limits", label: "CPU or memory limit exceeded", kinds: ["cloudflare"], ok: "Yes", source: "GraphQL status", storage: "Counts per hour", def: false, value: "0" },
+  { id: "cache", label: "Edge cache hit ratio", kinds: ["cloudflare"], ok: "Yes", source: "GraphQL zone dataset (zone token)", storage: "Hourly rollup", def: false, value: "88%" },
+  { id: "bindings", label: "KV / D1 / Durable Object usage", kinds: ["cloudflare"], ok: "Partly", source: "Separate GraphQL datasets", storage: "Hourly rollup", def: false, value: "41k reads" },
+  { id: "builds", label: "Pages build time and success", kinds: ["cloudflare"], ok: "Yes", source: "Pages API", storage: "One row per build", def: true, value: "48 s" },
+  { id: "pagesreq", label: "Pages request analytics", kinds: ["cloudflare"], ok: "No", source: "Not exposed by the API", storage: "Link to Web Analytics", def: false, value: "n/a" },
 ];
+const WORKERS: { name: string; kind: Kind; where: string }[] = [
+  { name: "api", kind: "container", where: "cm5 · container" },
+  { name: "blog", kind: "container", where: "cm4 · container" },
+  { name: "edge-router", kind: "cloudflare", where: "Cloudflare Worker" },
+  { name: "docs-site", kind: "cloudflare", where: "Cloudflare Pages" },
+];
+
+/** Per-worker choice of which metrics to collect and show. Demo state lives in memory only. */
+function Customise({ busy }: { busy: boolean; d: unknown }) {
+  const [worker, setWorker] = useState(WORKERS[0].name);
+  const [chosen, setChosen] = useState<Record<string, Set<string>>>(() =>
+    Object.fromEntries(WORKERS.map((w) => [w.name, new Set(CATALOG.filter((m) => m.kinds.includes(w.kind) && m.def).map((m) => m.id))])),
+  );
+  const w = WORKERS.find((x) => x.name === worker)!;
+  const list = CATALOG.filter((m) => m.kinds.includes(w.kind));
+  const on = chosen[worker];
+  const toggle = (id: string) =>
+    setChosen((c) => {
+      const next = new Set(c[worker]);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { ...c, [worker]: next };
+    });
+  const shown = list.filter((m) => on.has(m.id) && m.ok !== "No");
+  return (
+    <div className="grid gap-4 lg:grid-cols-5">
+      <Card className="lg:col-span-3">
+        <CardHeader title="Choose what to measure" subtitle="Only ticked metrics are collected and stored for this worker, so the rest cost nothing." />
+        <div className="flex flex-wrap gap-2 border-b border-neutral-200 p-4">
+          {WORKERS.map((x) => (
+            <button key={x.name} type="button" onClick={() => setWorker(x.name)} aria-pressed={worker === x.name} className={cx("rounded-lg border px-3 py-1.5 text-left text-sm", worker === x.name ? "border-primary bg-primary/5" : "border-neutral-300 hover:bg-neutral-50")}>
+              <span className="font-medium">{x.name}</span>
+              <span className="block text-xs text-neutral-500">{x.where}</span>
+            </button>
+          ))}
+        </div>
+        <ul className="divide-y divide-neutral-100">
+          {list.map((m) => (
+            <li key={m.id} className={cx("flex items-start gap-3 px-5 py-3", m.ok === "No" && "opacity-60")}>
+              <input type="checkbox" className="mt-1 size-4" checked={on.has(m.id) && m.ok !== "No"} disabled={m.ok === "No"} onChange={() => toggle(m.id)} aria-label={m.label} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">{m.label}</p>
+                <p className="text-xs text-neutral-500">{m.source} · {m.storage}</p>
+              </div>
+              <Badge tone={m.ok === "Yes" ? "ok" : m.ok === "Partly" ? "warn" : "bad"}>{m.ok === "Yes" ? "Available" : m.ok === "Partly" ? "Needs setup" : "Not available"}</Badge>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-wrap items-center gap-3 border-t border-neutral-200 px-5 py-3 text-xs text-neutral-600">
+          <span>Sample every</span>
+          <select className="rounded border border-neutral-300 bg-white px-2 py-1" defaultValue="60"><option value="15">15 s</option><option value="60">1 min</option><option value="300">5 min</option></select>
+          <span>Keep for</span>
+          <select className="rounded border border-neutral-300 bg-white px-2 py-1" defaultValue="30"><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option></select>
+          <span className="ml-auto">≈ {Math.max(1, on.size * 4)} MB of SQLite for this worker</span>
+        </div>
+      </Card>
+      <Card className="lg:col-span-2">
+        <CardHeader title={`Preview: ${w.name}`} subtitle="What the Metrics tab would show for this worker" />
+        <div className="grid gap-3 p-5 sm:grid-cols-2">
+          {shown.length === 0 && <p className="text-sm text-neutral-500 sm:col-span-2">Nothing selected. The Metrics tab will show only deployments.</p>}
+          {shown.map((m) => (
+            <Tile key={m.id} loading={busy} label={m.label} value={m.value} />
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}

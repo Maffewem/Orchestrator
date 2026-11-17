@@ -76,6 +76,21 @@ type cfRemoteDomain struct {
 	Detail string `json:"detail,omitempty"` // route pattern or zone
 }
 
+// cfRemoteBuild is a Worker's Workers Builds configuration: how Cloudflare builds it from Git.
+type cfRemoteBuild struct {
+	Name          string   `json:"name,omitempty"`
+	Repo          string   `json:"repo,omitempty"` // owner/name
+	Provider      string   `json:"provider,omitempty"`
+	BuildCommand  string   `json:"build_command,omitempty"`
+	DeployCommand string   `json:"deploy_command,omitempty"`
+	RootDir       string   `json:"root_dir,omitempty"`
+	Branches      []string `json:"branches,omitempty"`
+	ExcludeBranch []string `json:"exclude_branches,omitempty"`
+	PathIncludes  []string `json:"path_includes,omitempty"`
+	PathExcludes  []string `json:"path_excludes,omitempty"`
+	Caching       *bool    `json:"build_caching,omitempty"`
+}
+
 type cfRemoteVar struct {
 	Name   string `json:"name"`
 	Type   string `json:"type"`
@@ -99,6 +114,7 @@ type cfRemoteSettings struct {
 	BuildCommand       string            `json:"build_command,omitempty"`
 	OutputDir          string            `json:"output_dir,omitempty"`
 	RootDir            string            `json:"root_dir,omitempty"`
+	Build              *cfRemoteBuild    `json:"build,omitempty"` // Workers Builds (Git-connected builds)
 	Variables          []cfRemoteVar     `json:"variables"`
 	Bindings           []cfRemoteBinding `json:"bindings"`
 }
@@ -463,6 +479,8 @@ func (s *Server) cfRemoteWorker(ctx context.Context, tok, acct, name string, r *
 	}
 	s.cfWorkerRoutes(ctx, tok, acct, name, r)
 
+	build, buildNote := s.cfWorkerBuild(ctx, tok, acct, name)
+
 	// Settings: bindings by name, plain-text variables, compatibility.
 	var st struct {
 		Compat  string   `json:"compatibility_date"`
@@ -475,9 +493,18 @@ func (s *Server) cfRemoteWorker(ctx context.Context, tok, acct, name string, r *
 	}
 	if err := s.cfCall(ctx, tok, http.MethodGet, base+"/settings", nil, &st); err != nil {
 		r.Notes["settings"] = cfWhyDenied(err, need)
+		if buildNote != "" {
+			r.Notes["build"] = buildNote
+		}
+		if build != nil {
+			r.Settings = &cfRemoteSettings{Variables: []cfRemoteVar{}, Bindings: []cfRemoteBinding{}, Build: build}
+		}
 		return
 	}
-	set := &cfRemoteSettings{CompatibilityDate: st.Compat, CompatibilityFlags: st.Flags, UsageModel: st.Usage, Variables: []cfRemoteVar{}, Bindings: []cfRemoteBinding{}}
+	set := &cfRemoteSettings{CompatibilityDate: st.Compat, CompatibilityFlags: st.Flags, UsageModel: st.Usage, Variables: []cfRemoteVar{}, Bindings: []cfRemoteBinding{}, Build: build}
+	if buildNote != "" {
+		r.Notes["build"] = buildNote
+	}
 	if st.Observe != nil {
 		set.Observability = &st.Observe.Enabled
 	}
@@ -579,4 +606,62 @@ func (s *Server) handleGetCloudflareRemote(w http.ResponseWriter, r *http.Reques
 		rem = s.cfRemoteOf(r.Context(), p.ID)
 	}
 	writeJSON(w, http.StatusOK, rem)
+}
+
+// cfWorkerBuild reads the Worker's Workers Builds settings: the Git connection and the build and
+// deploy commands Cloudflare runs. The script's tag identifies it to the Builds API. A Worker
+// that is not built by Cloudflare has no trigger; that is reported as a note, not an error.
+func (s *Server) cfWorkerBuild(ctx context.Context, tok, acct, name string) (*cfRemoteBuild, string) {
+	const need = "Account > Workers Builds Configuration > Read"
+	var scripts []struct {
+		ID  string `json:"id"`
+		Tag string `json:"tag"`
+	}
+	if err := s.cfCall(ctx, tok, http.MethodGet, fmt.Sprintf("/accounts/%s/workers/scripts", acct), nil, &scripts); err != nil {
+		return nil, "Could not look up the Worker to find its build settings: " + cfWhyDenied(err, "Account > Workers Scripts > Read")
+	}
+	tag := ""
+	for _, sc := range scripts {
+		if sc.ID == name {
+			tag = sc.Tag
+		}
+	}
+	if tag == "" {
+		return nil, "Cloudflare did not give this Worker an identifier for Workers Builds, so its build settings can't be read."
+	}
+	var triggers []struct {
+		Name         string   `json:"trigger_name"`
+		BuildCommand string   `json:"build_command"`
+		DeployCmd    string   `json:"deploy_command"`
+		RootDir      string   `json:"root_directory"`
+		Include      []string `json:"branch_includes"`
+		Exclude      []string `json:"branch_excludes"`
+		PathInc      []string `json:"path_includes"`
+		PathExc      []string `json:"path_excludes"`
+		Caching      *bool    `json:"build_caching_enabled"`
+		Repo         *struct {
+			Provider string `json:"provider_type"`
+			Account  string `json:"provider_account_name"`
+			Name     string `json:"repo_name"`
+		} `json:"repo_connection"`
+	}
+	if err := s.cfCall(ctx, tok, http.MethodGet, fmt.Sprintf("/accounts/%s/builds/workers/%s/triggers", acct, url.PathEscape(tag)), nil, &triggers); err != nil {
+		if cfNotFound(err) {
+			return nil, "No Workers Builds configuration: this Worker is not built from Git by Cloudflare, or Cloudflare's API does not expose it."
+		}
+		return nil, "Workers Builds settings could not be read: " + cfWhyDenied(err, need)
+	}
+	if len(triggers) == 0 {
+		return nil, "This Worker has no Workers Builds trigger, so it is deployed some other way (Wrangler, CI or the dashboard)."
+	}
+	t := triggers[0]
+	b := &cfRemoteBuild{Name: t.Name, BuildCommand: t.BuildCommand, DeployCommand: t.DeployCmd, RootDir: t.RootDir,
+		Branches: t.Include, ExcludeBranch: t.Exclude, PathIncludes: t.PathInc, PathExcludes: t.PathExc, Caching: t.Caching}
+	if t.Repo != nil {
+		b.Provider = t.Repo.Provider
+		if t.Repo.Account != "" && t.Repo.Name != "" {
+			b.Repo = t.Repo.Account + "/" + t.Repo.Name
+		}
+	}
+	return b, ""
 }

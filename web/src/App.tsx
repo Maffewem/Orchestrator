@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { api, ApiError, getToken, setToken, setUnauthorizedHandler, type Me } from "./api";
 import { MeProvider } from "./components/auth";
 import UsersPage from "./pages/Users";
+import AccountPage from "./pages/Account";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import OverviewPage from "./pages/Overview";
@@ -136,6 +137,7 @@ export default function App() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="metrics-demo" element={<MetricsDemo />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="account" element={<AccountPage />} />
           <Route path="*" element={<Empty title="Page not found" />} />
         </Route>
       </Routes>

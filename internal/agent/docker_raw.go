@@ -17,20 +17,23 @@ import (
 type ImageInfo struct {
 	ID     string            `json:"Id"`
 	Labels map[string]string `json:"-"`
+	// RepoTags are the name:tag references pointing at the image (empty when untagged).
+	RepoTags []string `json:"-"`
 }
 
 // ImageInspect describes a local image by name or ID.
 func (d *Docker) ImageInspect(ctx context.Context, ref string) (*ImageInfo, error) {
 	var v struct {
-		ID     string `json:"Id"`
-		Config struct {
+		ID       string   `json:"Id"`
+		RepoTags []string `json:"RepoTags"`
+		Config   struct {
 			Labels map[string]string `json:"Labels"`
 		} `json:"Config"`
 	}
 	if err := d.call(ctx, http.MethodGet, "/images/"+ref+"/json", nil, nil, &v); err != nil {
 		return nil, err
 	}
-	return &ImageInfo{ID: v.ID, Labels: v.Config.Labels}, nil
+	return &ImageInfo{ID: v.ID, Labels: v.Config.Labels, RepoTags: v.RepoTags}, nil
 }
 
 // ContainerNameOf resolves a container ID or name to its ID, name and image.

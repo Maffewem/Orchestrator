@@ -132,6 +132,8 @@ export interface CloudflareStatus {
   state: "live" | "building" | "failed" | "missing" | "error";
   detail?: string;
   url?: string;
+  /** Where to visit it: the custom domain when it has an active one. */
+  default_url?: string;
   domains?: string[];
   latest_id?: string;
   latest_at?: string;
@@ -143,6 +145,27 @@ export interface CloudflareStatus {
   /** "ok", "none" (not collected for Pages) or why it could not be read. */
   analytics: string;
   polled_at: string;
+}
+
+/** What Cloudflare itself holds for a project: history, previews, domains and read-only settings. */
+export interface CloudflareRemote {
+  kind: "pages" | "worker";
+  name: string;
+  fetched_at: string;
+  deployments: {
+    id: string; label?: string; url?: string; environment: "production" | "preview"; status: "success" | "failure" | "building" | "canceled" | "active";
+    created_at: string; branch?: string; commit?: string; message?: string; author?: string; source?: string; live?: boolean; percentage?: number;
+  }[];
+  previews: { id: string; label: string; url?: string; aliases?: string[]; status: string; created_at: string; commit?: string; message?: string; author?: string }[];
+  domains: { host: string; kind: "custom-domain" | "route" | "pages-domain"; status?: string; detail?: string }[];
+  settings?: {
+    compatibility_date?: string; compatibility_flags?: string[]; usage_model?: string; observability?: boolean;
+    production_branch?: string; repo?: string; build_command?: string; output_dir?: string; root_dir?: string;
+    variables: { name: string; type: string; value?: string; secret?: boolean }[];
+    bindings: { name: string; type: string; target?: string }[];
+  };
+  /** Per section, why it could not be read (usually a missing token permission). */
+  notes?: Record<string, string>;
 }
 
 /** A Pages project or Worker that already exists in the Cloudflare account. */
@@ -864,6 +887,7 @@ export const api = {
     request<Migration>("POST", `/api/projects/${id}/migrate`, body),
   migration: (id: string) => request<Migration>("GET", `/api/projects/${id}/migration`),
   cloudflareStatus: (id: string) => request<CloudflareStatus | null>("GET", `/api/projects/${id}/cloudflare`),
+  cloudflareRemote: (id: string) => request<CloudflareRemote | null>("GET", `/api/projects/${id}/cloudflare/remote`),
   refreshCloudflare: (id: string) => request<CloudflareStatus>("POST", `/api/projects/${id}/cloudflare/refresh`),
   setCloudflareDeploy: (accountId: string, token?: string) =>
     request<{ pages?: boolean; workers?: boolean }>("PUT", "/api/settings/cloudflare/deploy", { account_id: accountId, token: token ?? "" }),

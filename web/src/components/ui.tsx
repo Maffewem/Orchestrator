@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { copyText } from "../clipboard";
 import { Link, NavLink } from "react-router";
-import { AlertTriangle, Check, CircleDashed, Loader2, Minus, X } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, Loader2, Minus, RefreshCw, X } from "lucide-react";
 import type { DeploymentStatus, Health, StepStatus } from "../api";
 import { cx } from "../lib";
 
@@ -219,7 +219,23 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 
 /** Placeholder block shown while data loads, so the page does not jump when it arrives. */
 export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden className={cx("animate-pulse rounded-md bg-neutral-200/70", className)} />;
+  return <div aria-hidden className={cx("animate-pulse rounded-md bg-neutral-200/70 motion-reduce:animate-none", className)} />;
+}
+
+/** An icon-only refresh button that spins while it fetches, like the one on Cloudflare's metrics page. */
+export function RefreshButton({ onClick, busy, label = "Refresh" }: { onClick: () => void; busy: boolean; label?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      aria-label={label}
+      title={label}
+      className="inline-flex size-9 items-center justify-center rounded-lg border border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-70"
+    >
+      <RefreshCw className={cx("size-4", busy && "animate-spin motion-reduce:animate-none")} />
+    </button>
+  );
 }
 
 export function Loading() {

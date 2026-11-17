@@ -52,6 +52,7 @@ type cfFake struct {
 	reqs, errs    int64
 	pagesStage    string
 	gitRepos      map[string]string // Pages project -> connected GitHub repository
+	remoteDenied  map[string]bool   // path suffixes answered with 403
 }
 
 func newCFFake(t *testing.T) *cfFake {
@@ -95,6 +96,7 @@ func (f *cfFake) serveCF(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"viewer": map[string]any{"accounts": []any{map[string]any{
 			"workersInvocationsAdaptive": []any{map[string]any{"sum": map[string]any{"requests": f.reqs, "errors": f.errs, "subrequests": 3},
 				"quantiles": map[string]any{"cpuTimeP50": 1200, "cpuTimeP99": 9000}}}}}}}})
+	case f.serveRemote(w, p, r, ok, notFound):
 	case p == "/accounts/acct/pages/projects" && r.Method == http.MethodGet:
 		list := []any{}
 		for name, branch := range f.pagesProjects {
@@ -321,7 +323,7 @@ func TestCloudflarePagesDeployRollbackAndMonitor(t *testing.T) {
 	if code := h.do("POST", "/api/projects/"+p.ID+"/cloudflare/refresh", adminToken, nil, &st); code != http.StatusOK {
 		t.Fatalf("refresh: %d", code)
 	}
-	if st.State != cfStateLive || st.URL != "https://site.pages.dev" || st.Analytics != "none" || len(st.Domains) != 2 {
+	if st.State != cfStateLive || st.URL != "https://www.example.com" || st.DefaultURL != "https://site.pages.dev" || st.Analytics != "none" || len(st.Domains) != 2 {
 		t.Fatalf("status: %+v", st)
 	}
 	var pv ProjectView

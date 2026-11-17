@@ -80,6 +80,10 @@ type Server struct {
 	logins        limiter
 	trusted       []*net.IPNet
 	sums          sync.Map // agent binary name -> [stamp, sha256]
+	cfdMu         sync.Mutex
+	cfdLatest     string    // newest cloudflared release, see tunnel_update.go
+	cfdTried      time.Time // last lookup, successful or not
+	cfdURL        string    // release lookup URL; tests point it elsewhere
 	mig           migrations
 	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
 	migratePoll   time.Duration // test hook; 2s when zero
@@ -305,6 +309,8 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/projects/{id}/tunnel", s.handleGetProjectTunnel)
 	admin("PUT /api/projects/{id}/tunnel", s.handleSetProjectTunnel)
 	admin("PUT /api/devices/{id}/tunnel/via", s.handleSetTunnelVia)
+	admin("POST /api/devices/{id}/tunnel/update", s.handleUpdateTunnel)
+	admin("PUT /api/devices/{id}/tunnel/auto-update", s.handleSetTunnelAutoUpdate)
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
 	admin("POST /api/projects/{id}/migrate", s.handleMigrateProject)
 	admin("GET /api/projects/{id}/migration", s.handleGetMigration)
@@ -336,6 +342,7 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/cloudflare/discover", s.handleCloudflareDiscover)
 	admin("POST /api/cloudflare/import", s.handleCloudflareImport)
 	admin("GET /api/projects/{id}/cloudflare", s.handleGetCloudflare)
+	admin("GET /api/projects/{id}/cloudflare/remote", s.handleGetCloudflareRemote)
 	admin("POST /api/projects/{id}/cloudflare/refresh", s.handleRefreshCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/agent-urls", s.handleSetAgentURLs)

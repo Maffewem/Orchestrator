@@ -40,6 +40,8 @@ type tunnelConfig struct {
 	Via    string        `json:"via,omitempty"`
 	Token  string        `json:"token"`
 	Routes []tunnelRoute `json:"routes,omitempty"`
+	// AutoUpdate lets the server update cloudflared on its own when a newer release exists.
+	AutoUpdate bool `json:"auto_update,omitempty"`
 }
 
 var tunnelServiceRe = regexp.MustCompile(`^(https?|tcp|ssh|rdp|unix)://\S+$`)
@@ -91,6 +93,17 @@ type tunnelView struct {
 	// CanRoute is true when Cloudflare is connected, so routes can be applied from here.
 	CanRoute bool     `json:"can_route"`
 	Warnings []string `json:"warnings,omitempty"`
+
+	// Version is the cloudflared version running on the device ("" until the agent reports it),
+	// Latest the newest release, and UpdateAvailable says the first is older than the second.
+	Version         string `json:"version,omitempty"`
+	Latest          string `json:"latest,omitempty"`
+	UpdateAvailable bool   `json:"update_available"`
+	// CanUpdate is false for an agent that predates tunnel updates.
+	CanUpdate  bool `json:"can_update"`
+	AutoUpdate bool `json:"auto_update"`
+	// AutoUpdateWhen says when automatic updates run (the Orchestrator update schedule); empty means that schedule is off, so they never run.
+	AutoUpdateWhen string `json:"auto_update_when,omitempty"`
 }
 
 func (s *Server) tunnelView(ctx context.Context, d *store.Device) tunnelView {
@@ -101,6 +114,14 @@ func (s *Server) tunnelView(ctx context.Context, d *store.Device) tunnelView {
 	}
 	v.Enabled = true
 	v.Via = cfg.Via
+	v.AutoUpdate = cfg.AutoUpdate
+	v.AutoUpdateWhen = s.tunnelUpdateWhen(ctx)
+	v.CanUpdate = hasCap(d, api.CapTunnelUpdate)
+	if d.Host.Tunnel != nil {
+		v.Version = d.Host.Tunnel.Version
+	}
+	v.Latest = s.cloudflaredLatest(ctx, true)
+	v.UpdateAvailable = versionOlder(v.Version, v.Latest)
 	if t, err := parseTunnelToken(cfg.Token); err == nil {
 		v.TunnelID = t.Tunnel
 	}

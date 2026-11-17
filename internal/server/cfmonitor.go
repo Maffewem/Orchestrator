@@ -26,12 +26,15 @@ const (
 
 // cfStatus is what the monitor last learned about a Cloudflare project.
 type cfStatus struct {
-	Kind    string   `json:"kind"`
-	Name    string   `json:"name"`
-	State   string   `json:"state"`
-	Detail  string   `json:"detail,omitempty"`
-	URL     string   `json:"url,omitempty"`
-	Domains []string `json:"domains,omitempty"`
+	Kind   string `json:"kind"`
+	Name   string `json:"name"`
+	State  string `json:"state"`
+	Detail string `json:"detail,omitempty"`
+	// URL is where to visit the project: its custom domain when it has an active one, otherwise
+	// the pages.dev or workers.dev address (DefaultURL).
+	URL        string   `json:"url,omitempty"`
+	DefaultURL string   `json:"default_url,omitempty"`
+	Domains    []string `json:"domains,omitempty"`
 	// Latest is the newest deployment Cloudflare knows of.
 	LatestID string `json:"latest_id,omitempty"`
 	LatestAt string `json:"latest_at,omitempty"`
@@ -82,6 +85,14 @@ func (s *Server) cfPollProject(ctx context.Context, p *store.Project) *cfStatus 
 		s.cfPollPages(ctx, tok, acct, st)
 	} else {
 		s.cfPollWorker(ctx, tok, acct, st)
+	}
+	if tok != "" && acct != "" && st.State != cfStateError && st.State != cfStateMissing {
+		rem := s.cfFetchRemote(ctx, tok, acct, t, st.Name)
+		s.saveCFRemote(ctx, p.ID, rem)
+		st.DefaultURL = st.URL
+		if h := cfVisitHost(rem.Domains); h != "" {
+			st.URL = "https://" + h
+		}
 	}
 	if prev != nil {
 		st.Alerting = prev.Alerting
@@ -183,12 +194,19 @@ func (s *Server) cfMonitorLoop(ctx context.Context) {
 	if s.cfg.CloudflareInterval <= 0 {
 		return
 	}
+	// Poll shortly after start so a freshly updated server fills in new data without waiting a full interval.
+	first := time.NewTimer(5 * time.Second)
+	defer first.Stop()
 	t := time.NewTicker(s.cfg.CloudflareInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-first.C:
+			if !s.movePaused() {
+				s.cfPollAll(ctx)
+			}
 		case <-t.C:
 			if !s.movePaused() {
 				s.cfPollAll(ctx)

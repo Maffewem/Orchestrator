@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { Cloud, ExternalLink, RefreshCw, Rocket } from "lucide-react";
 import { api, type CloudflareStatus, type Project } from "../api";
-import { Badge, Button, Card, CardHeader, Empty, ErrorNote, StatusIcon, deploymentLabel } from "./ui";
+import { Badge, Button, Card, CardHeader, Empty, ErrorNote, RefreshButton, Skeleton, StatusIcon, deploymentLabel } from "./ui";
+import { RemoteProduction, useCloudflareRemote } from "./CloudflareRemote";
 import { CommitChip, DeploymentRow, SourceLabel, deploymentTitle } from "../pages/Projects";
 import { ago, usePoll } from "../lib";
 import { useCan } from "./auth";
@@ -34,6 +35,7 @@ const fmt = (n: number) => n.toLocaleString();
 export function CloudflareOverview({ p }: { p: Project }) {
   const deps = usePoll(() => api.projectDeployments(p.id), 4000, [p.id]);
   const status = usePoll(() => api.cloudflareStatus(p.id), 30000, [p.id]);
+  const remote = useCloudflareRemote(p);
   const canOperate = useCan("operator");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export function CloudflareOverview({ p }: { p: Project }) {
     try {
       await api.refreshCloudflare(p.id);
       status.reload();
+      remote.reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -89,9 +92,11 @@ export function CloudflareOverview({ p }: { p: Project }) {
                 </p>
               )}
             </Link>
+          ) : remote.data?.deployments.length || !remote.data && !remote.error ? (
+            <RemoteProduction r={remote.data} loading={!remote.data} />
           ) : (
             <Empty icon={<Rocket className="size-8" />} title="Not deployed yet">
-              Use New deployment to build this project and upload it to Cloudflare.
+              {remote.data?.notes?.deployments ?? "Use New deployment to build this project and upload it to Cloudflare."}
             </Empty>
           )}
         </Card>
@@ -118,7 +123,7 @@ export function CloudflareOverview({ p }: { p: Project }) {
             {st?.detail && <p className="text-xs text-neutral-500">{st.detail}</p>}
             {st?.url && (
               <div className="flex justify-between gap-3">
-                <dt className="text-neutral-500">Address</dt>
+                <dt className="text-neutral-500">{st.default_url && st.default_url !== st.url ? "Custom domain" : "Address"}</dt>
                 <dd className="min-w-0">
                   <a href={st.url} target="_blank" rel="noreferrer" className="inline-flex max-w-full items-center gap-1 text-primary hover:underline">
                     <span className="truncate">{st.url.replace(/^https:\/\//, "")}</span>
@@ -146,32 +151,70 @@ export function CloudflareOverview({ p }: { p: Project }) {
 export function CloudflareMetrics({ p }: { p: Project }) {
   const status = usePoll(() => api.cloudflareStatus(p.id), 30000, [p.id]);
   const deps = usePoll(() => api.projectDeployments(p.id), 15000, [p.id]);
+  const remote = useCloudflareRemote(p);
+  const canOperate = useCan("operator");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const st = status.data ?? p.cloudflare ?? null;
-  const done = deps.data?.filter((d) => d.status === "succeeded" || d.status === "failed") ?? [];
-  const ok = done.filter((d) => d.status === "succeeded").length;
+  const loading = !st && !status.error;
+  // Deployments made here, or the history Cloudflare already holds for an imported project.
+  const local = deps.data?.filter((d) => d.status === "succeeded" || d.status === "failed") ?? [];
+  const rem = remote.data?.deployments.filter((d) => d.status !== "building") ?? [];
+  const done = local.length ? local.map((d) => d.status === "succeeded") : rem.map((d) => d.status === "success" || d.status === "active");
+  const total = deps.data?.length ? deps.data.length : remote.data?.deployments.length;
+  const ok = done.filter(Boolean).length;
   const worker = p.source.cloudflare?.kind === "worker";
   const errRate = st && st.requests ? (st.errors / st.requests) * 100 : 0;
+
+  const refresh = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.refreshCloudflare(p.id);
+      await Promise.all([status.reload(), deps.reload(), remote.reload()]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  // A pulsing placeholder stands in for each figure until it has loaded or while it refreshes.
+  const waiting = loading || busy;
   const tile = (label: string, value: string, sub?: string, bad?: boolean) => (
     <Card className="p-4">
       <p className="text-xs font-medium text-neutral-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${bad ? "text-bad" : ""}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-neutral-500">{sub}</p>}
+      {waiting ? (
+        <div className="mt-2 space-y-2">
+          <Skeleton className="h-7 w-24" />
+          <Skeleton className="h-3 w-32" />
+        </div>
+      ) : (
+        <>
+          <p className={`mt-1 text-2xl font-semibold tabular-nums ${bad ? "text-bad" : ""}`}>{value}</p>
+          {sub && <p className="mt-0.5 text-xs text-neutral-500">{sub}</p>}
+        </>
+      )}
     </Card>
   );
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy={waiting}>
+      <div className="flex items-center justify-end gap-2">
+        {st && <span className="text-xs text-neutral-500">Checked {ago(st.polled_at)}</span>}
+        {canOperate && <RefreshButton onClick={refresh} busy={busy} label="Refresh metrics" />}
+      </div>
+      {error && <ErrorNote>{error}</ErrorNote>}
       <div className="grid gap-4 sm:grid-cols-3">
-        {tile("Deployments", String(deps.data?.length ?? "—"))}
+        {tile("Deployments", String(total ?? "—"))}
         {tile("Success rate", done.length ? `${Math.round((ok / done.length) * 100)}%` : "—")}
         {tile("Status", st ? STATE[st.state].label : "—", st ? `Checked ${ago(st.polled_at)}` : undefined, st?.state === "failed" || st?.state === "error")}
       </div>
       {worker ? (
-        st?.analytics === "ok" ? (
+        waiting || st?.analytics === "ok" ? (
           <div className="grid gap-4 sm:grid-cols-4">
-            {tile("Requests, 24h", fmt(st.requests), `${fmt(st.subrequests)} subrequests`)}
-            {tile("Errors, 24h", fmt(st.errors), st.requests ? `${errRate.toFixed(1)}% of requests` : undefined, errRate > 5)}
-            {tile("CPU time p50", `${(st.cpu_p50_us / 1000).toFixed(1)} ms`)}
-            {tile("CPU time p99", `${(st.cpu_p99_us / 1000).toFixed(1)} ms`)}
+            {tile("Requests, 24h", fmt(st?.requests ?? 0), `${fmt(st?.subrequests ?? 0)} subrequests`)}
+            {tile("Errors, 24h", fmt(st?.errors ?? 0), st?.requests ? `${errRate.toFixed(1)}% of requests` : undefined, errRate > 5)}
+            {tile("CPU time p50", `${((st?.cpu_p50_us ?? 0) / 1000).toFixed(1)} ms`)}
+            {tile("CPU time p99", `${((st?.cpu_p99_us ?? 0) / 1000).toFixed(1)} ms`)}
           </div>
         ) : (
           <Card className="p-5 text-sm text-neutral-600">
@@ -183,11 +226,30 @@ export function CloudflareMetrics({ p }: { p: Project }) {
       )}
       <Card>
         <CardHeader title="Recent deployments" />
-        <div className="divide-y divide-neutral-100">
-          {(deps.data ?? []).slice(0, 8).map((d) => (
-            <DeploymentRow key={d.id} d={d} />
-          ))}
-        </div>
+        {waiting ? (
+          <div role="status" className="divide-y divide-neutral-100">
+            <span className="sr-only">Loading</span>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-3.5">
+                <Skeleton className="size-5 rounded-full" />
+                <Skeleton className="h-3.5 w-1/3" />
+                <Skeleton className="ml-auto h-3 w-16" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="divide-y divide-neutral-100">
+            {(deps.data ?? []).slice(0, 8).map((d) => (
+              <DeploymentRow key={d.id} d={d} />
+            ))}
+            {!deps.data?.length && (remote.data?.deployments ?? []).slice(0, 8).map((d) => (
+              <p key={d.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+                <span className="truncate">{d.message || d.label || d.id.slice(0, 8)}</span>
+                <span className="shrink-0 text-xs text-neutral-500">{ago(d.created_at)}</span>
+              </p>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   );

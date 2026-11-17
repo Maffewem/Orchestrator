@@ -182,6 +182,43 @@ function TunnelCard({ d }: { d: Device }) {
               <Badge>{t.enabled ? (t.state ?? "starting") : "off"}</Badge>
               {t.tunnel_id && <span className="font-mono text-xs text-neutral-500">{t.tunnel_id}</span>}
             </p>
+            {t.enabled && (
+              <div className="space-y-2">
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="text-neutral-500">cloudflared</span>
+                  <span className="font-mono text-xs">{t.version ?? (t.can_update ? "version unknown" : "version not reported")}</span>
+                  {t.update_available ? (
+                    <Badge>update available{t.latest ? `: ${t.latest}` : ""}</Badge>
+                  ) : t.version && t.latest ? (
+                    <Badge>up to date</Badge>
+                  ) : null}
+                  {isAdmin && t.can_update && (
+                    <Button
+                      variant={t.update_available ? "primary" : undefined}
+                      disabled={busy || d.status !== "online"}
+                      title="Pulls the newest cloudflared and recreates the container with the same token. The tunnel is down for a few seconds."
+                      onClick={() => act(() => api.updateTunnel(d.id))}
+                    >
+                      Update tunnel
+                    </Button>
+                  )}
+                </p>
+                {!t.can_update && <p className="text-neutral-500">This agent is too old to update the tunnel. Update the agent from the Updates page, then update the tunnel here.</p>}
+                {isAdmin && t.can_update && (
+                  <label className="flex items-start gap-2">
+                    <input type="checkbox" className="mt-1" checked={t.auto_update} disabled={busy} onChange={(e) => act(() => api.setTunnelAutoUpdate(d.id, e.target.checked))} />
+                    <span>
+                      Update cloudflared automatically
+                      <span className="block text-xs text-neutral-500">
+                        {t.auto_update_when
+                          ? `Runs with the server's update schedule (${t.auto_update_when}): if a newer release is out, the tunnel on this device is updated then. Skipped while the device is in maintenance mode.`
+                          : "Follows the server's update schedule, which is off, so nothing runs automatically until you set one on the Updates page. Use Update tunnel for a manual update."}
+                      </span>
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
             {!t.enabled && (
               <p className="text-neutral-500">
                 Create a tunnel in Cloudflare Zero Trust (Networks, Tunnels), then paste its token or the whole connector command here. Orchestrator runs cloudflared on this device.

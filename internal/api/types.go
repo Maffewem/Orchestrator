@@ -33,6 +33,15 @@ type HostInfo struct {
 	// Network details each address: its interface and, where the agent can tell, whether it
 	// was handed out by DHCP and so may change.
 	Network []NetAddr `json:"network,omitempty"`
+	// Tunnel describes the cloudflared container the agent runs, when there is one.
+	Tunnel *TunnelInfo `json:"tunnel,omitempty"`
+}
+
+// TunnelInfo is what the agent knows about its cloudflared container.
+type TunnelInfo struct {
+	// Version is the connector version, for example "2025.11.1"; empty when it could not be read.
+	Version string `json:"version,omitempty"`
+	Image   string `json:"image,omitempty"`
 }
 
 // NetAddr is one IPv4 address of a device.
@@ -55,6 +64,7 @@ const (
 	CapFileStore     = "filestore"      // file.store, receives server backups
 	CapCompose       = "compose"        // deploy of a Compose stack, and stack.start/stop/down
 	CapTunnel        = "tunnel"         // tunnel.sync, runs cloudflared
+	CapTunnelUpdate  = "tunnel-update"  // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
 	CapDiscover      = "discover"       // finds the server again by itself when its address changes
 	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
 )
@@ -187,6 +197,7 @@ const (
 	ActionStackStop  = "stack.stop"
 	ActionStackDown  = "stack.down"
 	// ActionTunnelSync runs (or, with an empty Args["token"], removes) the device's cloudflared container.
+	// With Args["update"] == "1" it also pulls the newest image and recreates the container if that changed it.
 	ActionTunnelSync = "tunnel.sync"
 )
 

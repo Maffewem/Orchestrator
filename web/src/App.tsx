@@ -18,6 +18,7 @@ import UpdatesPage from "./pages/Updates";
 import WorkerPage from "./pages/Worker";
 import ActivityPage from "./pages/Activity";
 import SettingsPage from "./pages/Settings";
+import MetricsDemo from "./pages/MetricsDemo";
 import { Empty } from "./components/ui";
 
 export default function App() {
@@ -133,6 +134,7 @@ export default function App() {
           <Route path="move" element={<Navigate to="/settings#mainserver" replace />} />
           <Route path="activity" element={<ActivityPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="metrics-demo" element={<MetricsDemo />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="*" element={<Empty title="Page not found" />} />
         </Route>

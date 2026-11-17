@@ -1,8 +1,8 @@
 import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, X } from "lucide-react";
+import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, WifiOff, X } from "lucide-react";
 import { api, type Device, type FleetContainer, type Project } from "../api";
-import { cx, usePoll } from "../lib";
+import { cx, usePoll, useStaleData } from "../lib";
 import { useMe } from "./auth";
 import { Button, ErrorNote, Field, Modal, inputClass } from "./ui";
 
@@ -16,6 +16,8 @@ export function useCrumbs(crumbs: Crumb[]) {
   const key = JSON.stringify(crumbs);
   useEffect(() => {
     set(crumbs);
+    // The browser tab names the page, most specific part first: "my-app · Projects · Orchestrator".
+    document.title = [...crumbs.map((c) => c.label)].reverse().concat("Orchestrator").join(" · ");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, set]);
 }
@@ -23,7 +25,7 @@ export function useCrumbs(crumbs: Crumb[]) {
 type NavItem = { to: string; label: string; icon: typeof Server; end?: boolean; admin?: boolean };
 
 // Grouped from most-used to least-used: what is running, where it runs, then administration.
-const settingsSections = [
+export const settingsSections = [
   ["appearance", "Appearance"],
   ["security", "Sign-in security"],
   ["https", "Dashboard HTTPS"],
@@ -262,6 +264,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             </button>
           </header>
           <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
+            <StaleBanner />
             {me?.role === "admin" && <MoveBanner />}
             <Outlet />
           </main>
@@ -290,6 +293,18 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
       {palette && <CommandPalette onClose={() => setPalette(false)} admin={me?.role === "admin"} />}
       {pw && <ChangePassword onClose={() => setPw(false)} />}
     </CrumbContext.Provider>
+  );
+}
+
+/** Shown when a page that has loaded once can no longer refresh, so stale data is not mistaken for current data. */
+function StaleBanner() {
+  const stale = useStaleData();
+  if (!stale) return null;
+  return (
+    <div role="status" className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <WifiOff className="mt-0.5 size-4 shrink-0" />
+      <span className="min-w-0">Can't reach the server. What you see may be out of date; retrying automatically.</span>
+    </div>
   );
 }
 

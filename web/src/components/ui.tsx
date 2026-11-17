@@ -1,4 +1,4 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { copyText } from "../clipboard";
 import { Link, NavLink } from "react-router";
 import { AlertTriangle, Check, CircleDashed, Loader2, Minus, X } from "lucide-react";
@@ -217,28 +217,91 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   );
 }
 
+/** Placeholder block shown while data loads, so the page does not jump when it arrives. */
+export function Skeleton({ className }: { className?: string }) {
+  return <div aria-hidden className={cx("animate-pulse rounded-md bg-neutral-200/70", className)} />;
+}
+
 export function Loading() {
   return (
-    <div className="flex items-center justify-center py-20 text-neutral-400">
-      <Loader2 className="size-5 animate-spin" />
+    <div role="status" aria-live="polite" className="space-y-4 py-2">
+      <span className="sr-only">Loading</span>
+      <Skeleton className="h-8 w-48" />
+      <div className="rounded-xl border border-neutral-200 bg-white">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="flex items-center gap-3 border-b border-neutral-100 px-5 py-4 last:border-0">
+            <Skeleton className="size-8 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-3.5 w-1/3" />
+              <Skeleton className="h-3 w-1/2" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
+/** Makes a clickable table row reachable and operable from the keyboard (Enter or Space). */
+export function rowProps(onActivate: () => void) {
+  return {
+    tabIndex: 0,
+    onClick: onActivate,
+    onKeyDown: (e: ReactKeyboardEvent) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
+}
+
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const previous = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      Array.from(panel.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? []);
+    // Move focus into the dialog unless something inside already took it (an autofocus field).
+    if (!panel.current?.contains(document.activeElement)) (focusable()[1] ?? focusable()[0] ?? panel.current)?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return closeRef.current();
+      if (e.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previous?.focus?.();
+    };
+  }, []);
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/30 p-4 sm:p-10" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/30 p-0 sm:items-start sm:p-10" onMouseDown={onClose}>
       <div
-        className={cx("w-full rounded-xl bg-white shadow-xl", wide ? "max-w-3xl" : "max-w-lg")}
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={cx("w-full rounded-t-xl bg-white shadow-xl outline-none sm:rounded-xl", wide ? "max-w-3xl" : "max-w-lg")}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-3.5">
-          <h2 className="font-semibold">{title}</h2>
+          <h2 id={titleId} className="font-semibold">{title}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-neutral-500 hover:bg-neutral-100" aria-label="Close">
             <X className="size-4" />
           </button>

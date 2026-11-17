@@ -34,7 +34,7 @@ export default function TunnelPanel({ projectId }: { projectId: string }) {
       const warns = res.warnings ?? [];
       setWarnings(warns);
       if (warns.length) notify(`Saved, but not fully applied: ${warns.join(" ")}`);
-      else notify(`Tunnel routes applied: ${res.routes.length ? res.routes.map((r) => r.hostname).join(", ") : "none left for this project"}.`, "info");
+      else notify(`Tunnel routes applied: ${res.routes.length ? res.routes.map((r) => r.hostname).join(", ") : "none left for this project"}.`, "success");
       setRows(null);
       t.reload();
     } catch (e) {

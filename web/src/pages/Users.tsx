@@ -3,7 +3,7 @@ import { KeyRound, Trash2, UserPlus } from "lucide-react";
 import { api, type Role, type User } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { useMe } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, Modal, PageHeader, Table, Td, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, Modal, PageHeader, Table, Td, inputClass, SecretInput } from "../components/ui";
 import { ago, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 
@@ -120,7 +120,7 @@ function AddUser({ onClose, onDone }: { onClose: () => void; onDone: () => void 
           <input className={inputClass} autoFocus value={username} onChange={(e) => setUsername(e.target.value)} />
         </Field>
         <Field label="Password" hint="At least 10 characters. They can't change it themselves yet, so share it safely.">
-          <input className={inputClass} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Field label="Role" hint={roleHelp[role]}>
           <select className={inputClass} value={role} onChange={(e) => setRole(e.target.value as Role)}>
@@ -161,7 +161,7 @@ function ResetPassword({ user, onClose }: { user: User; onClose: () => void }) {
         }}
       >
         <Field label="New password" hint="They are signed out everywhere and must use this one.">
-          <input className={inputClass} type="password" autoFocus autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <SecretInput className={inputClass} autoFocus autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         {error && <ErrorNote>{error}</ErrorNote>}
         <div className="flex justify-end gap-2">

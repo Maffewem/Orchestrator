@@ -4,7 +4,7 @@ import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, Key
 import { api, type Device, type FleetContainer, type Project } from "../api";
 import { cx, usePoll, useStaleData } from "../lib";
 import { useMe } from "./auth";
-import { Button, ErrorNote, Field, Modal, inputClass } from "./ui";
+import { Button, ErrorNote, Field, Modal, inputClass, SecretInput } from "./ui";
 
 export type Crumb = { label: string; to?: string };
 
@@ -362,10 +362,10 @@ function ChangePassword({ onClose }: { onClose: () => void }) {
         }}
       >
         <Field label="Current password">
-          <input className={inputClass} type="password" autoFocus autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          <SecretInput className={inputClass} autoFocus autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
         </Field>
         <Field label="New password" hint="At least 10 characters. Other devices are signed out.">
-          <input className={inputClass} type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         {error && <ErrorNote>{error}</ErrorNote>}
         <div className="flex justify-end gap-2">

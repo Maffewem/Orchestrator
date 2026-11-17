@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type LoginResult } from "../api";
 import { Logo } from "../components/Layout";
-import { Button, ErrorNote, Field, Loading, inputClass } from "../components/ui";
+import { Button, ErrorNote, Field, Loading, inputClass, SecretInput } from "../components/ui";
 
 export default function Login({ onLogin }: { onLogin: (token: string) => void }) {
   const [setup, setSetup] = useState<boolean | null>(null);
@@ -60,16 +60,16 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
           Create the first administrator. Paste the admin token the server printed on first start (or <code>ORCH_ADMIN_TOKEN</code>) to prove it's you.
         </p>
         <Field label="Admin token">
-          <input className={inputClass} type="password" autoFocus value={token} onChange={(e) => setToken(e.target.value)} />
+          <SecretInput className={inputClass} autoFocus value={token} onChange={(e) => setToken(e.target.value)} />
         </Field>
         <Field label="Username">
           <input className={inputClass} autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
         </Field>
         <Field label="Password" hint="At least 10 characters.">
-          <input className={inputClass} type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <Field label="Repeat password">
-          <input className={inputClass} type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         </Field>
         {error && <ErrorNote>{error}</ErrorNote>}
         <Button variant="primary" className="w-full" loading={busy} disabled={!token.trim() || !username || !password}>
@@ -91,7 +91,7 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
           <input className={inputClass} autoFocus autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
         </Field>
         <Field label="Password">
-          <input className={inputClass} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         </div>
         {error && <ErrorNote>{error}</ErrorNote>}
@@ -125,7 +125,7 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
       >
         <p className="text-sm text-neutral-500">The admin token always works, even if every account is locked out.</p>
         <Field label="Admin token">
-          <input className={inputClass} type="password" autoFocus value={token} onChange={(e) => setToken(e.target.value)} />
+          <SecretInput className={inputClass} autoFocus value={token} onChange={(e) => setToken(e.target.value)} />
         </Field>
         {error && <ErrorNote>{error}</ErrorNote>}
         <Button variant="primary" className="w-full" loading={busy} disabled={!token.trim()}>

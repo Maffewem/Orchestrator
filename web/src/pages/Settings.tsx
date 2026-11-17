@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar } from "lucide-react";
 import { api, type Settings } from "../api";
 import { settingsSections, useCrumbs } from "../components/Layout";
-import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass, SecretInput } from "../components/ui";
 import { usePoll } from "../lib";
 import { copyText } from "../clipboard";
 import { getTheme, setTheme, type ThemeChoice } from "../theme";
@@ -224,9 +224,8 @@ export default function SettingsPage() {
                 </Help>
               </div>
               <div className="flex gap-2">
-                <input
+                <SecretInput
                   className={inputClass}
-                  type="password"
                   placeholder={s.github.connected ? "Paste a new token to replace the current one" : "github_pat_…"}
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
@@ -290,9 +289,8 @@ export default function SettingsPage() {
               </p>
             </Help>
             <div className="flex gap-2">
-              <input
+              <SecretInput
                 className={inputClass}
-                type="password"
                 autoComplete="off"
                 placeholder={s.cloudflare.connected ? "Paste a new token to replace the current one" : "Cloudflare API token"}
                 value={cfToken}
@@ -424,9 +422,8 @@ export default function SettingsPage() {
         >
           <div className="space-y-3 p-5">
             <div className="flex gap-2">
-              <input
+              <SecretInput
                 className={inputClass}
-                type="password"
                 autoComplete="new-password"
                 placeholder={s.backup_password_set ? "Enter a new password to replace the current one" : "At least 8 characters"}
                 value={bkPw}

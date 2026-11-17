@@ -6,7 +6,7 @@ import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
 import { useCan } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass, SecretInput } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
@@ -189,9 +189,8 @@ function TunnelCard({ d }: { d: Device }) {
             )}
             {isAdmin && (
               <div className="flex gap-2">
-                <input
+                <SecretInput
                   className={inputClass}
-                  type="password"
                   autoComplete="off"
                   placeholder={t.enabled ? "Paste a new token to replace the current one" : "Tunnel token"}
                   value={token}

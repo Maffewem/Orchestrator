@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { Plus, Server } from "lucide-react";
 import { api, type Device } from "../api";
 import { useCrumbs } from "../components/Layout";
-import { Badge, Button, Card, CodeBlock, Empty, Field, HealthBadge, Loading, Meter, Modal, PageHeader, StatusDot, Toggle, inputClass } from "../components/ui";
+import { Badge, Button, Card, CodeBlock, Empty, Field, HealthBadge, Loading, Meter, Modal, PageHeader, StatusDot, Toggle, inputClass, SecretInput } from "../components/ui";
 import { ago, bytesOrDash, cx, pct, usePoll } from "../lib";
 
 const STEPS = ["Basics", "Networking", "Options", "Install"] as const;
@@ -125,7 +125,7 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
           {tunnel && (
             <div className="space-y-3 rounded-lg bg-neutral-50 p-3">
               <Field label="Tunnel token" hint="Paste the token or the whole cloudflared command. Leave blank to add it later. It is stored on the server, not in the install command.">
-                <input className={inputClass} value={tunnelToken} onChange={(e) => setTunnelToken(e.target.value)} placeholder="eyJhIjoi…" />
+                <SecretInput className={inputClass} autoComplete="off" value={tunnelToken} onChange={(e) => setTunnelToken(e.target.value)} placeholder="eyJhIjoi…" />
               </Field>
               <Field label="Send tunnel traffic" hint="Direct is lightest; through the proxy adds login, path routes and preview URLs.">
                 <select className={inputClass} value={tunnelVia} onChange={(e) => setTunnelVia(e.target.value as "" | "proxy")}>

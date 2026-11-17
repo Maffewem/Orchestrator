@@ -616,6 +616,7 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
                     </option>
                   ))}
                 </select>
+                <p className="mt-1 text-xs text-neutral-500">{d.name} is the current device, so it isn't offered as a destination.</p>
               </Field>
             )}
             <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">

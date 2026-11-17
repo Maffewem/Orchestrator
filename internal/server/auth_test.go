@@ -278,3 +278,25 @@ func TestLoginAddressWideThrottle(t *testing.T) {
 		t.Fatal("address-wide key should lock after repeated failures")
 	}
 }
+
+func TestAlerts(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	var out []Alert
+	if code := h.do("GET", "/api/alerts", adminToken, nil, &out); code != http.StatusOK {
+		t.Fatalf("alerts: %d", code)
+	}
+	// A device that has never reported Docker is unhealthy, so it must appear, linked to its page.
+	found := false
+	for _, a := range out {
+		if a.Link == "" || a.Severity == "" {
+			t.Fatalf("alert without link or severity: %+v", a)
+		}
+		if a.Link == "/devices/"+reg.DeviceID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no alert for the unhealthy device: %+v", out)
+	}
+}

@@ -377,6 +377,15 @@ export interface MetricSample {
   load1: number;
 }
 
+export interface Alert {
+  id: string;
+  severity: "critical" | "warning" | "info";
+  title: string;
+  detail?: string;
+  link: string;
+  at?: string;
+}
+
 export type Role = "viewer" | "operator" | "admin";
 
 export interface Me {
@@ -863,6 +872,7 @@ export const api = {
   setAccess: (id: string, protectedAccess: boolean) =>
     request<DomainsView>("PUT", `/api/projects/${id}/domains/access`, { protected: protectedAccess }),
   overview: () => request<Overview>("GET", "/api/overview"),
+  alerts: () => request<Alert[]>("GET", "/api/alerts"),
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),

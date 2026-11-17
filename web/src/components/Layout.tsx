@@ -1,6 +1,6 @@
 import { Fragment, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, LogOut, Menu, Monitor, Moon, PanelLeft, Sun, UserRound, Rocket, Search, Server, Settings, Users, WifiOff, X } from "lucide-react";
+import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, Bell, LogOut, Menu, Monitor, Moon, PanelLeft, Sun, UserRound, Rocket, Search, Server, Settings, Users, WifiOff, X } from "lucide-react";
 import { api, type Device, type Me, type FleetContainer, type Project } from "../api";
 import { cx, usePoll, useStaleData } from "../lib";
 import { useMe } from "./auth";
@@ -235,6 +235,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
               </span>
               <kbd className="hidden rounded border border-neutral-300 px-1.5 text-xs sm:inline">Ctrl K</kbd>
             </button>
+            {me && <AlertsBell />}
             {me && <UserMenu me={me} onLogout={onLogout} />}
           </header>
           <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
@@ -266,6 +267,114 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
       </nav>
       {palette && <CommandPalette onClose={() => setPalette(false)} admin={me?.role === "admin"} />}
     </CrumbContext.Provider>
+  );
+}
+
+const ALERT_LIMIT = 8;
+const alertDot = { critical: "bg-red-600", warning: "bg-amber-500", info: "bg-primary" } as const;
+
+/** Top-bar bell: everything that currently needs attention, most severe first. Items clear on their own. */
+function AlertsBell() {
+  const { data } = usePoll(() => api.alerts(), 15000);
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const nav = useNavigate();
+  const alerts = data ?? [];
+  const shown = alerts.slice(0, ALERT_LIMIT);
+  const more = alerts.length - shown.length;
+  const worst = alerts[0]?.severity;
+  useEffect(() => {
+    if (!open) return;
+    wrap.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const away = (e: MouseEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  const go = (to: string) => {
+    setOpen(false);
+    nav(to);
+  };
+  const onKey = (e: React.KeyboardEvent) => {
+    const els = Array.from(wrap.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    const i = els.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "Escape") {
+      setOpen(false);
+      btn.current?.focus();
+    } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && els.length) {
+      e.preventDefault();
+      els[e.key === "ArrowDown" ? (i + 1) % els.length : (i - 1 + els.length) % els.length]?.focus();
+    } else if (e.key === "Tab") setOpen(false);
+  };
+  const label = alerts.length ? `Alerts: ${alerts.length} need${alerts.length === 1 ? "s" : ""} attention` : "Alerts: nothing needs attention";
+  return (
+    <div ref={wrap} className="relative" onKeyDown={onKey}>
+      <button
+        ref={btn}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+        className="relative inline-flex size-9 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
+        <Bell className="size-5" />
+        {alerts.length > 0 && (
+          <span
+            className={cx(
+              "absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-white px-1 text-[10px] font-semibold leading-none text-white",
+              worst === "critical" ? "bg-red-600" : worst === "warning" ? "bg-amber-500" : "bg-primary",
+            )}
+          >
+            {alerts.length > 9 ? "9+" : alerts.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div role="menu" aria-label="Alerts" className="fixed inset-x-3 top-14 z-50 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-11 sm:w-96">
+          <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
+            <p className="text-sm font-semibold">Needs attention</p>
+            <button role="menuitem" tabIndex={-1} onClick={() => go("/activity")} className="rounded text-sm text-primary hover:underline focus:underline focus:outline-none">
+              View activity
+            </button>
+          </div>
+          {shown.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-neutral-500">All clear. Nothing needs attention.</p>
+          ) : (
+            <ul className="max-h-[60vh] overflow-y-auto">
+              {shown.map((a) => (
+                <li key={a.id}>
+                  <button
+                    role="menuitem"
+                    tabIndex={-1}
+                    onClick={() => go(a.link)}
+                    className="flex w-full gap-3 border-b border-neutral-100 px-4 py-2.5 text-left hover:bg-neutral-50 focus:bg-neutral-100 focus:outline-none"
+                  >
+                    <span className={cx("mt-1.5 size-2 shrink-0 rounded-full", alertDot[a.severity])} aria-hidden />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">
+                        <span className="sr-only">{a.severity}: </span>
+                        {a.title}
+                      </span>
+                      {a.detail && <span className="mt-0.5 line-clamp-2 block text-xs text-neutral-500">{a.detail}</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {more > 0 ? (
+            <button role="menuitem" tabIndex={-1} onClick={() => go("/devices")} className="block w-full px-4 py-2.5 text-center text-xs font-medium text-primary hover:bg-neutral-50 focus:bg-neutral-100 focus:outline-none">
+              And {more} more. Open Devices
+            </button>
+          ) : (
+            shown.length > 0 && <p className="px-4 py-2.5 text-center text-xs text-neutral-500">Items clear on their own when the problem is fixed.</p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

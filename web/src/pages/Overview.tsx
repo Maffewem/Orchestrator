@@ -45,7 +45,7 @@ export default function OverviewPage() {
                 <Link className="font-medium underline" to={`/devices/${d.id}`}>
                   {d.name}
                 </Link>
-                {d.maintenance_note ? ` (${d.maintenance_note})` : ""}
+                {d.maintenance_note && d.maintenance_note !== "Set up in maintenance mode" ? ` (${d.maintenance_note})` : ""}
               </span>
             ))}
         </div>

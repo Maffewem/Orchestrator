@@ -84,11 +84,7 @@ func (s *Server) applyDeviceSetup(ctx context.Context, d *store.Device, id strin
 		s.event(ctx, d.ID, "warning", "device.setup", "Setup step \""+what+"\" failed on "+d.Name+": "+err.Error())
 	}
 	if p.Maintenance {
-		note := p.MaintenanceNote
-		if note == "" {
-			note = "Added in maintenance mode"
-		}
-		if err := s.store.SetDeviceMaintenance(ctx, d.ID, true, note, time.Time{}); err != nil {
+		if err := s.store.SetDeviceMaintenance(ctx, d.ID, true, p.MaintenanceNote, time.Time{}); err != nil {
 			warn("maintenance", err)
 		}
 	}

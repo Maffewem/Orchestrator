@@ -237,7 +237,7 @@ export default function DevicesPage() {
                   <StatusDot status={d.status} />
                   <span className="truncate">{d.name}</span>
                   <HealthBadge health={d.health} status={d.status} />
-                  {d.maintenance && <Badge tone="warn">maintenance</Badge>}
+                  {d.maintenance && <Badge tone="warn">Maintenance</Badge>}
                 </p>
                 <p className="mt-1 flex text-xs text-neutral-500">
                   <DeviceSummary d={d} />

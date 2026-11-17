@@ -33,9 +33,14 @@ export default function DevicePage() {
             <StatusDot status={d.status} />
             {d.name}
             <HealthBadge health={d.health} status={d.status} />
-            {d.maintenance && <Badge tone="warn">maintenance</Badge>}
+            {d.maintenance && <Badge tone="warn">Maintenance</Badge>}
           </h1>
-          {d.maintenance && d.maintenance_note && <p className="mt-1 text-sm text-neutral-500">Maintenance mode: {d.maintenance_note}</p>}
+          {d.maintenance && (
+            <p className="mt-1 text-sm text-neutral-500">
+              Maintenance mode: no new workloads will be scheduled on this device.
+              {maintenanceReason(d.maintenance_note) ? ` Reason: ${maintenanceReason(d.maintenance_note)}` : ""}
+            </p>
+          )}
           <p className="mt-1 flex text-sm text-neutral-500">
             <DeviceSummary d={d} />
           </p>
@@ -443,6 +448,11 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
  * Maintenance mode keeps new workers, previews and adoptions off the device. Turning it on lists
  * the workers that would become unreachable if the device goes down, and offers to move them.
  */
+/** Hides the automatic reasons older versions stored when a device was added in maintenance mode. */
+function maintenanceReason(note?: string) {
+  return note && note !== "Set up in maintenance mode" && note !== "Added in maintenance mode" ? note : "";
+}
+
 function MaintenanceCard({ d, onSaved }: { d: Device; onSaved: () => void }) {
   const isAdmin = useCan("admin");
   const [open, setOpen] = useState(false);
@@ -464,7 +474,7 @@ function MaintenanceCard({ d, onSaved }: { d: Device; onSaved: () => void }) {
         {error && <ErrorNote>{error}</ErrorNote>}
         {d.maintenance && (
           <p className="text-sm text-neutral-600">
-            {d.maintenance_note ? <>“{d.maintenance_note}”. </> : null}
+            {maintenanceReason(d.maintenance_note) ? <>Reason: {maintenanceReason(d.maintenance_note)}. </> : null}
             {d.maintenance_until ? `Ends automatically ${new Date(d.maintenance_until).toLocaleString()}.` : "Remains active until you turn it off."}
           </p>
         )}

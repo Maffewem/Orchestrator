@@ -475,7 +475,7 @@ function MaintenanceCard({ d, onSaved }: { d: Device; onSaved: () => void }) {
         {d.maintenance && (
           <p className="text-sm text-neutral-600">
             {maintenanceReason(d.maintenance_note) ? <>Reason: {maintenanceReason(d.maintenance_note)}. </> : null}
-            {d.maintenance_until ? `Ends automatically ${new Date(d.maintenance_until).toLocaleString()}.` : "Remains active until you turn it off."}
+            {d.maintenance_until ? `Maintenance mode ends automatically on ${new Date(d.maintenance_until).toLocaleString()}.` : "Maintenance mode remains active until you turn it off."}
           </p>
         )}
         {d.maintenance ? (

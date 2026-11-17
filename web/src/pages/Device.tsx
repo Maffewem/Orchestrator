@@ -6,7 +6,7 @@ import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
 import { useCan } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass, SecretInput } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
@@ -33,9 +33,14 @@ export default function DevicePage() {
             <StatusDot status={d.status} />
             {d.name}
             <HealthBadge health={d.health} status={d.status} />
-            {d.maintenance && <Badge tone="warn">maintenance</Badge>}
+            {d.maintenance && <Badge tone="warn">Maintenance</Badge>}
           </h1>
-          {d.maintenance && d.maintenance_note && <p className="mt-1 text-sm text-neutral-500">In maintenance: {d.maintenance_note}</p>}
+          {d.maintenance && (
+            <p className="mt-1 text-sm text-neutral-500">
+              Maintenance mode: no new workloads will be scheduled on this device.
+              {maintenanceReason(d.maintenance_note) ? ` Reason: ${maintenanceReason(d.maintenance_note)}` : ""}
+            </p>
+          )}
           <p className="mt-1 flex text-sm text-neutral-500">
             <DeviceSummary d={d} />
           </p>
@@ -205,7 +210,9 @@ function TunnelCard({ d }: { d: Device }) {
                     <span>
                       Update cloudflared automatically
                       <span className="block text-xs text-neutral-500">
-                        When a newer release is out, the server updates the tunnel on this device, at most once every six hours. Skipped while the device is in maintenance mode.
+                        {t.auto_update_when
+                          ? `Runs with the server's update schedule (${t.auto_update_when}): if a newer release is out, the tunnel on this device is updated then. Skipped while the device is in maintenance mode.`
+                          : "Follows the server's update schedule, which is off, so nothing runs automatically until you set one on the Updates page. Use Update tunnel for a manual update."}
                       </span>
                     </span>
                   </label>
@@ -219,9 +226,8 @@ function TunnelCard({ d }: { d: Device }) {
             )}
             {isAdmin && (
               <div className="flex gap-2">
-                <input
+                <SecretInput
                   className={inputClass}
-                  type="password"
                   autoComplete="off"
                   placeholder={t.enabled ? "Paste a new token to replace the current one" : "Tunnel token"}
                   value={token}
@@ -461,7 +467,7 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
             variant="danger"
             icon={<Trash2 className="size-4" />}
             onClick={async () => {
-              if (!(await confirmDialog({ title: `Remove ${d.name} from the fleet?`, confirmLabel: "Remove", danger: true }))) return;
+              if (!(await confirmDialog({ title: `Remove ${d.name}?`, confirmLabel: "Remove", danger: true }))) return;
               await api.deleteDevice(d.id);
               nav("/devices");
             }}
@@ -478,6 +484,11 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
  * Maintenance mode keeps new workers, previews and adoptions off the device. Turning it on lists
  * the workers that would become unreachable if the device goes down, and offers to move them.
  */
+/** Hides the automatic reasons older versions stored when a device was added in maintenance mode. */
+function maintenanceReason(note?: string) {
+  return note && note !== "Set up in maintenance mode" && note !== "Added in maintenance mode" ? note : "";
+}
+
 function MaintenanceCard({ d, onSaved }: { d: Device; onSaved: () => void }) {
   const isAdmin = useCan("admin");
   const [open, setOpen] = useState(false);
@@ -494,17 +505,17 @@ function MaintenanceCard({ d, onSaved }: { d: Device; onSaved: () => void }) {
   };
   return (
     <Card>
-      <CardHeader title="Maintenance mode" subtitle="No new workers, previews or adopted containers are placed on the device. Workers already here keep running and can still be redeployed." />
+      <CardHeader title="Maintenance mode" subtitle="While a device is in maintenance mode, no new workers, previews or adopted containers are scheduled on it. Existing workers keep running and can still be redeployed." />
       <div className="space-y-3 p-5">
         {error && <ErrorNote>{error}</ErrorNote>}
         {d.maintenance && (
           <p className="text-sm text-neutral-600">
-            {d.maintenance_note ? <>“{d.maintenance_note}”. </> : null}
-            {d.maintenance_until ? `Ends automatically ${new Date(d.maintenance_until).toLocaleString()}.` : "Stays on until you turn it off."}
+            {maintenanceReason(d.maintenance_note) ? <>Reason: {maintenanceReason(d.maintenance_note)}. </> : null}
+            {d.maintenance_until ? `Maintenance mode ends automatically on ${new Date(d.maintenance_until).toLocaleString()}.` : "Maintenance mode remains active until you turn it off."}
           </p>
         )}
         {d.maintenance ? (
-          <Button onClick={leave}>Leave maintenance mode</Button>
+          <Button onClick={leave}>Exit maintenance mode</Button>
         ) : (
           <Button variant="primary" onClick={() => setOpen(true)}>
             Enter maintenance mode
@@ -626,13 +637,13 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
   };
   const label = (t: Device) => `${t.name} (${t.host.arch}${freeSpace(t) ? `, ${freeSpace(t)}` : ""})`;
   return (
-    <Modal title={`Put ${d.name} in maintenance?`} onClose={onClose}>
+    <Modal title={`Put ${d.name} into maintenance mode?`} onClose={onClose}>
       <div className="space-y-4 p-5 text-sm">
         {mine.length > 0 ? (
           <>
             <p>
-              These workers run on {d.name}. They become inaccessible if it goes down, unless you migrate them to another device first. A moved worker gets the other device's IP address, so
-              anything that points at the old IP needs updating. Cloudflare Tunnel routes and Cloudflare-managed DNS follow automatically.
+              These workers run on {d.name} and will be unavailable if it goes offline, unless you migrate them to another device first. A migrated worker uses the new device's IP address, so
+              anything that references the old IP must be updated. Cloudflare Tunnel routes and Cloudflare-managed DNS records are updated automatically.
             </p>
             {!moving && targets.length > 0 && (
               <Field label="Migrate all workers to">
@@ -651,6 +662,7 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
                     </option>
                   ))}
                 </select>
+                <p className="mt-1 text-xs text-neutral-500">{d.name} is the current device, so it isn't offered as a destination.</p>
               </Field>
             )}
             <ul className="divide-y divide-neutral-100 rounded-md border border-neutral-200">
@@ -683,12 +695,12 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
             {!moving && chosen.length > 0 && <Impact targets={targets} mine={mine} dest={dest} source={d} />}
           </>
         ) : (
-          <p>No workers run on this device. New workers will simply be placed elsewhere.</p>
+          <p>No workers are running on this device. New workers will be placed on other devices.</p>
         )}
         {!moving && (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Reason (optional)">
-              <input className={inputClass} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="Replacing the SD card" />
+              <input className={inputClass} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Replacing the SD card" />
             </Field>
             <Field label="Ends">
               <select className={inputClass} value={hours} onChange={(e) => setHours(Number(e.target.value))}>

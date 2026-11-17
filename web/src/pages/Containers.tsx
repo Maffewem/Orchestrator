@@ -66,7 +66,7 @@ export default function ContainersPage() {
     <>
       <PageHeader
         title="Workers & stacks"
-        description="Every container in the fleet: which device it runs on, its ports, and where to reach it."
+        description="Every container across your devices: which device it runs on, its ports, and where to reach it."
         actions={
           isAdmin &&
           data && (

@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { Plus, Server } from "lucide-react";
 import { api, type Device } from "../api";
 import { useCrumbs } from "../components/Layout";
-import { Badge, Button, Card, CodeBlock, Empty, Field, HealthBadge, Loading, Meter, Modal, PageHeader, StatusDot, Toggle, inputClass } from "../components/ui";
+import { Badge, Button, Card, CodeBlock, Empty, Field, HealthBadge, Loading, Meter, Modal, PageHeader, StatusDot, Toggle, inputClass, SecretInput } from "../components/ui";
 import { ago, bytesOrDash, cx, pct, usePoll } from "../lib";
 
 const STEPS = ["Basics", "Networking", "Options", "Install"] as const;
@@ -125,7 +125,7 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
           {tunnel && (
             <div className="space-y-3 rounded-lg bg-neutral-50 p-3">
               <Field label="Tunnel token" hint="Paste the token or the whole cloudflared command. Leave blank to add it later. It is stored on the server, not in the install command.">
-                <input className={inputClass} value={tunnelToken} onChange={(e) => setTunnelToken(e.target.value)} placeholder="eyJhIjoi…" />
+                <SecretInput className={inputClass} autoComplete="off" value={tunnelToken} onChange={(e) => setTunnelToken(e.target.value)} placeholder="eyJhIjoi…" />
               </Field>
               <Field label="Send tunnel traffic" hint="Direct is lightest; through the proxy adds login, path routes and preview URLs.">
                 <select className={inputClass} value={tunnelVia} onChange={(e) => setTunnelVia(e.target.value as "" | "proxy")}>
@@ -141,11 +141,11 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
       {step === 2 && (
         <div className="space-y-3">
           <Choice on={maintenance} set={setMaintenance} title="Start in maintenance mode">
-            Keeps new workers off the device until you release it, handy while you burn it in or finish configuring it.
+            No new workers will be scheduled on the device until you take it out of maintenance mode. Useful while you test or finish configuring it.
           </Choice>
           {maintenance && (
             <Field label="Note">
-              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Burn-in until Friday" />
+              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Burn-in testing until Friday" />
             </Field>
           )}
           <p className="text-xs text-neutral-500">Backups are set per worker once it exists, so there is nothing to choose here.</p>
@@ -237,7 +237,7 @@ export default function DevicesPage() {
                   <StatusDot status={d.status} />
                   <span className="truncate">{d.name}</span>
                   <HealthBadge health={d.health} status={d.status} />
-                  {d.maintenance && <Badge tone="warn">maintenance</Badge>}
+                  {d.maintenance && <Badge tone="warn">Maintenance</Badge>}
                 </p>
                 <p className="mt-1 flex text-xs text-neutral-500">
                   <DeviceSummary d={d} />

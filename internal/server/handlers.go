@@ -135,7 +135,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	} else if err == nil {
 		d, token, err = s.store.CreateDevice(r.Context(), name, cleanLabels(req.Labels), req.Host)
 		if err == nil {
-			s.event(r.Context(), d.ID, "info", "device.registered", fmt.Sprintf("%s joined the fleet", d.Name))
+			s.event(r.Context(), d.ID, "info", "device.registered", fmt.Sprintf("%s was added", d.Name))
 		}
 	}
 	if err != nil {
@@ -452,7 +452,7 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if on != d.Maintenance {
 			if on {
-				s.event(r.Context(), d.ID, "warning", "device.maintenance", d.Name+" is in maintenance mode: no new workers will be placed on it")
+				s.event(r.Context(), d.ID, "warning", "device.maintenance", d.Name+" entered maintenance mode: no new workers will be scheduled on it")
 			} else {
 				s.event(r.Context(), d.ID, "info", "device.maintenance", d.Name+" left maintenance mode")
 			}
@@ -466,7 +466,7 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 
 // errMaintenance is why a device refuses new work.
 func errMaintenance(d *store.Device) error {
-	return errors.New(d.Name + " is in maintenance mode: choose another device, or turn maintenance mode off first")
+	return errors.New(d.Name + " is in maintenance mode: choose another device, or take it out of maintenance mode first")
 }
 
 func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
@@ -478,7 +478,7 @@ func (s *Server) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	s.event(r.Context(), "", "warning", "device.removed", d.Name+" was removed from the fleet")
+	s.event(r.Context(), "", "warning", "device.removed", d.Name+" was removed")
 	w.WriteHeader(http.StatusNoContent)
 }
 

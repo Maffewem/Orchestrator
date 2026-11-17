@@ -161,6 +161,11 @@ export interface CloudflareRemote {
   settings?: {
     compatibility_date?: string; compatibility_flags?: string[]; usage_model?: string; observability?: boolean;
     production_branch?: string; repo?: string; build_command?: string; output_dir?: string; root_dir?: string;
+    /** Workers Builds: how Cloudflare builds this Worker from Git. */
+    build?: {
+      name?: string; repo?: string; provider?: string; build_command?: string; deploy_command?: string; root_dir?: string;
+      branches?: string[]; exclude_branches?: string[]; path_includes?: string[]; path_excludes?: string[]; build_caching?: boolean;
+    };
     variables: { name: string; type: string; value?: string; secret?: boolean }[];
     bindings: { name: string; type: string; target?: string }[];
   };
@@ -289,6 +294,8 @@ export interface TunnelView {
   /** False when the device's agent predates tunnel updates. */
   can_update: boolean;
   auto_update: boolean;
+  /** When automatic updates run (the server update schedule); empty when that schedule is off. */
+  auto_update_when?: string;
 }
 
 export interface ProjectTunnelView extends TunnelView {

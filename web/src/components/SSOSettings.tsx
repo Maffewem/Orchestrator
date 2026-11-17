@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, type SSOView } from "../api";
-import { Button, ErrorNote, Field, inputClass } from "./ui";
+import { Button, ErrorNote, Field, inputClass, SecretInput } from "./ui";
 
 const list = (v: string) => v.split(",").map((x) => x.trim()).filter(Boolean);
 const roles = [["pending", "Wait for an admin to approve"], ["viewer", "Viewer"], ["operator", "Operator"]];
@@ -52,7 +52,7 @@ export function SSOSettings({ value, onSaved }: { value: SSOView; onSaved: () =>
         {gh.enabled && (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Client ID"><input className={inputClass} value={gh.client_id} onChange={(e) => setGH({ client_id: e.target.value })} /></Field>
-            <Field label="Client secret"><input className={inputClass} type="password" value={gh.client_secret ?? ""} placeholder={c.github_secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => setGH({ client_secret: e.target.value })} /></Field>
+            <Field label="Client secret"><SecretInput className={inputClass} value={gh.client_secret ?? ""} placeholder={c.github_secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => setGH({ client_secret: e.target.value })} /></Field>
             <Field label="Allowed organisations" hint="Comma-separated. Members of these GitHub organisations can sign in."><input className={inputClass} value={gh.orgs.join(", ")} onChange={(e) => setGH({ orgs: list(e.target.value) })} /></Field>
             <Field label="New users start as">
               <select className={inputClass} value={gh.default_role} onChange={(e) => setGH({ default_role: e.target.value })}>
@@ -79,7 +79,7 @@ export function SSOSettings({ value, onSaved }: { value: SSOView; onSaved: () =>
             <Field label="Button label"><input className={inputClass} value={oi.name} onChange={(e) => setOI({ name: e.target.value })} /></Field>
             <Field label="Issuer URL" hint="Cloudflare: https://<team>.cloudflareaccess.com/cdn-cgi/access/sso/oidc/<client id>"><input className={inputClass} value={oi.issuer} onChange={(e) => setOI({ issuer: e.target.value })} /></Field>
             <Field label="Client ID"><input className={inputClass} value={oi.client_id} onChange={(e) => setOI({ client_id: e.target.value })} /></Field>
-            <Field label="Client secret"><input className={inputClass} type="password" value={oi.client_secret ?? ""} placeholder={c.oidc_secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => setOI({ client_secret: e.target.value })} /></Field>
+            <Field label="Client secret"><SecretInput className={inputClass} value={oi.client_secret ?? ""} placeholder={c.oidc_secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => setOI({ client_secret: e.target.value })} /></Field>
             <Field label="Allowed email domains" hint="Comma-separated, or * to accept everyone the provider signs in (for example when Cloudflare Access already limits who can reach it)."><input className={inputClass} value={oi.domains.join(", ")} onChange={(e) => setOI({ domains: list(e.target.value) })} /></Field>
             <Field label="New users start as">
               <select className={inputClass} value={oi.default_role} onChange={(e) => setOI({ default_role: e.target.value })}>

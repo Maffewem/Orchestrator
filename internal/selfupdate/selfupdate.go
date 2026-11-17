@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -34,10 +35,17 @@ func Identify(ctx context.Context, d *agent.Docker) (*Self, error) {
 	if !d.Available(ctx) {
 		return nil, errors.New("the Docker socket is not available inside the server container")
 	}
-	host, _ := os.Hostname()
-	id, name, imageID, ref, err := d.ContainerNameOf(ctx, host)
+	var id, name, imageID, ref string
+	var err error
+	tried := candidateIDs()
+	for _, c := range tried {
+		if id, name, imageID, ref, err = d.ContainerNameOf(ctx, c); err == nil {
+			break
+		}
+	}
 	if err != nil {
-		return nil, errors.New("the server is not running in a Docker container")
+		return nil, fmt.Errorf("the server could not find its own container through the Docker socket (tried %s). "+
+			"If it was installed by hand, set ORCH_CONTAINER=<container name> on it, or re-run install-server.sh", strings.Join(tried, ", "))
 	}
 	raw, err := d.InspectRaw(ctx, id)
 	if err != nil {
@@ -53,10 +61,49 @@ func Identify(ctx context.Context, d *agent.Docker) (*Self, error) {
 			s.SocketBind = m.Source
 		}
 	}
-	if strings.HasPrefix(ref, "sha256:") || ref == "" {
-		return nil, errors.New("the server container was created from an image ID, not a tag, so there is nothing to pull")
+	if strings.HasPrefix(ref, "sha256:") || ref == "" || !strings.ContainsAny(ref, "/:") {
+		// Created from an image ID (as after a swap by an older build): use a tag the image carries.
+		img, ierr := d.ImageInspect(ctx, imageID)
+		if ierr == nil && len(img.RepoTags) > 0 {
+			ref = img.RepoTags[0]
+			for _, t := range img.RepoTags {
+				if strings.HasSuffix(t, ":stable") || strings.HasSuffix(t, ":dev") {
+					ref = t
+					break
+				}
+			}
+			s.ImageRef = ref
+		} else {
+			return nil, errors.New("the server container was created from an image ID, not a tag, and the image has no tag, so there is nothing to pull. Re-create it with install-server.sh")
+		}
 	}
 	return s, nil
+}
+
+// candidateIDs lists the names under which Docker may know this container: an explicit
+// ORCH_CONTAINER override, the hostname (the short ID unless --hostname was set) and the
+// container IDs visible in /proc (which survive a custom hostname or an old swap).
+func candidateIDs() []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(v string) {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	add(os.Getenv("ORCH_CONTAINER"))
+	host, _ := os.Hostname()
+	add(host)
+	re := regexp.MustCompile(`[0-9a-f]{64}`)
+	for _, f := range []string{"/proc/self/mountinfo", "/proc/self/cgroup"} {
+		if b, err := os.ReadFile(f); err == nil {
+			for _, m := range re.FindAllString(string(b), 3) {
+				add(m)
+			}
+		}
+	}
+	return out
 }
 
 // Latest is what a pull of the container's image tag turned up.

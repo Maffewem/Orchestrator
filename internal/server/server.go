@@ -189,7 +189,6 @@ func (s *Server) Run(ctx context.Context) {
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
-	go s.tunnelUpdateLoop(ctx)
 	s.startHTTPS(ctx)
 	s.recoverMigrations(ctx)
 	go s.afterBoot(ctx)
@@ -217,7 +216,7 @@ func (s *Server) sweep(ctx context.Context) {
 		s.log.Error("expire maintenance", "err", err)
 	} else {
 		for _, d := range ended {
-			s.event(ctx, d.ID, "info", "device.maintenance", d.Name+" left maintenance mode (the time set for it ended)")
+			s.event(ctx, d.ID, "info", "device.maintenance", d.Name+" left maintenance mode (the scheduled end time passed)")
 		}
 	}
 	if _, err := s.store.ExpireCommands(ctx, time.Now().Add(-2*time.Minute), time.Now().Add(-30*time.Minute)); err != nil {

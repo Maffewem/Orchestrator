@@ -721,8 +721,8 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
   const isStack = p.source.type === "compose";
   const source = devices.data?.find((d) => d.id === p.device_id);
   const sourceDown = source?.status === "offline";
-  const others =
-    devices.data?.filter((d) => d.id !== p.device_id && !d.maintenance) ?? [];
+  // The current device stays in the list, labelled and disabled, so it is clear where the project runs now.
+  const choices = (devices.data ?? []).filter((d) => d.id === p.device_id || !d.maintenance);
   return (
     <Card>
       <CardHeader
@@ -739,14 +739,21 @@ function MigrateCard({ p, onDone }: { p: Project; onDone: () => void }) {
             disabled={running}
           >
             <option value="">Choose a device</option>
-            {others.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name} ({d.host.arch}
-                {d.status === "offline" ? ", offline" : ""}
-                {freeSpace(d) ? `, ${freeSpace(d)}` : ""})
-              </option>
-            ))}
+            {choices.map((d) =>
+              d.id === p.device_id ? (
+                <option key={d.id} value={d.id} disabled title="The project already runs on this device">
+                  {d.name} (current device)
+                </option>
+              ) : (
+                <option key={d.id} value={d.id}>
+                  {d.name} ({d.host.arch}
+                  {d.status === "offline" ? ", offline" : ""}
+                  {freeSpace(d) ? `, ${freeSpace(d)}` : ""})
+                </option>
+              ),
+            )}
           </select>
+          {source && <p className="mt-1 text-xs text-neutral-500">Currently on {source.name}. Pick a different device to move it to.</p>}
         </Field>
         {isStack && (
           <p className="text-sm text-neutral-500">

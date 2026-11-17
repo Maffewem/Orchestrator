@@ -219,7 +219,7 @@ function ItemList({ items }: { items: AdoptItem[] }) {
   );
 }
 
-/** "Import containers" for the fleet page: picks a device, then opens the dialog for it. */
+/** "Import containers" for the containers page: picks a device, then opens the dialog for it. */
 export function ImportContainers({ containers, onDone }: { containers: FleetContainer[]; onDone: () => void }) {
   const devices = new Map<string, string>();
   for (const c of containers) if (adoptable(c)) devices.set(c.device_id, c.device_name);

@@ -708,6 +708,8 @@ func (s *Server) scheduleTick(ctx context.Context, now time.Time) {
 	defer s.finish()
 	s.store.SetSetting(ctx, settingUpdateLastAuto, now.UTC().Format(time.RFC3339))
 	s.event(ctx, "", "info", "update.scheduled", "Scheduled update check started")
+	// Tunnels first: their commands are stored, so they survive a server restart below.
+	s.tunnelUpdatePass(ctx, now)
 	if s.applyServerUpdate(ctx, sch.Agents, "") {
 		return // the server restarts; agents follow once it is back
 	}

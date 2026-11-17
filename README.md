@@ -1,6 +1,6 @@
 # Orchestrator
 
-A self-hosted manager for a fleet of Raspberry Pis, VMs and servers. Think Portainer
+A self-hosted manager for a group of Raspberry Pis, VMs and servers. Think Portainer
 across many machines, with a Cloudflare Pages-style dashboard: projects, step-by-step
 deployments with live logs, GitHub push-to-deploy, and Server Manager-style health for
 every device.
@@ -283,11 +283,11 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 
 | | |
 | --- | --- |
-| `GET /api/overview` | fleet counts and recent activity |
+| `GET /api/overview` | device counts and recent activity |
 | `GET /api/devices`, `GET/PATCH/DELETE /api/devices/{id}` | devices with health and status |
 | `GET /api/devices/{id}/metrics` | the last hour of CPU/memory/disk samples |
 | `POST /api/devices/{id}/commands` | `container.start/stop/restart/logs` |
-| `GET /api/containers` | every container in the fleet |
+| `GET /api/containers` | every container across all devices |
 | `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}` | projects |
 | `POST /api/devices/{id}/adopt` | read containers and create projects from them (`dry_run` previews) |
 | `POST /api/projects/{id}/deployments` | deploy (GitHub projects use the branch head) |
@@ -327,7 +327,7 @@ with HMAC-SHA256.
 
 **Tunnel.** On a device page, paste a Cloudflare Tunnel token (or the whole connector command) to run `cloudflared` there on the host network, as the `orchestrator-tunnel` container. Any worker or stack on the device can then be published through it. With Cloudflare connected in Settings (token needs *Account > Cloudflare Tunnel > Edit*), the *Public hostnames* list is pushed to the tunnel's ingress and CNAME records are created; otherwise add the hostnames in the Cloudflare dashboard. A service is a URL like `http://localhost:3000` or `project:<name>`. Each project's *Domains* tab also has a Cloudflare Tunnel card where you pick a hostname and one of its published ports (for a stack, the ports of its services) without leaving the project; routes set there are kept apart from the device page's.
 
-**Keeping cloudflared current.** The tunnel card shows the cloudflared version running on the device (read from inside the container), the newest release, and an *update available* badge. *Update tunnel* pulls `cloudflare/cloudflared:latest` and recreates the container with the same token and settings (the tunnel is down for a few seconds; if the image has not changed nothing is recreated, and a failed pull leaves the running container alone). *Update cloudflared automatically* is opt-in per device: the server checks every 15 minutes, updates devices that are behind at most once every six hours, and skips devices in maintenance mode. Devices need an agent that supports tunnel updates, so re-run the install command or update the agent first.
+**Keeping cloudflared current.** The tunnel card shows the cloudflared version running on the device (read from inside the container), the newest release, and an *update available* badge. *Update tunnel* pulls `cloudflare/cloudflared:latest` and recreates the container with the same token and settings (the tunnel is down for a few seconds; if the image has not changed nothing is recreated, and a failed pull leaves the running container alone). *Update cloudflared automatically* is opt-in per device: it runs whenever the server's update schedule (Updates page) fires, so unattended changes share one window; it does nothing while that schedule is off, and skips devices in maintenance mode. Devices need an agent that supports tunnel updates, so re-run the install command or update the agent first.
 
 ## Cloudflare Pages and Workers
 

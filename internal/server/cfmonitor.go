@@ -194,12 +194,19 @@ func (s *Server) cfMonitorLoop(ctx context.Context) {
 	if s.cfg.CloudflareInterval <= 0 {
 		return
 	}
+	// Poll shortly after start so a freshly updated server fills in new data without waiting a full interval.
+	first := time.NewTimer(5 * time.Second)
+	defer first.Stop()
 	t := time.NewTicker(s.cfg.CloudflareInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-first.C:
+			if !s.movePaused() {
+				s.cfPollAll(ctx)
+			}
 		case <-t.C:
 			if !s.movePaused() {
 				s.cfPollAll(ctx)
@@ -246,7 +253,7 @@ func (s *Server) handleRefreshCloudflare(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, st)
 }
 
-// cfSummary is the fleet-wide Cloudflare line on the overview.
+// cfSummary is the Cloudflare line on the overview.
 type cfSummary struct {
 	Projects int   `json:"projects"`
 	Live     int   `json:"live"`

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { useMe } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, PageHeader, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, PageHeader, SecretInput, inputClass } from "../components/ui";
 
 /** The signed-in person's own settings, kept apart from the admin-only Settings page. */
 export default function AccountPage() {
@@ -68,10 +68,10 @@ function PasswordCard() {
         }}
       >
         <Field label="Current password">
-          <input className={inputClass} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
         </Field>
         <Field label="New password" hint="Must meet the minimum length set by an administrator.">
-          <input className={inputClass} type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         {error && <ErrorNote>{error}</ErrorNote>}
         {done && <p role="status" className="text-sm text-green-700">Password changed.</p>}

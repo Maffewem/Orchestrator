@@ -127,12 +127,21 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "unnamed-device"
 	}
-	d, token, err := s.store.CreateDevice(r.Context(), name, cleanLabels(req.Labels), req.Host)
+	// An agent that lost its saved identity (reinstalled, state file wiped, token rejected) must not
+	// leave an offline twin behind: take over the matching offline device instead.
+	d, token, err := s.store.ReenrollDevice(r.Context(), name, req.Host)
+	if err == nil && d != nil {
+		s.event(r.Context(), d.ID, "info", "device.reenrolled", fmt.Sprintf("%s re-registered and kept its existing record", d.Name))
+	} else if err == nil {
+		d, token, err = s.store.CreateDevice(r.Context(), name, cleanLabels(req.Labels), req.Host)
+		if err == nil {
+			s.event(r.Context(), d.ID, "info", "device.registered", fmt.Sprintf("%s joined the fleet", d.Name))
+		}
+	}
 	if err != nil {
 		s.internal(w, err)
 		return
 	}
-	s.event(r.Context(), d.ID, "info", "device.registered", fmt.Sprintf("%s joined the fleet", d.Name))
 	s.applyDeviceSetup(r.Context(), d, req.Setup)
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{DeviceID: d.ID, AgentToken: token, ServerKey: s.serverKey()})
 }

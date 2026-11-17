@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
@@ -392,6 +393,45 @@ func (s *Store) CreateDevice(ctx context.Context, name string, labels []string, 
 		return nil, "", err
 	}
 	return d, token, nil
+}
+
+// ReenrollDevice finds a device that this registration is most likely a repeat of: the same name
+// and hostname, offline, and sharing at least one IP address with the newcomer. It gives that device
+// a fresh token and the new host details, so the agent keeps its history, workers and settings
+// instead of creating a duplicate. It returns nil when nothing matches. A device that is still
+// online is never taken over.
+func (s *Store) ReenrollDevice(ctx context.Context, name string, host api.HostInfo) (*Device, string, error) {
+	devs, err := s.ListDevices(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	mine := map[string]bool{}
+	for _, a := range host.Addresses {
+		mine[a] = true
+	}
+	for _, d := range devs {
+		if !d.Offline || !strings.EqualFold(d.Name, name) || d.Host.Hostname != host.Hostname || host.Hostname == "" {
+			continue
+		}
+		shared := false
+		for _, a := range d.Host.Addresses {
+			if mine[a] {
+				shared = true
+			}
+		}
+		if !shared {
+			continue
+		}
+		token := NewToken()
+		now := time.Now().UTC().Truncate(time.Second)
+		if _, err := s.db.ExecContext(ctx, `UPDATE devices SET token_hash = ?, host = ?, last_seen = ?, offline = 0 WHERE id = ?`,
+			HashToken(token), mustJSON(host), now.Unix(), d.ID); err != nil {
+			return nil, "", err
+		}
+		d.Host, d.LastSeen, d.Offline = host, now, false
+		return d, token, nil
+	}
+	return nil, "", nil
 }
 
 func (s *Store) DeviceByToken(ctx context.Context, token string) (*Device, error) {

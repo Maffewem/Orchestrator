@@ -63,6 +63,21 @@ func TestAccounts(t *testing.T) {
 		t.Fatal("logins failed")
 	}
 
+	// "Sign out of other devices" keeps the calling session and ends the rest.
+	_, opOther := login("ops", "operator-pass")
+	if code := h.do("POST", "/api/auth/sessions/revoke-others", opS.Token, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("revoking other sessions: %d", code)
+	}
+	if code := h.do("GET", "/api/auth/me", opS.Token, nil, nil); code != http.StatusOK {
+		t.Fatalf("calling session ended: %d", code)
+	}
+	if code := h.do("GET", "/api/auth/me", opOther.Token, nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("other session survived: %d", code)
+	}
+	if code := h.do("POST", "/api/auth/sessions/revoke-others", adminToken, nil, nil); code != http.StatusBadRequest {
+		t.Fatalf("admin token revoking sessions: %d", code)
+	}
+
 	reg := h.register("pi")
 	var p ProjectView
 	body := map[string]any{"name": "web", "device_id": reg.DeviceID,
@@ -261,5 +276,27 @@ func TestLoginAddressWideThrottle(t *testing.T) {
 	}
 	if !l.locked("login|*|1.2.3.4") {
 		t.Fatal("address-wide key should lock after repeated failures")
+	}
+}
+
+func TestAlerts(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	var out []Alert
+	if code := h.do("GET", "/api/alerts", adminToken, nil, &out); code != http.StatusOK {
+		t.Fatalf("alerts: %d", code)
+	}
+	// A device that has never reported Docker is unhealthy, so it must appear, linked to its page.
+	found := false
+	for _, a := range out {
+		if a.Link == "" || a.Severity == "" {
+			t.Fatalf("alert without link or severity: %+v", a)
+		}
+		if a.Link == "/devices/"+reg.DeviceID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no alert for the unhealthy device: %+v", out)
 	}
 }

@@ -142,7 +142,7 @@ func routeRole(pattern string) string {
 		"GET /api/server-backups/{name}/download": true,
 	}
 	switch {
-	case pattern == "POST /api/auth/logout" || pattern == "POST /api/auth/password":
+	case pattern == "POST /api/auth/logout" || pattern == "POST /api/auth/password" || pattern == "POST /api/auth/sessions/revoke-others":
 		return store.RoleViewer
 	case operator[pattern]:
 		return store.RoleOperator
@@ -415,6 +415,30 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.store.DeleteSession(r.Context(), store.HashToken(bearer(r)))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRevokeOtherSessions signs the caller out everywhere except the browser making the request.
+func (s *Server) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request) {
+	id := identityFrom(r)
+	if id.Token {
+		writeError(w, http.StatusBadRequest, "the admin token has no sessions; sign in with an account")
+		return
+	}
+	u, err := s.store.UserByName(r.Context(), id.Name)
+	if err != nil || u == nil {
+		writeError(w, http.StatusNotFound, "account not found")
+		return
+	}
+	keep := store.HashToken(bearer(r))
+	if err := s.store.DeleteUserSessions(r.Context(), u.ID); err != nil {
+		s.internal(w, err)
+		return
+	}
+	if err := s.store.CreateSession(r.Context(), keep, u.ID, s.sessionLifetime(r.Context())); err != nil {
+		s.internal(w, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

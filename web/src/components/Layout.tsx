@@ -1,10 +1,10 @@
-import { Fragment, createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router";
-import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, KeyRound, LogOut, Menu, PanelLeft, Rocket, Search, Server, Settings, Users, WifiOff, X } from "lucide-react";
-import { api, type Device, type FleetContainer, type Project } from "../api";
+import { Activity, Archive, Boxes, RefreshCw, ChevronRight, LayoutDashboard, Bell, LogOut, Menu, Monitor, Moon, PanelLeft, Sun, UserRound, Rocket, Search, Server, Settings, Users, WifiOff, X } from "lucide-react";
+import { api, type Device, type Me, type FleetContainer, type Project } from "../api";
 import { cx, usePoll, useStaleData } from "../lib";
 import { useMe } from "./auth";
-import { Button, ErrorNote, Field, Modal, inputClass, SecretInput } from "./ui";
+import { getTheme, setTheme, type ThemeChoice } from "../theme";
 
 export type Crumb = { label: string; to?: string };
 
@@ -114,7 +114,6 @@ function MoveBanner() {
 export default function Layout({ onLogout }: { onLogout: () => void }) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [open, setOpen] = useState(false);
-  const [pw, setPw] = useState(false);
   const [palette, setPalette] = useState(false);
   const [rail, setRail] = useState(() => {
     try {
@@ -197,32 +196,6 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           </div>
         );
       })}
-      <div className="mt-auto">
-        {me && !compact && (
-          <div className="mb-1 px-2.5 py-2 text-sm">
-            <p className="truncate font-medium">{me.username}</p>
-            <p className="text-xs capitalize text-neutral-500">{me.role}</p>
-          </div>
-        )}
-        {me && !me.token_login && (
-          <button
-            onClick={() => setPw(true)}
-            title="Change password"
-            className={cx("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900", compact && "justify-center")}
-          >
-            <KeyRound className="size-4 shrink-0" />
-            {!compact && "Change password"}
-          </button>
-        )}
-        <button
-          onClick={onLogout}
-          title="Sign out"
-          className={cx("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900", compact && "justify-center")}
-        >
-          <LogOut className="size-4 shrink-0" />
-          {!compact && "Sign out"}
-        </button>
-      </div>
     </nav>
   );
 
@@ -262,6 +235,8 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
               </span>
               <kbd className="hidden rounded border border-neutral-300 px-1.5 text-xs sm:inline">Ctrl K</kbd>
             </button>
+            {me && <AlertsBell />}
+            {me && <UserMenu me={me} onLogout={onLogout} />}
           </header>
           <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
             <StaleBanner />
@@ -291,8 +266,230 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
         </button>
       </nav>
       {palette && <CommandPalette onClose={() => setPalette(false)} admin={me?.role === "admin"} />}
-      {pw && <ChangePassword onClose={() => setPw(false)} />}
     </CrumbContext.Provider>
+  );
+}
+
+const ALERT_LIMIT = 8;
+const alertDot = { critical: "bg-red-600", warning: "bg-amber-500", info: "bg-primary" } as const;
+
+/** Top-bar bell: everything that currently needs attention, most severe first. Items clear on their own. */
+function AlertsBell() {
+  const { data } = usePoll(() => api.alerts(), 15000);
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const nav = useNavigate();
+  const alerts = data ?? [];
+  const shown = alerts.slice(0, ALERT_LIMIT);
+  const more = alerts.length - shown.length;
+  const worst = alerts[0]?.severity;
+  useEffect(() => {
+    if (!open) return;
+    wrap.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const away = (e: MouseEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  const go = (to: string) => {
+    setOpen(false);
+    nav(to);
+  };
+  const onKey = (e: React.KeyboardEvent) => {
+    const els = Array.from(wrap.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    const i = els.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "Escape") {
+      setOpen(false);
+      btn.current?.focus();
+    } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && els.length) {
+      e.preventDefault();
+      els[e.key === "ArrowDown" ? (i + 1) % els.length : (i - 1 + els.length) % els.length]?.focus();
+    } else if (e.key === "Tab") setOpen(false);
+  };
+  const label = alerts.length ? `Alerts: ${alerts.length} need${alerts.length === 1 ? "s" : ""} attention` : "Alerts: nothing needs attention";
+  return (
+    <div ref={wrap} className="relative" onKeyDown={onKey}>
+      <button
+        ref={btn}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        title={label}
+        className="relative inline-flex size-9 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
+      >
+        <Bell className="size-5" />
+        {alerts.length > 0 && (
+          <span
+            className={cx(
+              "absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-white px-1 text-[10px] font-semibold leading-none text-white",
+              worst === "critical" ? "bg-red-600" : worst === "warning" ? "bg-amber-500" : "bg-primary",
+            )}
+          >
+            {alerts.length > 9 ? "9+" : alerts.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div role="menu" aria-label="Alerts" className="fixed inset-x-3 top-14 z-50 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-11 sm:w-96">
+          <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
+            <p className="text-sm font-semibold">Needs attention</p>
+            <button role="menuitem" tabIndex={-1} onClick={() => go("/activity")} className="rounded text-sm text-primary hover:underline focus:underline focus:outline-none">
+              View activity
+            </button>
+          </div>
+          {shown.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-neutral-500">All clear. Nothing needs attention.</p>
+          ) : (
+            <ul className="max-h-[60vh] overflow-y-auto">
+              {shown.map((a) => (
+                <li key={a.id}>
+                  <button
+                    role="menuitem"
+                    tabIndex={-1}
+                    onClick={() => go(a.link)}
+                    className="flex w-full gap-3 border-b border-neutral-100 px-4 py-2.5 text-left hover:bg-neutral-50 focus:bg-neutral-100 focus:outline-none"
+                  >
+                    <span className={cx("mt-1.5 size-2 shrink-0 rounded-full", alertDot[a.severity])} aria-hidden />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">
+                        <span className="sr-only">{a.severity}: </span>
+                        {a.title}
+                      </span>
+                      {a.detail && <span className="mt-0.5 line-clamp-2 block text-xs text-neutral-500">{a.detail}</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {more > 0 ? (
+            <button role="menuitem" tabIndex={-1} onClick={() => go("/devices")} className="block w-full px-4 py-2.5 text-center text-xs font-medium text-primary hover:bg-neutral-50 focus:bg-neutral-100 focus:outline-none">
+              And {more} more. Open Devices
+            </button>
+          ) : (
+            shown.length > 0 && <p className="px-4 py-2.5 text-center text-xs text-neutral-500">Items clear on their own when the problem is fixed.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One avatar button in the top bar: who is signed in, a theme switch, the account page and Sign out. */
+function UserMenu({ me, onLogout }: { me: Me; onLogout: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [theme, setThemeState] = useState<ThemeChoice>(getTheme());
+  const wrap = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const nav = useNavigate();
+  const itemSelector = '[role="menuitem"], [role="menuitemradio"]';
+  useEffect(() => {
+    if (!open) return;
+    wrap.current?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')?.focus();
+    const away = (e: MouseEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    return () => document.removeEventListener("mousedown", away);
+  }, [open]);
+  const onKey = (e: React.KeyboardEvent) => {
+    const els = Array.from(wrap.current?.querySelectorAll<HTMLElement>(itemSelector) ?? []);
+    const i = els.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "Escape") {
+      setOpen(false);
+      btn.current?.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!els.length) return;
+      const n = e.key === "ArrowDown" ? (i + 1) % els.length : (i - 1 + els.length) % els.length;
+      els[n]?.focus();
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      els[e.key === "Home" ? 0 : els.length - 1]?.focus();
+    } else if (e.key === "Tab") setOpen(false);
+  };
+  const row = "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-neutral-700 hover:bg-neutral-100 focus:bg-neutral-100 focus:outline-none";
+  return (
+    <div ref={wrap} className="relative" onKeyDown={onKey}>
+      <button
+        ref={btn}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Account menu for ${me.username}`}
+        title={me.username}
+        className="inline-flex size-9 items-center justify-center rounded-full bg-primary text-sm font-semibold uppercase text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
+      >
+        {me.username.charAt(0) || "?"}
+      </button>
+      {open && (
+        <div role="menu" aria-label="Account" className="absolute right-0 top-11 z-50 w-60 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1.5 shadow-xl">
+          <div className="border-b border-neutral-100 px-2.5 pb-2 pt-1.5">
+            <p className="truncate text-sm font-medium">{me.username}</p>
+            <p className="text-xs capitalize text-neutral-500">{me.role}</p>
+          </div>
+          <div className="border-b border-neutral-100 px-1 py-2">
+            <p className="px-1.5 pb-1 text-xs font-medium uppercase tracking-wide text-neutral-400">Theme</p>
+            <div role="group" aria-label="Theme" className="flex gap-0.5 rounded-lg bg-neutral-100 p-0.5">
+              {(
+                [
+                  ["light", "Light", Sun],
+                  ["auto", "Auto", Monitor],
+                  ["dark", "Dark", Moon],
+                ] as const
+              ).map(([v, label, Icon]) => (
+                <button
+                  key={v}
+                  role="menuitemradio"
+                  aria-checked={theme === v}
+                  tabIndex={-1}
+                  onClick={() => {
+                    setThemeState(v);
+                    setTheme(v);
+                  }}
+                  className={cx(
+                    "flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                    theme === v ? "bg-white font-medium text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-900",
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="pt-1">
+            <button
+              role="menuitem"
+              tabIndex={-1}
+              className={row}
+              onClick={() => {
+                setOpen(false);
+                nav("/account");
+              }}
+            >
+              <UserRound className="size-4 shrink-0" />
+              My account
+            </button>
+            <button
+              role="menuitem"
+              tabIndex={-1}
+              className={row}
+              onClick={() => {
+                setOpen(false);
+                onLogout();
+              }}
+            >
+              <LogOut className="size-4 shrink-0" />
+              Sign out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -339,44 +536,6 @@ export function Section({ title, children, action }: { title: string; children: 
   );
 }
 
-function ChangePassword({ onClose }: { onClose: () => void }) {
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  return (
-    <Modal title="Change password" onClose={onClose}>
-      <form
-        className="space-y-4"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setBusy(true);
-          setError(null);
-          try {
-            await api.changePassword(current, next);
-            onClose();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-            setBusy(false);
-          }
-        }}
-      >
-        <Field label="Current password">
-          <SecretInput className={inputClass} autoFocus autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
-        </Field>
-        <Field label="New password" hint="At least 10 characters. Other devices are signed out.">
-          <SecretInput className={inputClass} autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
-        </Field>
-        {error && <ErrorNote>{error}</ErrorNote>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" loading={busy} disabled={!current || !next}>Change password</Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
 type Hit = { label: string; hint: string; to: string };
 
 /** Ctrl+K: jump to any page, worker, device or project. */
@@ -390,6 +549,7 @@ function CommandPalette({ onClose, admin }: { onClose: () => void; admin: boolea
   }, []);
   const all: Hit[] = [
     ...navGroups.flatMap((g) => g.items).filter((n) => !n.admin || admin).map((n) => ({ label: n.label, hint: "Page", to: n.to })),
+    { label: "My account", hint: "Page", to: "/account" },
     ...data.projects.map((p) => ({ label: p.name, hint: "Project", to: `/projects/${p.id}` })),
     ...data.containers.map((c) => ({ label: c.name, hint: `Worker on ${c.device_name}`, to: `/workers/${c.device_id}/${encodeURIComponent(c.name)}` })),
     ...data.devices.map((d) => ({ label: d.name, hint: "Device", to: `/devices/${d.id}` })),

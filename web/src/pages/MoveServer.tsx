@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { CheckCircle2, Circle, Loader2, Server } from "lucide-react";
 import { api, type MoveCandidate, type MoveView, type ServerMove } from "../api";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, inputClass } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, inputClass, SecretInput } from "../components/ui";
 import { confirmDialog, notify } from "../components/dialogs";
 import { usePoll } from "../lib";
 
@@ -329,7 +329,7 @@ function ManualMove() {
       <div className="space-y-3 p-5 text-sm text-neutral-700">
         <p>Download a password-protected copy of this server (it contains the key that seals your secrets, so it is encrypted). Anything changed after the download is not in it.</p>
         <div className="flex max-w-md gap-2">
-          <input type="password" className={inputClass} placeholder="Choose a password (8+ characters)" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <SecretInput className={inputClass} placeholder="Choose a password (8+ characters)" value={pw} onChange={(e) => setPw(e.target.value)} />
           <Button
             loading={busy}
             disabled={pw.length < 8 || busy}

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, type Settings } from "../api";
-import { Button, ErrorNote, Field, inputClass } from "./ui";
+import { Button, ErrorNote, Field, inputClass, SecretInput } from "./ui";
 import { confirmDialog } from "./dialogs";
 
 /** Account ID and token for deploying to Cloudflare Pages and Workers. */
@@ -42,7 +42,7 @@ export function CloudflareDeploy({ s, reload }: { s: Settings; reload: () => voi
           <input className={inputClass} placeholder="32-character account ID" value={account} onChange={(e) => setAccount(e.target.value)} />
         </Field>
         <Field label="API token" hint={d.own_token ? "A token for deployments is saved. Paste another to replace it." : d.configured ? "Empty: use the token from the Cloudflare section above." : "Needs the permissions listed below."}>
-          <input className={inputClass} type="password" autoComplete="off" placeholder="Token for Pages and Workers" value={token} onChange={(e) => setToken(e.target.value)} />
+          <SecretInput className={inputClass} autoComplete="off" placeholder="Token for Pages and Workers" value={token} onChange={(e) => setToken(e.target.value)} />
         </Field>
       </div>
       <div className="flex gap-2">

@@ -1,7 +1,7 @@
-import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { copyText } from "../clipboard";
 import { Link, NavLink } from "react-router";
-import { AlertTriangle, Check, CircleDashed, Loader2, Minus, X } from "lucide-react";
+import { AlertTriangle, Check, CircleDashed, Eye, EyeOff, Loader2, Minus, X } from "lucide-react";
 import type { DeploymentStatus, Health, StepStatus } from "../api";
 import { cx } from "../lib";
 
@@ -326,6 +326,26 @@ export function Field({ label, hint, children, as = "label" }: { label: string; 
 
 export const inputClass =
   "block w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm placeholder:text-neutral-400 focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none";
+
+/** A secret input that is hidden by default, with an eye button to reveal what was typed. */
+export function SecretInput({ className = inputClass, ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, "type">) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="relative min-w-0 w-full flex-1">
+      <input {...props} type={shown ? "text" : "password"} className={cx(className, "pr-10")} spellCheck={false} autoCapitalize="off" />
+      <button
+        type="button"
+        onClick={() => setShown((v) => !v)}
+        aria-label={shown ? "Hide value" : "Show value"}
+        aria-pressed={shown}
+        title={shown ? "Hide" : "Show"}
+        className="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg text-neutral-500 hover:text-neutral-800 focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        {shown ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+      </button>
+    </div>
+  );
+}
 
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);

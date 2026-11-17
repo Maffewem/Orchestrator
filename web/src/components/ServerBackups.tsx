@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Download, RotateCcw, Trash2, Upload } from "lucide-react";
 import { api, type BackupDest, type ServerBackupPolicy } from "../api";
-import { Badge, Button, ErrorNote, Field, Loading, inputClass } from "./ui";
+import { Badge, Button, ErrorNote, Field, Loading, inputClass, SecretInput } from "./ui";
 import { confirmDialog } from "./dialogs";
 import { ago, bytes, usePoll } from "../lib";
 
@@ -185,7 +185,7 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
               <Field label="Bucket"><input className={inputClass} value={d.bucket ?? ""} onChange={(e) => set(i, { bucket: e.target.value })} /></Field>
               <Field label="Folder in bucket"><input className={inputClass} value={d.prefix ?? ""} onChange={(e) => set(i, { prefix: e.target.value })} placeholder="orchestrator" /></Field>
               <Field label="Access key ID"><input className={inputClass} value={d.access_key ?? ""} onChange={(e) => set(i, { access_key: e.target.value })} /></Field>
-              <Field label="Secret access key"><input className={inputClass} type="password" value={d.secret_key ?? ""} placeholder={d.secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => set(i, { secret_key: e.target.value })} /></Field>
+              <Field label="Secret access key"><SecretInput className={inputClass} value={d.secret_key ?? ""} placeholder={d.secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => set(i, { secret_key: e.target.value })} /></Field>
             </div>
           )}
           {d.kind === "folder" && (

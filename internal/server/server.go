@@ -343,6 +343,7 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/cloudflare/discover", s.handleCloudflareDiscover)
 	admin("POST /api/cloudflare/import", s.handleCloudflareImport)
 	admin("GET /api/projects/{id}/cloudflare", s.handleGetCloudflare)
+	admin("GET /api/projects/{id}/cloudflare/remote", s.handleGetCloudflareRemote)
 	admin("POST /api/projects/{id}/cloudflare/refresh", s.handleRefreshCloudflare)
 	admin("PUT /api/settings/ssl", s.handleSetSSL)
 	admin("PUT /api/settings/agent-urls", s.handleSetAgentURLs)

@@ -855,6 +855,7 @@ export const api = {
     request<LoginResult>("POST", "/api/auth/setup", { admin_token, username, password }, null),
   changePassword: (current: string, next: string) => request<void>("POST", "/api/auth/password", { current, new: next }),
   logout: () => request<void>("POST", "/api/auth/logout"),
+  revokeOtherSessions: () => request<void>("POST", "/api/auth/sessions/revoke-others"),
   users: () => request<User[]>("GET", "/api/users"),
   createUser: (u: { username: string; password: string; role: Role }) => request<User>("POST", "/api/users", u),
   updateUser: (id: string, u: { role?: Role; password?: string; disabled?: boolean }) => request<User>("PATCH", `/api/users/${id}`, u),

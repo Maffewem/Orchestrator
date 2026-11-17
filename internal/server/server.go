@@ -268,6 +268,7 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/auth/me", s.handleMe)
 	admin("POST /api/auth/logout", s.handleLogout)
 	admin("POST /api/auth/password", s.handleChangePassword)
+	admin("POST /api/auth/sessions/revoke-others", s.handleRevokeOtherSessions)
 	admin("GET /api/users", s.handleListUsers)
 	admin("POST /api/users", s.handleCreateUser)
 	admin("PATCH /api/users/{id}", s.handleUpdateUser)

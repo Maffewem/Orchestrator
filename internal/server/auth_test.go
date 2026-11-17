@@ -63,6 +63,21 @@ func TestAccounts(t *testing.T) {
 		t.Fatal("logins failed")
 	}
 
+	// "Sign out of other devices" keeps the calling session and ends the rest.
+	_, opOther := login("ops", "operator-pass")
+	if code := h.do("POST", "/api/auth/sessions/revoke-others", opS.Token, nil, nil); code != http.StatusNoContent {
+		t.Fatalf("revoking other sessions: %d", code)
+	}
+	if code := h.do("GET", "/api/auth/me", opS.Token, nil, nil); code != http.StatusOK {
+		t.Fatalf("calling session ended: %d", code)
+	}
+	if code := h.do("GET", "/api/auth/me", opOther.Token, nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("other session survived: %d", code)
+	}
+	if code := h.do("POST", "/api/auth/sessions/revoke-others", adminToken, nil, nil); code != http.StatusBadRequest {
+		t.Fatalf("admin token revoking sessions: %d", code)
+	}
+
 	reg := h.register("pi")
 	var p ProjectView
 	body := map[string]any{"name": "web", "device_id": reg.DeviceID,

@@ -318,7 +318,7 @@ function AlertsBell() {
         aria-expanded={open}
         aria-label={label}
         title={label}
-        className="relative inline-flex size-9 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="relative inline-flex size-9 items-center justify-center rounded-full text-neutral-600 hover:bg-neutral-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
       >
         <Bell className="size-5" />
         {alerts.length > 0 && (
@@ -421,7 +421,7 @@ function UserMenu({ me, onLogout }: { me: Me; onLogout: () => void }) {
         aria-expanded={open}
         aria-label={`Account menu for ${me.username}`}
         title={me.username}
-        className="inline-flex size-9 items-center justify-center rounded-full bg-primary text-sm font-semibold uppercase text-white hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="inline-flex size-9 items-center justify-center rounded-full bg-primary text-sm font-semibold uppercase text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2"
       >
         {me.username.charAt(0) || "?"}
       </button>

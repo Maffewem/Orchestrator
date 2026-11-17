@@ -137,7 +137,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.nextServer()
 			wait = backoff
 		case errors.Is(err, errUnauthorized):
-			// The device was removed from the fleet; join again if we can.
+			// The device was removed from the server; join again if we can.
 			a.log.Warn("agent token rejected, re-registering")
 			// Drop the saved identity too, or ensureRegistered would load the rejected token again.
 			a.state = state{}

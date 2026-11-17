@@ -212,7 +212,7 @@ func (s *Server) sweep(ctx context.Context) {
 		s.log.Error("expire maintenance", "err", err)
 	} else {
 		for _, d := range ended {
-			s.event(ctx, d.ID, "info", "device.maintenance", d.Name+" left maintenance mode (the time set for it ended)")
+			s.event(ctx, d.ID, "info", "device.maintenance", d.Name+" left maintenance mode (the scheduled end time passed)")
 		}
 	}
 	if _, err := s.store.ExpireCommands(ctx, time.Now().Add(-2*time.Minute), time.Now().Add(-30*time.Minute)); err != nil {

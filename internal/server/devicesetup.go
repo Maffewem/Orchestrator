@@ -86,7 +86,7 @@ func (s *Server) applyDeviceSetup(ctx context.Context, d *store.Device, id strin
 	if p.Maintenance {
 		note := p.MaintenanceNote
 		if note == "" {
-			note = "Set up in maintenance mode"
+			note = "Added in maintenance mode"
 		}
 		if err := s.store.SetDeviceMaintenance(ctx, d.ID, true, note, time.Time{}); err != nil {
 			warn("maintenance", err)

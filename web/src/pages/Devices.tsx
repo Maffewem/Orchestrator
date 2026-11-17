@@ -141,11 +141,11 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
       {step === 2 && (
         <div className="space-y-3">
           <Choice on={maintenance} set={setMaintenance} title="Start in maintenance mode">
-            Keeps new workers off the device until you release it, handy while you burn it in or finish configuring it.
+            No new workers will be scheduled on the device until you take it out of maintenance mode. Useful while you test or finish configuring it.
           </Choice>
           {maintenance && (
             <Field label="Note">
-              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Burn-in until Friday" />
+              <input className={inputClass} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Burn-in testing until Friday" />
             </Field>
           )}
           <p className="text-xs text-neutral-500">Backups are set per worker once it exists, so there is nothing to choose here.</p>

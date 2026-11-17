@@ -148,25 +148,23 @@ export default function MetricsDemo() {
       <PageHeader
         title="Worker metrics"
         description="Proposed layout for the Metrics tab. Per-container and per-Cloudflare-worker measurements."
-        actions={
-          <>
-            <div role="group" aria-label="Time range" className="inline-flex rounded-lg border border-neutral-300 bg-white p-0.5 text-sm">
+      />
+      <div className="mb-4 flex items-center gap-2 sm:-mt-2">
+            <div role="group" aria-label="Time range" className="inline-flex flex-1 rounded-lg border border-neutral-300 bg-white p-0.5 text-sm sm:flex-none">
               {RANGES.map((r) => (
-                <button key={r} type="button" onClick={() => pick(r)} aria-pressed={range === r} className={cx("rounded-md px-3 py-1.5", range === r ? "bg-primary text-white" : "text-neutral-600 hover:bg-neutral-50")}>
-                  {r === "24h" ? "Last 24 hours" : r === "7d" ? "Last 7 days" : "Last 30 days"}
+                <button key={r} type="button" onClick={() => pick(r)} aria-pressed={range === r} className={cx("flex-1 rounded-md px-3 py-1.5 sm:flex-none", range === r ? "bg-primary text-white" : "text-neutral-600 hover:bg-neutral-50")}>
+                  <span className="sm:hidden">{r}</span><span className="hidden sm:inline">{r === "24h" ? "Last 24 hours" : r === "7d" ? "Last 7 days" : "Last 30 days"}</span>
                 </button>
               ))}
             </div>
             <RefreshButton onClick={refresh} busy={busy} label="Refresh metrics" />
-          </>
-        }
-      />
+      </div>
       <div role="note" className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm">
         <b>Demo data.</b> Nothing on this page is measured. Figures are generated from a fixed seed so the layout can be reviewed.
       </div>
-      <div className="mb-4 flex flex-wrap gap-1 border-b border-neutral-200">
+      <div className="-mx-4 mb-4 flex gap-1 overflow-x-auto border-b border-neutral-200 px-4 [scrollbar-width:none] sm:mx-0 sm:px-0">
         {SECTIONS.map((s) => (
-          <button key={s.id} type="button" onClick={() => setSection(s.id)} aria-pressed={section === s.id} className={cx("inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm", section === s.id ? "border-primary font-medium text-primary" : "border-transparent text-neutral-600 hover:text-neutral-900")}>
+          <button key={s.id} type="button" onClick={() => setSection(s.id)} aria-pressed={section === s.id} className={cx("inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm", section === s.id ? "border-primary font-medium text-primary" : "border-transparent text-neutral-600 hover:text-neutral-900")}>
             <s.icon className="size-4" />
             {s.label}
           </button>
@@ -176,7 +174,7 @@ export default function MetricsDemo() {
       <div className="space-y-4" aria-busy={busy}>
         {section === "container" && (
           <>
-            <div className="grid gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
               <Tile loading={busy} label="Status" value="Healthy" sub="Health check passing" />
               <Tile loading={busy} label="Uptime" value={`${Math.round(11 + tick)}d 4h`} sub="Since 6 Nov, 09:12" />
               <Tile loading={busy} label="Restarts" value="2" sub="Last: OOM killed, 3 days ago" bad />
@@ -202,7 +200,7 @@ export default function MetricsDemo() {
 
         {section === "proxy" && (
           <>
-            <div className="grid gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
               <Tile loading={busy} label="Requests" value={fmt(reqTotal)} sub={`Through Caddy, ${range}`} />
               <Tile loading={busy} label="Error rate" value="0.8%" sub="5xx responses" />
               <Tile loading={busy} label="Latency p50" value="14 ms" sub="Time to last byte" />
@@ -237,7 +235,7 @@ export default function MetricsDemo() {
 
         {section === "cloudflare" && (
           <>
-            <div className="grid gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
               <Tile loading={busy} label={`Requests, ${range}`} value={fmt(cfTotal)} sub={`${fmt(Math.round(cfTotal * 1.7))} subrequests`} />
               <Tile loading={busy} label="Errors" value="0.4%" sub="Exceptions and 5xx" />
               <Tile loading={busy} label="CPU time p50 / p99" value="1.8 / 9.5 ms" />
@@ -279,7 +277,7 @@ export default function MetricsDemo() {
 
         {section === "deploys" && (
           <>
-            <div className="grid gap-4 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
               <Tile loading={busy} label="Deployments" value={String(d.deploys.reduce((a, b) => a + b, 0))} sub={range} />
               <Tile loading={busy} label="Success rate" value="94%" />
               <Tile loading={busy} label="Median deploy time" value="1 m 12 s" sub="Queued to Verified" />

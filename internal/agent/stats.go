@@ -164,8 +164,8 @@ func (a *Agent) sampleStats(ctx context.Context) *api.StatsReport {
 			continue
 		}
 		cs.Name = c.toAPI().Name
-		if cs.MemLimit == 0 || (devMem > 0 && cs.MemLimit > devMem) {
-			cs.MemLimit = devMem
+		if devMem > 0 && cs.MemLimit >= devMem {
+			cs.MemLimit = 0 // Docker reports the device's memory when no limit is set
 		}
 		rep.Containers = append(rep.Containers, cs)
 	}
@@ -259,16 +259,27 @@ func (a *Agent) proxyStats(ctx context.Context) []api.ProxyHostStats {
 
 // parseCaddyMetrics folds Caddy's Prometheus text output into per-host counters. It reads
 // caddy_http_request_duration_seconds (a histogram labelled by host and code when the Caddyfile
-// turns on per-host metrics) and caddy_http_response_size_bytes_sum.
+// turns on per-host metrics) and caddy_http_response_size_bytes_sum. Caddy counts a request
+// once per instrumented handler, so for each host only the busiest handler (the site's
+// top-level route) is kept.
 func parseCaddyMetrics(r io.Reader) []api.ProxyHostStats {
-	hosts := map[string]*api.ProxyHostStats{}
-	buckets := map[string]map[float64]float64{}
-	get := func(h string) *api.ProxyHostStats {
-		if hosts[h] == nil {
-			hosts[h] = &api.ProxyHostStats{Host: h, Codes: map[string]float64{}}
-			buckets[h] = map[float64]float64{}
+	type acc struct {
+		codes   map[string]float64
+		buckets map[float64]float64
+		bytes   float64
+		total   float64
+	}
+	byHost := map[string]map[string]*acc{} // host -> handler -> counters
+	get := func(host, handler string) *acc {
+		if byHost[host] == nil {
+			byHost[host] = map[string]*acc{}
 		}
-		return hosts[h]
+		a := byHost[host][handler]
+		if a == nil {
+			a = &acc{codes: map[string]float64{}, buckets: map[float64]float64{}}
+			byHost[host][handler] = a
+		}
+		return a
 	}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
@@ -281,40 +292,52 @@ func parseCaddyMetrics(r io.Reader) []api.ProxyHostStats {
 		if !ok {
 			continue
 		}
-		host := labels["host"]
-		if host == "" || strings.HasPrefix(host, "127.0.0.1") || host == "localhost" {
+		host := strings.ToLower(labels["host"])
+		if host == "" || host == "_other" || strings.HasPrefix(host, "127.0.0.1") || host == "localhost" {
 			continue
 		}
 		switch name {
 		case "caddy_http_request_duration_seconds_count":
-			h := get(host)
+			a := get(host, labels["handler"])
+			a.total += value
 			if c := labels["code"]; len(c) == 3 && c[0] >= '1' && c[0] <= '5' {
-				h.Codes[c[:1]+"xx"] += value
+				a.codes[c[:1]+"xx"] += value
 			}
 		case "caddy_http_request_duration_seconds_bucket":
-			get(host)
 			le := labels["le"]
 			if le == "+Inf" {
 				continue
 			}
 			if f, err := strconv.ParseFloat(le, 64); err == nil {
-				buckets[host][f] += value
+				get(host, labels["handler"]).buckets[f] += value
 			}
 		case "caddy_http_response_size_bytes_sum":
-			get(host).Bytes += value
+			get(host, labels["handler"]).bytes += value
 		}
 	}
-	out := make([]api.ProxyHostStats, 0, len(hosts))
-	for h, s := range hosts {
-		les := make([]float64, 0, len(buckets[h]))
-		for le := range buckets[h] {
+	out := make([]api.ProxyHostStats, 0, len(byHost))
+	for h, handlers := range byHost {
+		var best *acc
+		names := make([]string, 0, len(handlers))
+		for n := range handlers {
+			names = append(names, n)
+		}
+		sort.Strings(names) // a stable choice when two handlers tie
+		for _, n := range names {
+			if a := handlers[n]; best == nil || a.total > best.total {
+				best = a
+			}
+		}
+		s := api.ProxyHostStats{Host: h, Codes: best.codes, Bytes: best.bytes}
+		les := make([]float64, 0, len(best.buckets))
+		for le := range best.buckets {
 			les = append(les, le)
 		}
 		sort.Float64s(les)
 		for _, le := range les {
-			s.Buckets = append(s.Buckets, api.ProxyBucket{Le: le, Count: buckets[h][le]})
+			s.Buckets = append(s.Buckets, api.ProxyBucket{Le: le, Count: best.buckets[le]})
 		}
-		out = append(out, *s)
+		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Host < out[j].Host })
 	return out

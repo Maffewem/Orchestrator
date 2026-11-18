@@ -50,6 +50,7 @@ var (
 
 const (
 	settingMetricPrefs = "metricprefs:"
+	settingVolumeSizes = "volsizes:"
 	maxRetentionDays   = 90
 )
 
@@ -211,9 +212,14 @@ func (s *Server) ingestStats(ctx context.Context, d *store.Device, containers []
 	}
 	now := time.Now()
 	if len(rep.Volumes) > 0 {
+		vs := volumeSizes{At: now, Sizes: rep.Volumes}
 		s.wstats.mu.Lock()
-		s.wstats.volumes[d.ID] = volumeSizes{At: now, Sizes: rep.Volumes}
+		s.wstats.volumes[d.ID] = vs
 		s.wstats.mu.Unlock()
+		// Volumes are measured every 30 minutes; keep the last measurement across server restarts.
+		if b, err := json.Marshal(vs); err == nil {
+			s.store.SetSetting(ctx, settingVolumeSizes+d.ID, string(b))
+		}
 	}
 	type job struct {
 		key    string
@@ -253,7 +259,7 @@ func (s *Server) ingestStats(ctx context.Context, d *store.Device, containers []
 			if cs.OOMKilled {
 				s.wstatsEvent(d, "warning", "container.oom", fmt.Sprintf("%s on %s restarted after running out of memory", cs.Name, d.Name))
 			} else {
-				s.wstatsEvent(d, "warning", "container.restarted", fmt.Sprintf("%s on %s restarted (%d restarts so far)", cs.Name, d.Name, cs.Restarts))
+				s.wstatsEvent(d, "warning", "container.restarted", fmt.Sprintf("%s on %s restarted by Docker (restart %d)", cs.Name, d.Name, cs.Restarts))
 			}
 		}
 		if seen && cs.Health == "unhealthy" && prev.Health != "unhealthy" {
@@ -277,7 +283,10 @@ func (s *Server) ingestStats(ctx context.Context, d *store.Device, containers []
 			w.CPU = f64(math.Round(acc.cpuSum/float64(acc.cpuN)*10) / 10)
 		}
 		if pf.on(mMemory) {
-			w.Mem, w.MemLimit = i64(int64(acc.memMax)), i64(int64(cs.MemLimit))
+			w.Mem = i64(int64(acc.memMax))
+			if cs.MemLimit > 0 {
+				w.MemLimit = i64(int64(cs.MemLimit))
+			}
 		}
 		if pf.on(mNetwork) && !cs.HostNetwork {
 			w.NetRx, w.NetTx = f64(counterRate(cs.NetRx, acc.base.NetRx, dt)), f64(counterRate(cs.NetTx, acc.base.NetTx, dt))
@@ -461,7 +470,7 @@ func metricsRange(r *http.Request) (name string, since, step int64) {
 	now := time.Now().Unix()
 	switch r.URL.Query().Get("range") {
 	case "1h":
-		return "1h", now - 3600, 60
+		return "1h", now - 3600, 30
 	case "7d":
 		return "7d", now - 7*86400, 7200
 	case "30d":
@@ -642,6 +651,19 @@ func (s *Server) handleWorkerMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.Restarts, _ = s.store.WorkerRestartsSince(ctx, d.ID, name, since)
+	s.wstats.mu.Lock()
+	_, haveVols := s.wstats.volumes[d.ID]
+	s.wstats.mu.Unlock()
+	if !haveVols {
+		var vs volumeSizes
+		if v, _ := s.store.GetSetting(ctx, settingVolumeSizes+d.ID); v != "" && json.Unmarshal([]byte(v), &vs) == nil {
+			s.wstats.mu.Lock()
+			if _, ok := s.wstats.volumes[d.ID]; !ok {
+				s.wstats.volumes[d.ID] = vs
+			}
+			s.wstats.mu.Unlock()
+		}
+	}
 	s.wstats.mu.Lock()
 	if acc := s.wstats.workers[d.ID+"|"+name]; acc != nil && acc.latestAt > 0 {
 		l := acc.latest

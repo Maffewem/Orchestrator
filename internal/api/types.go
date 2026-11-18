@@ -174,7 +174,7 @@ type ContainerStats struct {
 	// previous sample.
 	CPUPercent float64 `json:"cpu"`
 	MemUsed    uint64  `json:"mem"`
-	MemLimit   uint64  `json:"mem_limit"` // the container's limit, or the device's memory when unlimited
+	MemLimit   uint64  `json:"mem_limit"` // the container's memory limit; 0 when it has none
 	NetRx      uint64  `json:"net_rx"`
 	NetTx      uint64  `json:"net_tx"`
 	// HostNetwork is set for containers on the host network, whose traffic Docker cannot count.

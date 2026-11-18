@@ -538,6 +538,102 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
+// --- Per-worker metrics ---
+
+export type MetricsRange = "1h" | "24h" | "7d" | "30d";
+
+export interface MetricPrefs {
+  metrics: string[];
+  interval: number;
+  retention_days: number;
+}
+
+export interface MetricPrefsView {
+  key: string;
+  cloudflare: boolean;
+  prefs: MetricPrefs;
+  /** Estimated SQLite bytes this worker's history takes at these settings. */
+  storage: number;
+}
+
+export interface WorkerSample {
+  t: number;
+  cpu?: number;
+  mem?: number;
+  mem_limit?: number;
+  net_rx?: number;
+  net_tx?: number;
+  blk_read?: number;
+  blk_write?: number;
+  pids?: number;
+  throttled?: number;
+  restarts?: number;
+}
+
+export interface ProxyPoint {
+  t: number;
+  requests: number;
+  c2xx: number;
+  c3xx: number;
+  c4xx: number;
+  c5xx: number;
+  bytes?: number;
+  p50?: number;
+  p95?: number;
+}
+
+export interface WorkerMetrics {
+  supported: boolean;
+  project_id?: string;
+  prefs: MetricPrefs;
+  range: MetricsRange;
+  step: number;
+  current?: { at: number; cpu: number; mem: number; mem_limit: number; pids: number; restarts: number; health?: string; started_at: number; host_network?: boolean; oom_killed?: boolean };
+  series: WorkerSample[];
+  restarts: number;
+  volumes: { name: string; size: number }[];
+  volumes_at?: string;
+  proxy?: { hosts: string[]; series: ProxyPoint[]; totals: ProxyPoint; p99?: number };
+  proxy_note?: string;
+}
+
+export interface CFPoint {
+  t: number;
+  requests: number;
+  errors: number;
+  subrequests: number;
+  cpu_p50?: number;
+  cpu_p99?: number;
+  wall_p50?: number;
+  wall_p99?: number;
+}
+
+export interface ProjectMetrics {
+  kind: "device" | "compose" | "cloudflare";
+  range: MetricsRange;
+  step: number;
+  workers: { device_id: string; device_name: string; name: string; state: string }[];
+  deployments: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    previews: number;
+    rollbacks: number;
+    median_seconds?: number;
+    p95_seconds?: number;
+    series: { t: number; succeeded: number; failed: number }[];
+  };
+  cloudflare?: {
+    kind: "pages" | "worker";
+    analytics: string;
+    note?: string;
+    series: CFPoint[];
+    totals: CFPoint;
+    by_status: Record<string, number>;
+    by_version: Record<string, number>;
+  };
+}
+
 export async function request<T>(method: string, path: string, body?: unknown, token: string | null | undefined = getToken()): Promise<T> {
   const res = await fetch(path, {
     method,
@@ -883,6 +979,15 @@ export const api = {
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),
   deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
+  workerMetrics: (deviceId: string, name: string, range: MetricsRange) =>
+    request<WorkerMetrics>("GET", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/metrics?range=${range}`),
+  workerMetricPrefs: (deviceId: string, name: string) =>
+    request<MetricPrefsView>("GET", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/metrics/prefs`),
+  setWorkerMetricPrefs: (deviceId: string, name: string, p: MetricPrefs) =>
+    request<MetricPrefsView>("PUT", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/metrics/prefs`, p),
+  projectMetrics: (id: string, range: MetricsRange) => request<ProjectMetrics>("GET", `/api/projects/${id}/metrics?range=${range}`),
+  projectMetricPrefs: (id: string) => request<MetricPrefsView>("GET", `/api/projects/${id}/metrics/prefs`),
+  setProjectMetricPrefs: (id: string, p: MetricPrefs) => request<MetricPrefsView>("PUT", `/api/projects/${id}/metrics/prefs`, p),
   updateDevice: (id: string, patch: { name?: string; labels?: string[]; maintenance?: boolean; maintenance_note?: string; maintenance_hours?: number }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),

@@ -8,6 +8,7 @@ import PowerControls from "../components/PowerControls";
 import { LiveLogs, Shell } from "../components/Streams";
 import { useCan } from "../components/auth";
 import PreviewsPanel from "../components/Previews";
+import { WorkerMetricsTab } from "../components/WorkerMetrics";
 import { Badge, Button, Card, CardHeader, Empty, ErrorNote, Field, Loading, PageHeader, StatusDot, Table, Tabs, Td, inputClass } from "../components/ui";
 import { ago, bytes, pct, usePoll, useTick } from "../lib";
 import WorkerOverview from "./WorkerOverview";
@@ -52,6 +53,7 @@ export default function WorkerPage() {
           items={[
             { to: base, label: "Overview", end: true },
             { to: `${base}/deployments`, label: "Deployments" },
+            { to: `${base}/metrics`, label: "Metrics" },
             { to: `${base}/domains`, label: "Domains" },
             ...(w.project_id ? [{ to: `${base}/previews`, label: "Previews" }] : []),
             { to: `${base}/backups`, label: "Backups" },
@@ -61,6 +63,7 @@ export default function WorkerPage() {
       <Routes>
         <Route index element={<WorkerOverview w={w} addresses={device.data?.host.addresses ?? w.device_addresses} canBackup={!!device.data?.host.capabilities?.includes("backup")} />} />
         <Route path="deployments" element={<Deployments w={w} />} />
+        <Route path="metrics" element={<WorkerMetricsTab deviceId={w.device_id} name={w.name} projectId={w.project_id || undefined} />} />
         <Route
           path="domains"
           element={

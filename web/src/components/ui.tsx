@@ -398,11 +398,14 @@ export function LineChart({
   height = 120,
   max = 100,
   unit = "%",
+  format,
 }: {
   series: { label: string; color: string; values: number[] }[];
   height?: number;
   max?: number;
   unit?: string;
+  /** Formats the latest value in the legend; the default is two decimals plus the unit. */
+  format?: (v: number) => string;
 }) {
   const w = 600;
   const n = Math.max(2, ...series.map((s) => s.values.length));
@@ -432,7 +435,7 @@ export function LineChart({
             <span className="size-2 rounded-full" style={{ background: s.color }} />
             {s.label}
             <span className="font-medium text-neutral-900 tabular-nums">
-              {s.values.length ? `${s.values[s.values.length - 1].toFixed(unit === "%" ? 0 : 2)}${unit}` : "—"}
+              {s.values.length ? (format ? format(s.values[s.values.length - 1]) : `${s.values[s.values.length - 1].toFixed(unit === "%" ? 0 : 2)}${unit}`) : "—"}
             </span>
           </span>
         ))}

@@ -16,7 +16,13 @@ import (
 
 // fakeAgent answers its device's commands the way a healthy agent would.
 func (h *harness) fakeAgent(t *testing.T, reg api.RegisterResponse, containers func() []api.Container, log *[]string, mu *sync.Mutex, stop <-chan struct{}) {
+	done := make(chan struct{})
+	// Wait for the last heartbeat before the test server shuts down; otherwise an in-flight
+	// request is reset during cleanup and fails the test. Cleanups run last-registered first,
+	// so this runs before the harness closes the server (stop is closed by the test's defer).
+	t.Cleanup(func() { <-done })
 	go func() {
+		defer close(done)
 		for {
 			select {
 			case <-stop:

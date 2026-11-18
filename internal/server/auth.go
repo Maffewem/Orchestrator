@@ -131,6 +131,8 @@ func routeRole(pattern string) string {
 		"PUT /api/projects/{id}/previews/settings":           true,
 		"DELETE /api/projects/{id}/previews/{pid}":           true,
 		"DELETE /api/projects/{id}/domains/{did}":            true,
+		"PUT /api/projects/{id}/metrics/prefs":               true,
+		"PUT /api/devices/{id}/workers/{name}/metrics/prefs": true,
 	}
 	adminGets := map[string]bool{
 		"GET /api/settings":                       true,

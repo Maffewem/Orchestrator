@@ -28,7 +28,6 @@ import {
   Toggle,
   inputClass,
   ErrorNote,
-  LineChart,
   Loading,
   StatusDot,
   StatusIcon,
@@ -46,8 +45,8 @@ import PreviewsPanel from "../components/Previews";
 import TunnelPanel from "../components/ProjectTunnel";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
+import { ProjectMetricsTab } from "../components/WorkerMetrics";
 import {
-  CloudflareMetrics,
   CloudflareOverview,
 } from "../components/CloudflareProject";
 import {
@@ -314,7 +313,7 @@ export default function ProjectPage() {
         <Route
           path="metrics"
           element={
-            isCF ? <CloudflareMetrics p={p} /> : <ProjectMetrics p={p} />
+            <ProjectMetricsTab p={p} />
           }
         />
         {canOperate && (
@@ -563,62 +562,6 @@ function ProjectDeployments({ p }: { p: Project }) {
         )}
       </Card>
       {p.source.type === "cloudflare" && <CloudflareHistory p={p} />}
-    </div>
-  );
-}
-
-function ProjectMetrics({ p }: { p: Project }) {
-  const samples = usePoll(() => api.deviceMetrics(p.device_id), 5000, [
-    p.device_id,
-  ]);
-  const deps = usePoll(() => api.projectDeployments(p.id), 15000, [p.id]);
-  const s = samples.data ?? [];
-  const done =
-    deps.data?.filter(
-      (d) => d.status === "succeeded" || d.status === "failed",
-    ) ?? [];
-  const ok = done.filter((d) => d.status === "succeeded").length;
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card className="p-4">
-          <p className="text-xs font-medium text-neutral-500">Deployments</p>
-          <p className="mt-1 text-2xl font-semibold">
-            {deps.data?.length ?? "—"}
-          </p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-medium text-neutral-500">Success rate</p>
-          <p className="mt-1 text-2xl font-semibold">
-            {done.length ? `${Math.round((ok / done.length) * 100)}%` : "—"}
-          </p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs font-medium text-neutral-500">Device</p>
-          <p className="mt-1 truncate text-2xl font-semibold">
-            {p.device_name}
-          </p>
-        </Card>
-      </div>
-      <Card>
-        <CardHeader
-          title="Device resources"
-          subtitle="Live samples from the agent (last hour)."
-        />
-        <div className="p-5">
-          <LineChart
-            series={[
-              { label: "CPU", color: "#0051c3", values: s.map((x) => x.cpu) },
-              {
-                label: "Memory",
-                color: "#f6821f",
-                values: s.map((x) => x.mem),
-              },
-              { label: "Disk", color: "#16794c", values: s.map((x) => x.disk) },
-            ]}
-          />
-        </div>
-      </Card>
     </div>
   );
 }

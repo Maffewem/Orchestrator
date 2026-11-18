@@ -169,7 +169,7 @@ func Open(path string) (*Store, error) {
 	}
 	// SQLite allows one writer; a single connection keeps ":memory:" databases shared too.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + metricsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

@@ -484,7 +484,9 @@ func buildCaddy(base, serverURL string, projects []*store.Project, doms map[stri
 	}
 	sort.Strings(hosts)
 	var b strings.Builder
-	b.WriteString("# Managed by Orchestrator. Changes are overwritten.\n{\n\tadmin off\n}\n")
+	b.WriteString("# Managed by Orchestrator. Changes are overwritten.\n{\n\tadmin off\n\tmetrics {\n\t\tper_host\n\t}\n}\n")
+	// Request counters for the Metrics tab, read by the agent on the same host. Loopback only.
+	b.WriteString("\nhttp://127.0.0.1:2019 {\n\tbind 127.0.0.1\n\tmetrics\n}\n")
 	for _, h := range hosts {
 		fmt.Fprintf(&b, "\n%s {\n", h)
 		entries := sites[h]

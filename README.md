@@ -286,6 +286,9 @@ Admin endpoints need `Authorization: Bearer <admin token>`.
 | `GET /api/overview` | device counts and recent activity |
 | `GET /api/devices`, `GET/PATCH/DELETE /api/devices/{id}` | devices with health and status |
 | `GET /api/devices/{id}/metrics` | the last hour of CPU/memory/disk samples |
+| `GET /api/devices/{id}/workers/{name}/metrics?range=1h\|24h\|7d\|30d` | a container's stored resource and proxy history |
+| `GET /api/projects/{id}/metrics?range=...` | deployment history, and hourly Worker analytics for Cloudflare projects |
+| `GET/PUT /api/projects/{id}/metrics/prefs`, `GET/PUT /api/devices/{id}/workers/{name}/metrics/prefs` | which metrics a worker collects, its sample interval and retention |
 | `POST /api/devices/{id}/commands` | `container.start/stop/restart/logs` |
 | `GET /api/containers` | every container across all devices |
 | `GET/POST /api/projects`, `GET/PATCH/DELETE /api/projects/{id}` | projects |
@@ -391,5 +394,5 @@ lifecycle rule.
 - Docker Compose stacks as a project source
 - GitHub App installation instead of a personal access token
 - Multiple users with roles, and an audit log
-- Long-term metrics storage and alerts (email, webhook, push)
+- Alerts (email, webhook, push) on top of the stored metrics
 - Agent self-update from the dashboard

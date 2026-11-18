@@ -46,8 +46,10 @@ type cfStatus struct {
 	CPUP50      float64 `json:"cpu_p50_us"`
 	CPUP99      float64 `json:"cpu_p99_us"`
 	// Analytics is "ok", "none" (not collected for this kind) or why it could not be read.
-	Analytics string    `json:"analytics"`
-	PolledAt  time.Time `json:"polled_at"`
+	Analytics string `json:"analytics"`
+	// MetricsNote says which hourly figures for the Metrics tab Cloudflare would not give.
+	MetricsNote string    `json:"metrics_note,omitempty"`
+	PolledAt    time.Time `json:"polled_at"`
 	// Alerting is set while an event has been raised for a high error rate, so it is raised once.
 	Alerting bool `json:"alerting,omitempty"`
 }
@@ -85,6 +87,9 @@ func (s *Server) cfPollProject(ctx context.Context, p *store.Project) *cfStatus 
 		s.cfPollPages(ctx, tok, acct, st)
 	} else {
 		s.cfPollWorker(ctx, tok, acct, st)
+		if st.Analytics == "ok" {
+			st.MetricsNote = s.cfCollectWorker(ctx, p, tok, acct, st.Name)
+		}
 	}
 	if tok != "" && acct != "" && st.State != cfStateError && st.State != cfStateMissing {
 		rem := s.cfFetchRemote(ctx, tok, acct, t, st.Name)

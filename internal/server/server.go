@@ -77,6 +77,7 @@ type Server struct {
 	githubAPI     string
 	cloudflareAPI string
 	metrics       *metricsHistory
+	wstats        *workerStats
 	logins        limiter
 	trusted       []*net.IPNet
 	sums          sync.Map // agent binary name -> [stamp, sha256]
@@ -139,7 +140,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.DockerHost == "" {
 		cfg.DockerHost = "unix:///var/run/docker.sock"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted, cfSem: make(chan struct{}, cfMaxConcurrentBuilds)}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), wstats: newWorkerStats(), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted, cfSem: make(chan struct{}, cfMaxConcurrentBuilds)}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 	s.mig.persist = s.persistMigration
 
@@ -186,6 +187,7 @@ func (s *Server) Run(ctx context.Context) {
 	s.recoverCloudflare(ctx)
 	s.recoverMove(ctx)
 	go s.cfMonitorLoop(ctx)
+	go s.metricsPruneLoop(ctx)
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
 	go s.backupLoop(ctx)
@@ -278,6 +280,12 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/devices", s.handleListDevices)
 	admin("GET /api/devices/{id}", s.handleGetDevice)
 	admin("GET /api/devices/{id}/metrics", s.handleDeviceMetrics)
+	admin("GET /api/devices/{id}/workers/{name}/metrics", s.handleWorkerMetrics)
+	admin("GET /api/devices/{id}/workers/{name}/metrics/prefs", s.handleGetWorkerMetricPrefs)
+	admin("PUT /api/devices/{id}/workers/{name}/metrics/prefs", s.handleSetWorkerMetricPrefs)
+	admin("GET /api/projects/{id}/metrics", s.handleProjectMetrics)
+	admin("GET /api/projects/{id}/metrics/prefs", s.handleGetProjectMetricPrefs)
+	admin("PUT /api/projects/{id}/metrics/prefs", s.handleSetProjectMetricPrefs)
 	admin("PATCH /api/devices/{id}", s.handleUpdateDevice)
 	admin("DELETE /api/devices/{id}", s.handleDeleteDevice)
 	admin("POST /api/devices/{id}/commands", s.handleCreateCommand)

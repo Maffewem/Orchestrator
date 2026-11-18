@@ -52,20 +52,54 @@ func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView
 	return v, nil
 }
 
+// seesSecrets reports whether the caller may see environment values: operators and admins,
+// who can change or deploy the project anyway.
+func seesSecrets(r *http.Request) bool {
+	id := identityFrom(r)
+	return id != nil && store.RoleRank(id.Role) >= store.RoleRank(store.RoleOperator)
+}
+
+// maskEnv keeps the names of KEY=value assignments and drops their values (and comments).
+func maskEnv(env []string) []string {
+	out := []string{}
+	for _, e := range store.EnvAssignments(env) {
+		k, _, _ := strings.Cut(e, "=")
+		out = append(out, k+"=")
+	}
+	return out
+}
+
 // forRole hides environment values from viewers: they are secrets (tokens, passwords) that
 // only people who can change or deploy the project need to see.
 func forRole(r *http.Request, v ProjectView) ProjectView {
-	if id := identityFrom(r); id != nil && store.RoleRank(id.Role) >= store.RoleRank(store.RoleOperator) {
+	if seesSecrets(r) {
 		return v
 	}
 	p := *v.Project
-	p.Runtime.Env = []string{}
-	for _, e := range store.EnvAssignments(v.Project.Runtime.Env) {
-		k, _, _ := strings.Cut(e, "=")
-		p.Runtime.Env = append(p.Runtime.Env, k+"=")
-	}
+	p.Runtime.Env = maskEnv(v.Project.Runtime.Env)
 	v.Project = &p
+	v.Latest = deploymentForRole(r, v.Latest)
 	return v
+}
+
+// deploymentForRole hides the environment values a deployment's spec was sent with from
+// viewers, the same way forRole does for the project. The stored deployment is not changed.
+func deploymentForRole(r *http.Request, d *store.Deployment) *store.Deployment {
+	if d == nil || seesSecrets(r) {
+		return d
+	}
+	c := *d
+	if c.Spec.Env != nil {
+		c.Spec.Env = maskEnv(c.Spec.Env)
+	}
+	if c.Spec.Compose != nil {
+		cs := *c.Spec.Compose
+		if cs.Env != nil {
+			cs.Env = maskEnv(cs.Env)
+		}
+		c.Spec.Compose = &cs
+	}
+	return &c
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
@@ -301,9 +335,25 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 	return nil
 }
 
+// errCloudflareAdmin explains why only administrators may set up Cloudflare projects.
+const errCloudflareAdmin = "only administrators can create or change Cloudflare projects, because their builds run on the Orchestrator server itself; operators can still deploy, retry and roll them back"
+
+// mayConfigureCloudflare reports whether the caller may create or change a Cloudflare project.
+// Cloudflare builds run on this server: the install and build commands, the repository's own
+// scripts and the project's environment all execute as the server's user, next to its database
+// and secret key. Letting an operator choose them would let them take over the server.
+func mayConfigureCloudflare(r *http.Request) bool {
+	id := identityFrom(r)
+	return id != nil && id.Role == store.RoleAdmin
+}
+
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	var in projectInput
 	if !decode(w, r, &in) {
+		return
+	}
+	if in.Source.Type == store.SourceCloudflare && !mayConfigureCloudflare(r) {
+		writeError(w, http.StatusForbidden, errCloudflareAdmin)
 		return
 	}
 	if err := s.validateProject(r.Context(), &in); err != nil {
@@ -376,6 +426,11 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	if (p.Source.Type == store.SourceCloudflare || in.Source.Type == store.SourceCloudflare) && !mayConfigureCloudflare(r) {
+		writeError(w, http.StatusForbidden, errCloudflareAdmin)
+		return
+	}
+	oldDevice := p.DeviceID
 	if err := s.validateProject(r.Context(), &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -395,6 +450,9 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.syncProxy(r.Context(), p.DeviceID)
+	if oldDevice != "" && oldDevice != p.DeviceID {
+		s.syncProxy(r.Context(), oldDevice) // drop the project's routes from the device it left
+	}
 	v, err := s.projectView(r.Context(), p)
 	if err != nil {
 		s.internal(w, err)
@@ -548,6 +606,9 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	for i, d := range deps {
+		deps[i] = deploymentForRole(r, d)
+	}
 	writeJSON(w, http.StatusOK, deps)
 }
 
@@ -565,7 +626,7 @@ func (s *Server) lookupDeployment(w http.ResponseWriter, r *http.Request) (*stor
 
 func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 	if d, ok := s.lookupDeployment(w, r); ok {
-		writeJSON(w, http.StatusOK, d)
+		writeJSON(w, http.StatusOK, deploymentForRole(r, d))
 	}
 }
 

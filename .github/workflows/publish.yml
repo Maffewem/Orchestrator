@@ -9,6 +9,14 @@ permissions:
   contents: read
   packages: write
 
+# Builds for one branch run one after another, in push order. Two merges seconds apart used to
+# build in parallel, and whichever finished last won the tag, so an older commit could end up
+# as :dev. A queued run is replaced by a newer one; since each build contains everything
+# before it, skipping an intermediate build never loses a change.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   images:
     runs-on: ubuntu-latest

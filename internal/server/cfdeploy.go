@@ -285,14 +285,27 @@ func (s *Server) cfExecute(ctx context.Context, dep *store.Deployment) (remoteID
 		}
 	}
 
-	env := s.cfBuildEnv(work, cs, dep.Spec.Env)
 	pkg := readPackageJSON(root)
+	ctxDir := strings.Trim(cs.Context, "/")
+
+	// The repository's commands run in a throwaway container, never on this machine.
+	steps.start(cfStepInstall)
+	box, err := s.cfNewBox(ctx, cfBuildEnv(cs, dep.Spec.Env), func(l string) { steps.logf(cfStepInstall, "%s", l) })
+	if err != nil {
+		steps.fail(cfStepInstall, err)
+		return "", "", err
+	}
+	defer box.Close()
+	if err := box.Put(ctx, srcDir); err != nil {
+		err = fmt.Errorf("copying the source into the build container: %w", err)
+		steps.fail(cfStepInstall, err)
+		return "", "", err
+	}
 
 	// Installing
-	steps.start(cfStepInstall)
 	if cmd := installCommand(root, cs.Build.Install, pkg != nil); cmd == "" {
 		steps.skip(cfStepInstall, "No package.json, nothing to install")
-	} else if err := s.cfRun(ctx, steps, cfStepInstall, root, env, cmd); err != nil {
+	} else if err := s.cfRun(ctx, box, steps, cfStepInstall, ctxDir, cmd); err != nil {
 		steps.fail(cfStepInstall, err)
 		return "", "", err
 	} else {
@@ -303,15 +316,20 @@ func (s *Server) cfExecute(ctx context.Context, dep *store.Deployment) (remoteID
 	steps.start(cfStepBuild)
 	if cmd := buildCommand(cs.Build.Build, pkg); cmd == "" {
 		steps.skip(cfStepBuild, "No build command and no build script in package.json")
-	} else if err := s.cfRun(ctx, steps, cfStepBuild, root, env, cmd); err != nil {
+	} else if err := s.cfRun(ctx, box, steps, cfStepBuild, ctxDir, cmd); err != nil {
 		steps.fail(cfStepBuild, err)
 		return "", "", err
 	} else {
 		steps.done(cfStepBuild)
 	}
 
-	// Uploading
+	// Uploading: bring the built tree back first (files only, no node_modules).
 	steps.start(cfStepUpload)
+	if _, err := box.Fetch(ctx, srcDir); err != nil {
+		steps.fail(cfStepUpload, err)
+		return "", "", err
+	}
+	box.Close()
 	remoteID, deployURL, err = s.cfUpload(ctx, steps, tok, acct, cs, dep, root)
 	if err != nil {
 		steps.fail(cfStepUpload, err)

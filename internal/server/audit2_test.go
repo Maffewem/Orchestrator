@@ -100,6 +100,20 @@ func TestOnlyAdminsConfigureCloudflareBuilds(t *testing.T) {
 		t.Fatalf("operator changed the build environment: %d", code)
 	}
 
+	// Previews build pull request branches on the server: only an admin turns them on.
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/previews/settings", operator, map[string]any{"enabled": true, "max": 3}, nil); code != http.StatusForbidden {
+		t.Fatalf("operator turned on Cloudflare previews: %d", code)
+	}
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/previews/settings", adminToken, map[string]any{"enabled": true, "max": 3}, nil); code != http.StatusOK {
+		t.Fatalf("admin previews: %d", code)
+	}
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/previews/settings", operator, map[string]any{"enabled": true, "max": 5}, nil); code != http.StatusOK {
+		t.Fatalf("operator changing the limit of enabled previews: %d", code)
+	}
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/previews/settings", operator, map[string]any{"enabled": false, "max": 5}, nil); code != http.StatusOK {
+		t.Fatalf("operator turning previews off: %d", code)
+	}
+
 	// Turning a device project into a Cloudflare one is refused too.
 	reg := h.register("pi")
 	var img ProjectView

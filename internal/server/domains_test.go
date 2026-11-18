@@ -104,7 +104,7 @@ func TestDomains(t *testing.T) {
 	for _, c := range resp.Commands {
 		file = c.Args["caddyfile"]
 	}
-	if strings.Contains(file, "http://") || strings.Contains(file, "\nblog.example.com {") {
+	if strings.Contains(strings.ReplaceAll(file, "http://127.0.0.1:2019", ""), "http://") || strings.Contains(file, "\nblog.example.com {") {
 		t.Fatalf("toggled caddyfile:\n%s", file)
 	}
 

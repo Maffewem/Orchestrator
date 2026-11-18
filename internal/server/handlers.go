@@ -165,6 +165,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.noteNetworkChanges(ctx, d, req.Host)
 
 	s.metrics.add(d.ID, req.Metrics)
+	s.ingestStats(ctx, d, req.Containers, req.Stats)
 
 	// A server in standby has handed over: it gives out no work, only the new address.
 	if to := s.standby(); to != "" {

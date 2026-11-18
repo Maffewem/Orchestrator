@@ -67,6 +67,7 @@ const (
 	CapTunnelUpdate  = "tunnel-update"  // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
 	CapDiscover      = "discover"       // finds the server again by itself when its address changes
 	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
+	CapStats         = "stats"          // sends per-container StatsReport with heartbeats, and proxy metrics
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -148,6 +149,62 @@ type HeartbeatRequest struct {
 	Host       HostInfo    `json:"host"`
 	Metrics    Metrics     `json:"metrics"`
 	Containers []Container `json:"containers"`
+	// Stats is set when the agent has taken a new per-container sample since the last heartbeat.
+	Stats *StatsReport `json:"stats,omitempty"`
+}
+
+// StatsReport is one per-container resource sample from a device. Counters (network, block
+// I/O, throttling, proxy requests) are cumulative since the container or proxy started; the
+// server turns them into rates.
+type StatsReport struct {
+	Time       int64            `json:"time"` // unix seconds
+	Containers []ContainerStats `json:"containers"`
+	// Volumes maps named volume to its size in bytes. It is only sent when re-measured
+	// (about every 30 minutes), because measuring walks the volume's files.
+	Volumes map[string]int64 `json:"volumes,omitempty"`
+	// Proxy holds the device's Caddy proxy counters per site, when the proxy exposes them.
+	Proxy []ProxyHostStats `json:"proxy,omitempty"`
+}
+
+// ContainerStats is one running container's resource use.
+type ContainerStats struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// CPUPercent is percent of one core (200 means two full cores), measured since the
+	// previous sample.
+	CPUPercent float64 `json:"cpu"`
+	MemUsed    uint64  `json:"mem"`
+	MemLimit   uint64  `json:"mem_limit"` // the container's limit, or the device's memory when unlimited
+	NetRx      uint64  `json:"net_rx"`
+	NetTx      uint64  `json:"net_tx"`
+	// HostNetwork is set for containers on the host network, whose traffic Docker cannot count.
+	HostNetwork bool   `json:"host_network,omitempty"`
+	BlkRead     uint64 `json:"blk_read"`
+	BlkWrite    uint64 `json:"blk_write"`
+	PIDs        uint64 `json:"pids"`
+	// ThrottledNs is the total time the container was held back by its CPU limit.
+	ThrottledNs uint64 `json:"throttled_ns,omitempty"`
+	Restarts    int    `json:"restarts"`
+	StartedAt   int64  `json:"started_at"`       // unix seconds
+	Health      string `json:"health,omitempty"` // healthy, unhealthy, starting, or empty without a health check
+	OOMKilled   bool   `json:"oom_killed,omitempty"`
+}
+
+// ProxyHostStats is Caddy's cumulative request counters for one site address.
+type ProxyHostStats struct {
+	Host string `json:"host"`
+	// Codes counts requests by status class: "2xx", "3xx", "4xx", "5xx".
+	Codes map[string]float64 `json:"codes"`
+	// Buckets is the cumulative request duration histogram: upper bound in seconds to count.
+	Buckets []ProxyBucket `json:"buckets"`
+	// Bytes is the total response size sent.
+	Bytes float64 `json:"bytes"`
+}
+
+// ProxyBucket is one cumulative histogram bucket.
+type ProxyBucket struct {
+	Le    float64 `json:"le"`
+	Count float64 `json:"count"`
 }
 
 type HeartbeatResponse struct {

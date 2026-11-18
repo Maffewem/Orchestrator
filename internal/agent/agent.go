@@ -82,6 +82,8 @@ type Agent struct {
 	abort     context.CancelFunc
 
 	lastCPUTotal, lastCPUIdle uint64
+
+	stats statsState // per-container samples waiting for the next heartbeat
 }
 
 var errUnauthorized = errors.New("control plane rejected the agent token")
@@ -127,6 +129,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.log.Info("agent running", "device", a.state.DeviceID, "server", a.server())
 	go a.worker(ctx)
 	go a.streamLoop(ctx)
+	go a.statsLoop(ctx)
 
 	backoff := time.Second
 	for {
@@ -252,7 +255,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	if err != nil {
 		containers = nil
 	}
-	req := api.HeartbeatRequest{Host: host, Metrics: a.metrics(), Containers: containers}
+	req := api.HeartbeatRequest{Host: host, Metrics: a.metrics(), Containers: containers, Stats: a.takeStats()}
 	var res api.HeartbeatResponse
 	if err := a.post(ctx, "/api/agent/heartbeat", a.state.AgentToken, req, &res); err != nil {
 		return err

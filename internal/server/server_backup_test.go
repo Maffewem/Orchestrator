@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -111,10 +112,20 @@ func TestServerBackupDestinations(t *testing.T) {
 	h := &harness{t: t, srv: srv, st: st}
 	h.ts = newTestServer(t, srv)
 
-	var got struct{ path, auth string }
+	var (
+		gotMu sync.Mutex // the fake S3 runs on the server's goroutines
+		got   struct{ path, auth string }
+	)
+	seen := func() struct{ path, auth string } {
+		gotMu.Lock()
+		defer gotMu.Unlock()
+		return got
+	}
 	s3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
+			gotMu.Lock()
 			got.path, got.auth = r.URL.Path, r.Header.Get("Authorization")
+			gotMu.Unlock()
 			io.Copy(io.Discard, r.Body)
 		}
 		w.WriteHeader(http.StatusOK)
@@ -154,15 +165,15 @@ func TestServerBackupDestinations(t *testing.T) {
 	h.do("POST", "/api/server-backups", adminToken, nil, &b)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(filepath.Join(folder, b.Name)); err == nil && strings.HasSuffix(got.path, b.Name) {
+		if _, err := os.Stat(filepath.Join(folder, b.Name)); err == nil && strings.HasSuffix(seen().path, b.Name) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("copy missing: path=%q", got.path)
+			t.Fatalf("copy missing: path=%q", seen().path)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if !strings.HasPrefix(got.path, "/bk/orch2/") || !strings.Contains(got.auth, "Credential=AK/") {
-		t.Fatalf("s3 request: %+v", got)
+	if g := seen(); !strings.HasPrefix(g.path, "/bk/orch2/") || !strings.Contains(g.auth, "Credential=AK/") {
+		t.Fatalf("s3 request: %+v", g)
 	}
 }

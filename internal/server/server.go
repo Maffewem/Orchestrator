@@ -79,6 +79,7 @@ type Server struct {
 	metrics       *metricsHistory
 	wstats        *workerStats
 	logins        limiter
+	gateOK        gateCache // recently verified worker-login credentials; see auth.go
 	trusted       []*net.IPNet
 	sums          sync.Map // agent binary name -> [stamp, sha256]
 	cfdMu         sync.Mutex

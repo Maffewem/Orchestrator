@@ -5,6 +5,7 @@ import EnvEditor from "../components/EnvEditor";
 import { normalizeEnv } from "../env";
 import { Button, ChipInput, ErrorNote, Field, Toggle, inputClass } from "../components/ui";
 import { cx, usePoll } from "../lib";
+import { useCan } from "../components/auth";
 
 const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
 
@@ -64,6 +65,8 @@ export default function ProjectForm({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Cloudflare builds run on the server, so only admins may set them up or change them.
+  const isAdmin = useCan("admin");
   const [tab, setTab] = useState<"production" | "preview">("production");
   const saved = usePoll(() => (initial ? api.projectPreviews(initial.id) : Promise.resolve(null)), 0, [initial?.id]);
   const [previewsPick, setPreviewsPick] = useState<boolean | null>(null);
@@ -108,7 +111,9 @@ export default function ProjectForm({
             { type: "image" as const, icon: Package, title: "Container image", sub: "Pull an image from Docker Hub or any registry" },
             { type: "compose" as const, icon: Layers, title: "Compose stack", sub: "Paste a docker-compose file that runs several services together" },
             { type: "cloudflare" as const, icon: Cloud, title: "Cloudflare", sub: "Build here, deploy to Cloudflare Pages or Workers. No device needed" },
-          ].map((o) => (
+          ]
+            .filter((o) => o.type !== "cloudflare" || isAdmin || source.type === "cloudflare")
+            .map((o) => (
             <button
               type="button"
               key={o.type}
@@ -480,8 +485,11 @@ export default function ProjectForm({
       </fieldset>
 
       {error && <ErrorNote>{error}</ErrorNote>}
+      {isCF && !isAdmin && (
+        <p className="text-sm text-neutral-500">Only administrators can change Cloudflare projects, because their builds run on the Orchestrator server itself.</p>
+      )}
       <div className="flex justify-end">
-        <Button variant="primary" loading={busy} disabled={!device && !isCF}>
+        <Button variant="primary" loading={busy} disabled={(!device && !isCF) || (isCF && !isAdmin)}>
           {submitLabel}
         </Button>
       </div>

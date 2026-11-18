@@ -413,6 +413,12 @@ func (s *Server) handleSetPreviewSettings(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "keep between 1 and 20 previews")
 		return
 	}
+	// Previews of a Cloudflare project build every pull request branch on this server, so
+	// turning them on is an administrator's decision, like the project's build settings.
+	if p.Source.Type == store.SourceCloudflare && req.Enabled && !s.previewSettings(r.Context(), p.ID).Enabled && !mayConfigureCloudflare(r) {
+		writeError(w, http.StatusForbidden, "only administrators can turn on previews for Cloudflare projects, because their builds run on the Orchestrator server itself")
+		return
+	}
 	if req.Enabled && p.Source.Type == store.SourceGitHub {
 		d, err := s.store.GetDevice(r.Context(), p.DeviceID)
 		if err != nil {

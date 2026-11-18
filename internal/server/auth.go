@@ -567,7 +567,16 @@ func (s *Server) handleGateVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	name, pw, ok := r.BasicAuth()
 	if ok {
+		// Browsers send the credentials with every request to the worker, and Caddy asks here
+		// each time. Checking the password hash on each one would cost a full key derivation per
+		// page asset, so a success is remembered for a short while.
+		if u := s.gateOK.check(r.Context(), s.store, name, pw); u != nil {
+			w.Header().Set("X-Orchestrator-User", u.Username)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if u, msg := s.verifyLogin(r.Context(), r, "gate", name, pw); u != nil {
+			s.gateOK.remember(name, pw, u)
 			w.Header().Set("X-Orchestrator-User", u.Username)
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -619,4 +628,61 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	s.store.DeleteUserSessions(r.Context(), u.ID)
 	s.store.CreateSession(r.Context(), keep, u.ID, s.sessionLifetime(r.Context()))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- worker login cache ---
+
+const (
+	gateCacheTTL = time.Minute
+	gateCacheMax = 1024
+)
+
+// gateCache remembers credentials that passed the worker login recently, keyed by a hash of
+// the username and password. An entry only counts while the account is still enabled and its
+// password hash is the one it was verified against, so a changed password or a disabled
+// account takes effect at once.
+type gateCache struct {
+	mu      sync.Mutex
+	entries map[string]gateEntry
+}
+
+type gateEntry struct {
+	userID, passwordHash string
+	expires              time.Time
+}
+
+func gateKey(name, pw string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(name)) + "\x00" + pw))
+	return string(sum[:])
+}
+
+func (c *gateCache) remember(name, pw string, u *store.User) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil || len(c.entries) >= gateCacheMax {
+		c.entries = map[string]gateEntry{}
+	}
+	c.entries[gateKey(name, pw)] = gateEntry{userID: u.ID, passwordHash: u.PasswordHash, expires: time.Now().Add(gateCacheTTL)}
+}
+
+func (c *gateCache) check(ctx context.Context, st *store.Store, name, pw string) *store.User {
+	key := gateKey(name, pw)
+	c.mu.Lock()
+	e, ok := c.entries[key]
+	if ok && time.Now().After(e.expires) {
+		delete(c.entries, key)
+		ok = false
+	}
+	c.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	u, err := st.UserByName(ctx, strings.ToLower(strings.TrimSpace(name)))
+	if err != nil || u == nil || u.Disabled || u.ID != e.userID || u.PasswordHash != e.passwordHash {
+		c.mu.Lock()
+		delete(c.entries, key)
+		c.mu.Unlock()
+		return nil
+	}
+	return u
 }

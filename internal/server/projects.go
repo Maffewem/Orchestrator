@@ -30,10 +30,13 @@ type ProjectView struct {
 	Latest     *store.Deployment `json:"latest_deployment"`
 	// Cloudflare is what the monitor last saw of a Cloudflare project.
 	Cloudflare *cfStatus `json:"cloudflare,omitempty"`
+	// HostAccess lists the host-level options the project uses (host folder mounts, host
+	// networking, Compose files). Only an administrator can change them.
+	HostAccess []string `json:"host_access,omitempty"`
 }
 
 func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView, error) {
-	v := ProjectView{Project: p}
+	v := ProjectView{Project: p, HostAccess: hostAccessOf(p.Source, p.Runtime)}
 	if p.Source.Type == store.SourceCloudflare {
 		v.DeviceName = "Cloudflare"
 		v.Cloudflare = s.cfStatusOf(ctx, p.ID)
@@ -360,6 +363,10 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !hostAccessAllowed(r, nil, hostAccessOf(in.Source, in.Runtime)) {
+		writeError(w, http.StatusForbidden, errHostAccessAdmin)
+		return
+	}
 	if d, _ := s.store.GetDevice(r.Context(), in.DeviceID); d != nil && d.Maintenance {
 		writeError(w, http.StatusConflict, errMaintenance(d).Error())
 		return
@@ -422,6 +429,8 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Taken before decoding: decoding into the copy below can overwrite slices shared with p.
+	hadHostAccess := hostAccessOf(p.Source, p.Runtime)
 	in := projectInput{Name: p.Name, DeviceID: p.DeviceID, Source: p.Source, Runtime: p.Runtime}
 	if !decode(w, r, &in) {
 		return
@@ -433,6 +442,10 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	oldDevice := p.DeviceID
 	if err := s.validateProject(r.Context(), &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !hostAccessAllowed(r, hadHostAccess, hostAccessOf(in.Source, in.Runtime)) {
+		writeError(w, http.StatusForbidden, errHostAccessAdmin)
 		return
 	}
 	if in.DeviceID != p.DeviceID {

@@ -4,17 +4,21 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Maffewem/Orchestrator/internal/agent"
 	"github.com/Maffewem/Orchestrator/internal/api"
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
@@ -209,6 +213,15 @@ func (f *cfFake) connect(h *harness) {
 	h.srv.githubAPI = f.gh.URL
 	h.srv.cfWait = time.Millisecond
 	h.srv.cfg.BuildDir = f.t.TempDir()
+	h.srv.cfBoxer = testBox
+	if img := os.Getenv("ORCH_TEST_BUILD_IMAGE"); img != "" {
+		// Run the same tests against a real Docker engine and the real sandbox.
+		d, err := agent.NewDocker("unix:///var/run/docker.sock")
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		h.srv.docker, h.srv.cfg.BuildImage, h.srv.cfBoxer = d, img, nil
+	}
 	h.srv.cfVerifyURL = func(string) string { return f.cf.URL + "/site-live" }
 }
 
@@ -570,8 +583,7 @@ func TestExtractTarballSkipsEscapesAndLinks(t *testing.T) {
 
 func TestBuildEnvHidesServerSecrets(t *testing.T) {
 	t.Setenv("ORCH_ADMIN_TOKEN", "super-secret")
-	h := newHarness(t)
-	env := h.srv.cfBuildEnv(t.TempDir(), &api.CloudflareSpec{Branch: "main", SHA: "abc"}, []string{"A=1"})
+	env := cfBuildEnv(&api.CloudflareSpec{Branch: "main", SHA: "abc"}, []string{"A=1"})
 	for _, e := range env {
 		if strings.Contains(e, "super-secret") || strings.HasPrefix(e, "ORCH_") {
 			t.Errorf("server secret leaked into the build environment: %s", e)
@@ -648,6 +660,99 @@ func TestCloudflareDiscoversAndImportsExisting(t *testing.T) {
 	for _, x := range found {
 		if x.Name == "blog" && x.Imported != "blog" {
 			t.Fatalf("blog should be marked imported: %+v", x)
+		}
+	}
+}
+
+// testBox stands in for the Docker sandbox: it runs commands with sh in the source directory,
+// with only the environment it was given, so the tests exercise the build flow without Docker.
+func testBox(_ context.Context, env []string, _ func(string)) (cfBox, error) {
+	return &hostBox{env: env}, nil
+}
+
+type hostBox struct {
+	env []string
+	dir string
+}
+
+func (b *hostBox) Put(_ context.Context, src string) error    { b.dir = src; return nil }
+func (b *hostBox) Close()                                     {}
+func (b *hostBox) Fetch(context.Context, string) (int, error) { return 0, nil }
+func (b *hostBox) Exec(ctx context.Context, dir, command string, out io.Writer) (int, error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = filepath.Join(b.dir, dir)
+	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, b.env...)
+	cmd.Stdout, cmd.Stderr = out, out
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode(), nil
+	}
+	return 0, err
+}
+
+func TestCloudflareBuildFailsWithoutDockerInsteadOfRunningOnHost(t *testing.T) {
+	f := newCFFake(t)
+	h := newHarness(t)
+	f.connect(h)
+	h.srv.cfBoxer = nil // the real sandbox
+	h.srv.docker = nil
+	_, err := h.srv.cfNewBox(context.Background(), nil, func(string) {})
+	if err == nil || !strings.Contains(err.Error(), "was not run on the server itself") {
+		t.Fatalf("want a clear refusal, got %v", err)
+	}
+}
+
+func TestSandboxHasNoHostAccess(t *testing.T) {
+	// The container settings are fixed in agent.SandboxStart; this guards the server's side:
+	// the environment is only what the build sets.
+	env := cfBuildEnv(&api.CloudflareSpec{Branch: "b", SHA: "s"}, nil)
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") || strings.Contains(e, "TOKEN") || strings.HasPrefix(e, "ORCH_") {
+			t.Errorf("unexpected variable %q", e)
+		}
+	}
+}
+
+// With ORCH_TEST_BUILD_IMAGE set (and a Docker engine on /var/run/docker.sock) this builds a project
+// whose commands try to look at the host and the server, and checks they cannot.
+func TestRealSandboxIsolation(t *testing.T) {
+	if os.Getenv("ORCH_TEST_BUILD_IMAGE") == "" {
+		t.Skip("set ORCH_TEST_BUILD_IMAGE to run against Docker")
+	}
+	t.Setenv("ORCH_ADMIN_TOKEN", "super-secret-admin")
+	t.Setenv("ORCH_SECRET_KEY", strings.Repeat("ab", 32))
+	f := newCFFake(t)
+	h := newHarness(t)
+	f.connect(h)
+	probe := "mkdir -p dist && { echo \"user=$(id -u)\"; env | sort; ls -la /var/run/docker.sock 2>&1; ls /proc/1/root >/dev/null 2>&1; cat /etc/hostname >/dev/null; touch /etc/pwned 2>&1; mount | grep -c ' /host' ; ls " + t.TempDir() + " 2>&1; echo 'fork'; } > dist/index.html 2>&1; cat dist/index.html; test -f /etc/hostname"
+	project := map[string]any{
+		"name": "iso", "device_id": "x",
+		"source": map[string]any{"type": "cloudflare", "repo": "o/site", "branch": "main",
+			"cloudflare": map[string]any{"kind": "pages"}, "node": map[string]any{"build": probe}},
+		"runtime": map[string]any{"env": []string{"MY_BUILD_VAR=ok"}},
+	}
+	var p ProjectView
+	if code := h.do("POST", "/api/projects", adminToken, project, &p); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	h.do("PUT", "/api/settings/cloudflare/deploy", adminToken, map[string]string{"account_id": "acct", "token": "deploytok"}, nil)
+	var dep store.Deployment
+	h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, &dep)
+	dep = waitDeployment(t, h, dep.ID)
+	log := dep.Steps[2].Log
+	t.Logf("status=%s\n%s", dep.Status, log)
+	if dep.Status != store.DeploymentSucceeded {
+		t.Fatalf("%s %s", dep.Status, dep.Error)
+	}
+	for _, bad := range []string{"super-secret", "ORCH_", "user=0", "docker.sock\n-"} {
+		if strings.Contains(log, bad) {
+			t.Errorf("build output contains %q", bad)
+		}
+	}
+	for _, want := range []string{"user=1000", "MY_BUILD_VAR=ok", "No such file or directory", "Permission denied", "CF_PAGES=1"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("build output lacks %q", want)
 		}
 	}
 }

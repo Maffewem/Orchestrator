@@ -52,6 +52,9 @@ type cfStatus struct {
 	PolledAt    time.Time `json:"polled_at"`
 	// Alerting is set while an event has been raised for a high error rate, so it is raised once.
 	Alerting bool `json:"alerting,omitempty"`
+	// OtherKind is set when Cloudflare also has a resource of the other kind (a Pages project
+	// for a Worker, or the reverse) under this name, so the type may have been picked wrongly.
+	OtherKind string `json:"other_kind,omitempty"`
 }
 
 func (s *Server) cfStatusOf(ctx context.Context, projectID string) *cfStatus {
@@ -89,6 +92,20 @@ func (s *Server) cfPollProject(ctx context.Context, p *store.Project) *cfStatus 
 		s.cfPollWorker(ctx, tok, acct, st)
 		if st.Analytics == "ok" {
 			st.MetricsNote = s.cfCollectWorker(ctx, p, tok, acct, st.Name)
+		}
+	}
+	if tok != "" && acct != "" && st.State != cfStateError {
+		other := cfOtherKind(t.Kind)
+		exists, err := s.cfKindExists(ctx, tok, acct, other, st.Name)
+		if err == nil && exists && st.State == cfStateMissing {
+			// Nothing of this kind is deployed under the name, but the other kind is: the project was
+			// set up with the wrong type. Switch it and read it again as the right one.
+			if s.cfSwitchKind(ctx, p, other) == nil {
+				s.event(ctx, "", "info", "cloudflare.kind", fmt.Sprintf("%s: Cloudflare has a %s named %s and no %s, so the project now tracks the %s", p.Name, other, st.Name, t.Kind, other))
+				return s.cfPollProject(ctx, p)
+			}
+		} else if err == nil && exists {
+			st.OtherKind = other
 		}
 	}
 	if tok != "" && acct != "" && st.State != cfStateError && st.State != cfStateMissing {
@@ -359,4 +376,75 @@ func cfHTTPStatus(err error) int {
 		return ce.Status
 	}
 	return 0
+}
+
+func cfOtherKind(kind string) string {
+	if kind == api.CloudflarePages {
+		return api.CloudflareWorker
+	}
+	return api.CloudflarePages
+}
+
+// cfKindExists says whether Cloudflare has a resource of this kind with this name.
+func (s *Server) cfKindExists(ctx context.Context, tok, acct, kind, name string) (bool, error) {
+	var err error
+	if kind == api.CloudflarePages {
+		_, err = s.cfGetPagesProject(ctx, tok, acct, name)
+	} else {
+		_, err = s.cfWorkerDeployments(ctx, tok, acct, name)
+	}
+	if cfNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// cfSwitchKind changes a project's Cloudflare type and drops what was stored under the old one.
+func (s *Server) cfSwitchKind(ctx context.Context, p *store.Project, kind string) error {
+	if p.Source.Cloudflare == nil {
+		return errors.New("this project is not deployed to Cloudflare")
+	}
+	if name := cfNameOf(p); name != p.Name {
+		p.Source.Cloudflare.Name = name
+	}
+	p.Source.Cloudflare.Kind = kind
+	if kind == api.CloudflarePages {
+		p.Source.Cloudflare.CompatibilityDate = ""
+	}
+	if err := s.store.UpdateProject(ctx, p); err != nil {
+		return err
+	}
+	s.store.SetSetting(ctx, settingCFStatus+p.ID, "")
+	s.store.SetSetting(ctx, settingCFRemote+p.ID, "")
+	return nil
+}
+
+// handleSetCloudflareKind changes a Cloudflare project between Pages and Workers.
+func (s *Server) handleSetCloudflareKind(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.lookupProject(w, r)
+	if !ok {
+		return
+	}
+	if p.Source.Type != store.SourceCloudflare || p.Source.Cloudflare == nil {
+		writeError(w, http.StatusBadRequest, "this project is not deployed to Cloudflare")
+		return
+	}
+	var req struct {
+		Kind string `json:"kind"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Kind != api.CloudflarePages && req.Kind != api.CloudflareWorker {
+		writeError(w, http.StatusBadRequest, "the Cloudflare type must be Pages or Workers")
+		return
+	}
+	if req.Kind != p.Source.Cloudflare.Kind {
+		if err := s.cfSwitchKind(r.Context(), p, req.Kind); err != nil {
+			s.internal(w, err)
+			return
+		}
+		s.event(r.Context(), "", "info", "cloudflare.kind", fmt.Sprintf("%s now tracks a Cloudflare %s", p.Name, req.Kind))
+	}
+	writeJSON(w, http.StatusOK, s.cfPollProject(r.Context(), p))
 }

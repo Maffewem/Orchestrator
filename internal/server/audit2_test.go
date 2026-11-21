@@ -218,3 +218,24 @@ func TestGateCacheFollowsAccountChanges(t *testing.T) {
 		t.Fatalf("disabled account still accepted from the cache: %d", code)
 	}
 }
+
+// Renaming a Cloudflare project in the dashboard must keep it pointed at the Cloudflare project
+// it deployed to, so the monitor does not treat that project as new.
+func TestRenamingCloudflareProjectKeepsItsCloudflareName(t *testing.T) {
+	f := newCFFake(t)
+	h := newHarness(t)
+	f.connect(h)
+	var p ProjectView
+	body := map[string]any{"name": "site", "source": map[string]any{"type": "cloudflare", "repo": "o/site", "branch": "main",
+		"cloudflare": map[string]any{"kind": "pages"}}}
+	if code := h.do("POST", "/api/projects", adminToken, body, &p); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	body["name"] = "renamed"
+	if code := h.do("PATCH", "/api/projects/"+p.ID, adminToken, body, &p); code != http.StatusOK {
+		t.Fatalf("rename: %d", code)
+	}
+	if p.Source.Cloudflare == nil || p.Source.Cloudflare.Name != "site" {
+		t.Fatalf("Cloudflare name after rename: %+v", p.Source.Cloudflare)
+	}
+}

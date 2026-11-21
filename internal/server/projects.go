@@ -431,6 +431,13 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	oldDevice := p.DeviceID
+	// Renaming a Cloudflare project must not orphan what it deployed: Cloudflare names the
+	// project, not the dashboard, so keep pointing at the old name unless one was set on purpose.
+	if p.Source.Type == store.SourceCloudflare && in.Source.Type == store.SourceCloudflare &&
+		in.Source.Cloudflare != nil && in.Source.Cloudflare.Name == "" && in.Name != p.Name &&
+		serviceName(in.Name) != cfNameOf(p) {
+		in.Source.Cloudflare.Name = cfNameOf(p)
+	}
 	if err := s.validateProject(r.Context(), &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

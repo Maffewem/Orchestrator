@@ -203,6 +203,29 @@ export function CloudflareMetrics({ p }: { p: Project }) {
         {canOperate && <RefreshButton onClick={refresh} busy={busy} label="Refresh metrics" />}
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
+      {st?.other_kind && canOperate && (
+        <Card className="flex flex-wrap items-center gap-3 p-4 text-sm text-neutral-700">
+          <span className="min-w-0 flex-1">
+            This project is tracked as a Cloudflare {worker ? "Worker" : "Pages project"}, but Cloudflare also has a {st.other_kind === "pages" ? "Pages project" : "Worker"} named <b>{st.name}</b>. If that is the one you meant, switch the type.
+          </span>
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await api.setCloudflareKind(p.id, st.other_kind!);
+                window.location.reload();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+                setBusy(false);
+              }
+            }}
+          >
+            Switch to {st.other_kind === "pages" ? "Pages" : "Worker"}
+          </Button>
+        </Card>
+      )}
       <div className="grid gap-4 sm:grid-cols-3">
         {tile("Deployments", String(total ?? "—"))}
         {tile("Success rate", done.length ? `${Math.round((ok / done.length) * 100)}%` : "—")}

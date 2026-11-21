@@ -144,6 +144,8 @@ export interface CloudflareStatus {
   cpu_p99_us: number;
   /** "ok", "none" (not collected for Pages) or why it could not be read. */
   analytics: string;
+  /** Set when Cloudflare also has a resource of the other kind under this name. */
+  other_kind?: "pages" | "worker";
   polled_at: string;
 }
 
@@ -1020,6 +1022,7 @@ export const api = {
   migration: (id: string) => request<Migration>("GET", `/api/projects/${id}/migration`),
   cloudflareStatus: (id: string) => request<CloudflareStatus | null>("GET", `/api/projects/${id}/cloudflare`),
   cloudflareRemote: (id: string) => request<CloudflareRemote | null>("GET", `/api/projects/${id}/cloudflare/remote`),
+  setCloudflareKind: (id: string, kind: "pages" | "worker") => request<CloudflareStatus>("PUT", `/api/projects/${id}/cloudflare/kind`, { kind }),
   refreshCloudflare: (id: string) => request<CloudflareStatus>("POST", `/api/projects/${id}/cloudflare/refresh`),
   setCloudflareDeploy: (accountId: string, token?: string) =>
     request<{ pages?: boolean; workers?: boolean }>("PUT", "/api/settings/cloudflare/deploy", { account_id: accountId, token: token ?? "" }),

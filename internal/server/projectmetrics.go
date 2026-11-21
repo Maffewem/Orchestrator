@@ -84,7 +84,10 @@ func percentile(sorted []float64, q float64) *float64 {
 	return &v
 }
 
-func (s *Server) deploymentStats(ctx context.Context, projectID string, since, step int64) (deployStats, error) {
+// deploymentStats counts the project's deployments in the range. For a Cloudflare project it also
+// counts the history Cloudflare holds (rem), so an imported project that was deployed elsewhere
+// shows its real history; a deployment made here is not counted twice.
+func (s *Server) deploymentStats(ctx context.Context, projectID string, since, step int64, rem *cfRemote) (deployStats, error) {
 	st := deployStats{Series: []deployPoint{}}
 	deps, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: projectID, Preview: "*", Limit: 500})
 	if err != nil {
@@ -92,7 +95,11 @@ func (s *Server) deploymentStats(ctx context.Context, projectID string, since, s
 	}
 	buckets := map[int64]*deployPoint{}
 	var durations []float64
+	known := map[string]bool{}
 	for _, d := range deps {
+		if d.RemoteID != "" {
+			known[d.RemoteID] = true
+		}
 		at := d.CreatedAt.Unix()
 		if at < since {
 			continue
@@ -120,6 +127,33 @@ func (s *Server) deploymentStats(ctx context.Context, projectID string, since, s
 			buckets[b].Failed++
 		}
 	}
+	if rem != nil {
+		for _, d := range rem.Deployments {
+			t, err := time.Parse(time.RFC3339, d.CreatedAt)
+			if err != nil || known[d.ID] || t.Unix() < since {
+				continue
+			}
+			ok := d.Status == "success" || d.Status == "active"
+			if !ok && d.Status != "failure" {
+				continue // still building, or canceled: neither a success nor a failure
+			}
+			st.Total++
+			if d.Environment == "preview" {
+				st.Previews++
+			}
+			b := (t.Unix() / step) * step
+			if buckets[b] == nil {
+				buckets[b] = &deployPoint{Time: b}
+			}
+			if ok {
+				st.Succeeded++
+				buckets[b].Succeeded++
+			} else {
+				st.Failed++
+				buckets[b].Failed++
+			}
+		}
+	}
 	for _, p := range buckets {
 		st.Series = append(st.Series, *p)
 	}
@@ -138,7 +172,11 @@ func (s *Server) handleProjectMetrics(w http.ResponseWriter, r *http.Request) {
 	rng, since, step := metricsRange(r)
 	v := projectMetricsView{Kind: "device", Range: rng, Step: step, Workers: []projectWorker{}}
 	var err error
-	if v.Deployments, err = s.deploymentStats(ctx, p.ID, since, step); err != nil {
+	var rem *cfRemote
+	if p.Source.Type == store.SourceCloudflare {
+		rem = s.cfRemoteOf(ctx, p.ID)
+	}
+	if v.Deployments, err = s.deploymentStats(ctx, p.ID, since, step, rem); err != nil {
 		s.internal(w, err)
 		return
 	}
@@ -181,11 +219,20 @@ func (s *Server) cloudflareMetrics(ctx context.Context, p *store.Project, since,
 		v.Note = st.MetricsNote
 	}
 	if v.Kind != api.CloudflareWorker {
+		v.Note = "Cloudflare keeps no request analytics for Pages projects in its API; see Web Analytics in the Cloudflare dashboard for traffic."
 		return v, nil
 	}
 	rows, err := s.store.CFSamples(ctx, p.ID, since)
 	if err != nil {
 		return nil, err
+	}
+	if len(rows) == 0 {
+		switch {
+		case v.Analytics != "ok":
+			// handleProjectMetrics shows the reason carried in Analytics.
+		case v.Note == "":
+			v.Note = "Cloudflare reports no Worker invocations in this range. Requests answered directly from static assets, or served by a Pages project, are not counted as invocations."
+		}
 	}
 	// Hourly rows go into buckets of step seconds; percentiles are weighted by requests.
 	type agg struct {

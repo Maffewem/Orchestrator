@@ -472,8 +472,12 @@ func (s *Server) cfRemoteWorker(ctx context.Context, tok, acct, name string, r *
 	if err := s.cfCall(ctx, tok, http.MethodGet, fmt.Sprintf("/accounts/%s/workers/domains?service=%s", acct, url.QueryEscape(name)), nil, &doms); err != nil {
 		r.Notes["domains"] = cfWhyDenied(err, "Account > Workers Scripts > Read")
 	}
+	if len(doms) == 0 && r.Notes["domains"] == "" {
+		// Some accounts ignore the service filter or answer it empty; list them all and match here.
+		s.cfCall(ctx, tok, http.MethodGet, fmt.Sprintf("/accounts/%s/workers/domains", acct), nil, &doms)
+	}
 	for _, d := range doms {
-		if d.Service == "" || d.Service == name {
+		if d.Service == name {
 			r.Domains = append(r.Domains, cfRemoteDomain{Host: d.Hostname, Kind: "custom-domain", Status: "active", Detail: d.Zone})
 		}
 	}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -175,5 +176,32 @@ func TestCloudflarePagesHistoryPreviewsAndMissingPermissions(t *testing.T) {
 	h.do("GET", "/api/projects/"+id+"/cloudflare/remote", adminToken, nil, &rem)
 	if !strings.Contains(rem.Notes["deployments"], "not allowed") || len(rem.Deployments) != 0 || rem.Settings == nil {
 		t.Fatalf("notes: %+v settings: %+v", rem.Notes, rem.Settings)
+	}
+}
+
+func TestCloudflareMetricsCountImportedHistoryAndFixWrongType(t *testing.T) {
+	f := newCFFake(t)
+	f.pagesProjects["blog"] = "trunk"
+	h := newHarness(t)
+	f.connect(h)
+	h.do("PUT", "/api/settings/cloudflare/deploy", adminToken, map[string]string{"account_id": "acct", "token": "deploytok"}, nil)
+	var res []cfImportResult
+	h.do("POST", "/api/cloudflare/import", adminToken, map[string]any{"items": []map[string]string{{"kind": "pages", "name": "blog"}}}, &res)
+	var projects []ProjectView
+	h.do("GET", "/api/projects", adminToken, nil, &projects)
+	id := projects[0].ID
+	var rem cfRemote
+	h.do("GET", "/api/projects/"+id+"/cloudflare/remote", adminToken, nil, &rem)
+
+	st, err := h.srv.deploymentStats(context.Background(), id, 0, 3600, &rem)
+	if err != nil || st.Total != 3 || st.Succeeded != 2 || st.Failed != 1 || st.Previews != 2 {
+		t.Fatalf("history from Cloudflare should be counted: %+v %v", st, err)
+	}
+
+	// Marking the project as a Worker, which does not exist, corrects itself to Pages.
+	var cs cfStatus
+	h.do("PUT", "/api/projects/"+id+"/cloudflare/kind", adminToken, map[string]string{"kind": "worker"}, &cs)
+	if cs.Kind != "pages" || cs.State != cfStateLive {
+		t.Fatalf("wrong type should switch back: %+v", cs)
 	}
 }

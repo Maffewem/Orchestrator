@@ -923,7 +923,28 @@ async function exportServerCopy(password: string) {
   URL.revokeObjectURL(url);
 }
 
+export interface ClusterPolicy {
+  failover: boolean;
+  allowed?: string[];
+  fail_back: boolean;
+  start_empty: boolean;
+}
+export interface ClusterView {
+  config: { enabled: boolean; grace_seconds: number };
+  workers: {
+    project_id: string;
+    name: string;
+    device_id: string;
+    device: string;
+    policy: ClusterPolicy;
+    last_failover?: { from_name: string; to_name: string; at: string; with_data: boolean; home: boolean };
+  }[];
+}
+
 export const api = {
+  cluster: () => request<ClusterView>("GET", "/api/cluster"),
+  setCluster: (c: { enabled: boolean; grace_seconds: number }) => request<ClusterView["config"]>("PUT", "/api/cluster", c),
+  setClusterPolicy: (id: string, p: ClusterPolicy) => request<ClusterPolicy>("PUT", `/api/projects/${id}/cluster`, p),
   serverMove: () => request<MoveView>("GET", "/api/server-move"),
   startServerMove: (b: { device_id: string; port: number; address: string; old_url: string }) => request<MoveView>("POST", "/api/server-move", b),
   switchServerMove: () => request<MoveView>("POST", "/api/server-move/switch"),

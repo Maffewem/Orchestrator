@@ -18,6 +18,7 @@ import BackupsPage from "./pages/Backups";
 import UpdatesPage from "./pages/Updates";
 import WorkerPage from "./pages/Worker";
 import ActivityPage from "./pages/Activity";
+import ClusterPage from "./pages/Cluster";
 import SettingsPage from "./pages/Settings";
 import { Empty } from "./components/ui";
 
@@ -128,6 +129,7 @@ export default function App() {
           <Route path="devices" element={<DevicesPage />} />
           <Route path="devices/:id/*" element={<DevicePage />} />
           <Route path="containers" element={<ContainersPage />} />
+          <Route path="cluster" element={<ClusterPage />} />
           <Route path="backups" element={<BackupsPage />} />
           <Route path="workers/:deviceId/:name/*" element={<WorkerPage />} />
           <Route path="updates" element={<UpdatesPage />} />

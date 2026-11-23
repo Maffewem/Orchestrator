@@ -89,6 +89,7 @@ type Server struct {
 	mig           migrations
 	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
 	migratePoll   time.Duration // test hook; 2s when zero
+	cluster       clusterState
 	moveTick      time.Duration // test hook: how often a server move polls; 2s when zero
 	moveFrozen    atomic.Bool   // a server move is under way: dashboard changes are paused
 	standbyTo     atomic.Pointer[string]
@@ -222,6 +223,7 @@ func (s *Server) sweep(ctx context.Context) {
 			s.event(ctx, d.ID, "info", "device.maintenance", d.Name+" left maintenance mode (the scheduled end time passed)")
 		}
 	}
+	s.clusterSweep(ctx)
 	if _, err := s.store.ExpireCommands(ctx, time.Now().Add(-2*time.Minute), time.Now().Add(-30*time.Minute)); err != nil {
 		s.log.Error("expire commands", "err", err)
 	}
@@ -325,6 +327,9 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
 	admin("POST /api/projects/{id}/migrate", s.handleMigrateProject)
 	admin("GET /api/projects/{id}/migration", s.handleGetMigration)
+	admin("GET /api/cluster", s.handleGetCluster)
+	admin("PUT /api/cluster", s.handleSetCluster)
+	admin("PUT /api/projects/{id}/cluster", s.handleSetClusterPolicy)
 	admin("GET /api/projects/{id}/deployments", s.handleListDeployments)
 	admin("GET /api/deployments", s.handleListDeployments)
 	admin("GET /api/deployments/{id}", s.handleGetDeployment)

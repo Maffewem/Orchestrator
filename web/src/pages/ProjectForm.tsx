@@ -6,6 +6,7 @@ import { normalizeEnv } from "../env";
 import { Button, ChipInput, ErrorNote, Field, Toggle, inputClass } from "../components/ui";
 import { cx, usePoll } from "../lib";
 import { useCan } from "../components/auth";
+import { confirmDialog } from "../components/dialogs";
 
 const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
 
@@ -80,18 +81,47 @@ export default function ProjectForm({
   const cfTarget = source.cloudflare ?? { kind: "pages" as const };
   const setCF = (patch: Partial<NonNullable<Source["cloudflare"]>>) => setSource((s) => ({ ...s, cloudflare: { ...(s.cloudflare ?? { kind: "pages" as const }), ...patch } }));
 
+  const renamedCF = !!initial && initial.source.type === "cloudflare" && isCF && name.trim() !== initial.name;
+
   const device = deviceId || devices.data?.[0]?.id || "";
   const set = (patch: Partial<Source>) => setSource((s) => ({ ...s, ...patch }));
   const node = source.node;
   const setNode = (patch: Partial<NodeBuild>) => setSource((s) => ({ ...s, node: { ...s.node, ...patch } }));
 
+  // Host folder mounts, host networking and Compose files give a container control of the
+  // device, so only admins may add or change them. The server enforces this too.
+  const hostMounts = lines(volumes).filter((v) => !/^[A-Za-z0-9][A-Za-z0-9_.-]*:/.test(v));
+  const keptMounts = new Set((initial?.runtime.volumes ?? []).filter((v) => !/^[A-Za-z0-9][A-Za-z0-9_.-]*:/.test(v)));
+  const addsHostMount = hostMounts.some((v) => !keptMounts.has(v));
+  const composeChanged =
+    source.type === "compose" &&
+    (initial?.source.type !== "compose" ||
+      (source.compose ?? "") !== (initial.source.compose ?? "") ||
+      (source.repo ?? "") !== (initial.source.repo ?? "") ||
+      (source.compose_file ?? "") !== (initial.source.compose_file ?? ""));
+  const hostBlocked = !isAdmin && (addsHostMount || composeChanged);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setError(null);
+    // The Cloudflare project is found by name. Renaming here does not rename it there.
+    let src = source;
+    if (renamedCF) {
+      const keep = initial!.source.cloudflare?.name || initial!.name;
+      const ok = await confirmDialog({
+        title: "Rename the dashboard project?",
+        message: `This only changes the name here. The Cloudflare ${cfTarget.kind === "pages" ? "Pages project" : "Worker"} is still called "${keep}" and cannot be renamed from the dashboard. ` +
+          `If the names no longer match, the link breaks and "${keep}" shows up as a new project to import.` +
+          (cfTarget.name ? "" : ` To prevent that, the dashboard will keep pointing at "${keep}".`),
+        confirmLabel: "Rename",
+      });
+      if (!ok) return;
+      if (!cfTarget.name) src = { ...source, cloudflare: { ...cfTarget, name: keep } };
+    }
+    setBusy(true);
     try {
       await onSubmit(
-        { name: name.trim(), device_id: isCF ? "" : device, source, runtime: { ports: lines(ports), web_port: webPort.trim(), env: normalizeEnv(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), env: normalizeEnv(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
     } catch (err) {
@@ -113,6 +143,7 @@ export default function ProjectForm({
             { type: "cloudflare" as const, icon: Cloud, title: "Cloudflare", sub: "Build here, deploy to Cloudflare Pages or Workers. No device needed" },
           ]
             .filter((o) => o.type !== "cloudflare" || isAdmin || source.type === "cloudflare")
+            .filter((o) => o.type !== "compose" || isAdmin || source.type === "compose")
             .map((o) => (
             <button
               type="button"
@@ -440,6 +471,11 @@ export default function ProjectForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Project name" hint={source.type === "compose" ? "Lowercase letters, digits and dashes. Also the Compose project name." : "Lowercase letters, digits and dashes. Also used as the container name."}>
             <input className={inputClass} placeholder="my-service" value={name} onChange={(e) => setName(e.target.value)} />
+            {renamedCF && (
+              <p className="mt-1.5 text-sm text-amber-700">
+                Changing this doesn't rename the Cloudflare project. Keep the Cloudflare name below as it is, or the link breaks and the old project appears as a new one to import.
+              </p>
+            )}
           </Field>
           {!isCF && (<Field label="Device">
             <select className={inputClass} value={device} onChange={(e) => setDeviceId(e.target.value)}>
@@ -478,6 +514,11 @@ export default function ProjectForm({
         <Field label="Volumes" hint="One per line: name:/path for a named volume, /host/path:/path for a folder, add :ro for read-only. Existing data stays when the container is recreated.">
           <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
         </Field>
+        {!isAdmin && (
+          <p className="text-sm text-neutral-500">
+            Only administrators can mount host folders (a /path source), because that gives the container access to the device itself. Named volumes are fine.
+          </p>
+        )}
         </>)}
         <Field as="div" label="Environment variables" hint={isCF ? "Set while the build runs, so VITE_* style variables are baked into the site. They are not set on a deployed Worker." : source.type === "compose" ? "Fills the ${VAR} references in the compose file. They are not passed to the containers unless the file lists them under environment." : node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
           <EnvEditor value={env} onChange={setEnv} />
@@ -485,11 +526,17 @@ export default function ProjectForm({
       </fieldset>
 
       {error && <ErrorNote>{error}</ErrorNote>}
+      {hostBlocked && (
+        <p className="text-sm text-neutral-500">
+          Only administrators can add or change host folder mounts and Compose files, because they give containers control of the device. Remove the host folder
+          {source.type === "compose" ? " or leave the Compose file as it was" : ""} to save.
+        </p>
+      )}
       {isCF && !isAdmin && (
         <p className="text-sm text-neutral-500">Only administrators can change Cloudflare projects, because their builds run on the Orchestrator server itself.</p>
       )}
       <div className="flex justify-end">
-        <Button variant="primary" loading={busy} disabled={(!device && !isCF) || (isCF && !isAdmin)}>
+        <Button variant="primary" loading={busy} disabled={(!device && !isCF) || (isCF && !isAdmin) || hostBlocked}>
           {submitLabel}
         </Button>
       </div>

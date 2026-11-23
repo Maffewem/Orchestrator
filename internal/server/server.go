@@ -52,6 +52,8 @@ type Config struct {
 	// CloudflareInterval is how often Cloudflare Pages and Workers projects are checked on.
 	// Zero uses the default of 2 minutes; negative disables it.
 	CloudflareInterval time.Duration
+	// BuildImage is the image Cloudflare builds run in (default node:22-bookworm-slim).
+	BuildImage string
 	// BuildDir is where Cloudflare projects are built (default: the system temp directory).
 	BuildDir string
 	// BackupDir holds container backup archives.
@@ -109,6 +111,7 @@ type Server struct {
 	polled        map[string]string    // project ID -> last commit SHA the poller acted on
 
 	// Cloudflare deployments are built by the server itself.
+	cfBoxer     cfBoxFactory        // nil: a Docker container; tests replace it
 	cfRuns      sync.Map            // deployment ID -> cancel func of the build carrying it out
 	cfLocks     sync.Map            // "kind/name" -> *sync.Mutex, one build per Cloudflare target at a time
 	cfSem       chan struct{}       // limits concurrent builds

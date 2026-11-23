@@ -3,6 +3,7 @@ package agent
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -37,11 +38,16 @@ func TestCopyPrefixed(t *testing.T) {
 	w.WriteHeader(&tar.Header{Name: "data/", Typeflag: tar.TypeDir, Mode: 0o755})
 	w.WriteHeader(&tar.Header{Name: "data/a.txt", Mode: 0o644, Size: 2})
 	w.Write([]byte("hi"))
+	w.WriteHeader(&tar.Header{Name: "data/backups/", Typeflag: tar.TypeDir, Mode: 0o755})
+	w.WriteHeader(&tar.Header{Name: "data/backups/old.tar.gz", Mode: 0o644, Size: 3})
+	w.Write([]byte("big"))
+	w.WriteHeader(&tar.Header{Name: "data/backups-keep.txt", Mode: 0o644, Size: 1})
+	w.Write([]byte("x"))
 	w.Close()
 
 	var out bytes.Buffer
 	ow := tar.NewWriter(&out)
-	if err := copyPrefixed(ow, &src, "mounts/0/"); err != nil {
+	if err := copyPrefixed(ow, &src, "mounts/0/", "/", []string{"/data/backups"}); err != nil {
 		t.Fatal(err)
 	}
 	ow.Close()
@@ -54,7 +60,7 @@ func TestCopyPrefixed(t *testing.T) {
 		}
 		names = append(names, h.Name)
 	}
-	if strings.Join(names, ",") != "mounts/0/data/,mounts/0/data/a.txt" {
+	if strings.Join(names, ",") != "mounts/0/data/,mounts/0/data/a.txt,mounts/0/data/backups-keep.txt" {
 		t.Fatalf("%v", names)
 	}
 }
@@ -82,7 +88,7 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 		exec.Command("docker", "volume", "rm", "-f", name+"-vol").Run()
 	})
 	id := sh("run", "-d", "--name", name, "-v", name+"-vol:/data", "alpine:3.20", "sh", "-c",
-		"mkdir -p /data/sub && echo original > /data/sub/file.txt && sleep 300")
+		"mkdir -p /data/sub /data/backups && echo original > /data/sub/file.txt && echo old > /data/backups/old.tar.gz && touch /data/backups/.orchestrator-no-backup && sleep 300")
 	time.Sleep(time.Second)
 
 	var archive []byte
@@ -111,11 +117,25 @@ func TestBackupRestoreRoundTrip(t *testing.T) {
 	a.state.AgentToken = "tok"
 	ctx := context.Background()
 
-	if err := a.backup(ctx, id, "bkp_1"); err != nil {
+	if err := a.backup(ctx, id, "bkp_1", "/data/backups"); err != nil {
 		t.Fatal(err)
 	}
 	if len(archive) == 0 {
 		t.Fatal("nothing uploaded")
+	}
+	if gz, err := gzip.NewReader(bytes.NewReader(archive)); err != nil {
+		t.Fatal(err)
+	} else {
+		tr := tar.NewReader(gz)
+		for {
+			h, err := tr.Next()
+			if err != nil {
+				break
+			}
+			if strings.Contains(h.Name, "backups") {
+				t.Fatalf("backup folder should be excluded, found %s", h.Name)
+			}
+		}
 	}
 	sh("exec", name, "sh", "-c", "echo changed > /data/sub/file.txt && echo extra > /data/new.txt")
 	if err := a.restoreBackup(ctx, id, "bkp_1"); err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Maffewem/Orchestrator/internal/api"
 	"io"
 	"net/http"
 	"net/url"
@@ -96,7 +97,7 @@ func backupMounts(inspect json.RawMessage) ([]backupMount, string, error) {
 
 // backup builds the archive and streams it to the control plane as it goes, so nothing is
 // staged on the device's (often small) SD card.
-func (a *Agent) backup(ctx context.Context, containerID, backupID string) error {
+func (a *Agent) backup(ctx context.Context, containerID, backupID, exclude string) error {
 	inspect, err := a.docker.InspectRaw(ctx, containerID)
 	if err != nil {
 		return err
@@ -106,8 +107,9 @@ func (a *Agent) backup(ctx context.Context, containerID, backupID string) error 
 		return err
 	}
 
+	skip := a.backupExcludes(ctx, containerID, mounts, exclude)
 	pr, pw := io.Pipe()
-	go func() { pw.CloseWithError(a.writeArchive(ctx, pw, containerID, name, inspect, mounts)) }()
+	go func() { pw.CloseWithError(a.writeArchive(ctx, pw, containerID, name, inspect, mounts, skip)) }()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.server()+"/api/agent/backups/"+url.PathEscape(backupID), pr)
 	if err != nil {
@@ -131,7 +133,7 @@ func (a *Agent) backup(ctx context.Context, containerID, backupID string) error 
 	return nil
 }
 
-func (a *Agent) writeArchive(ctx context.Context, w io.Writer, containerID, name string, inspect json.RawMessage, mounts []backupMount) error {
+func (a *Agent) writeArchive(ctx context.Context, w io.Writer, containerID, name string, inspect json.RawMessage, mounts []backupMount, skip []string) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
 
@@ -154,7 +156,7 @@ func (a *Agent) writeArchive(ctx context.Context, w io.Writer, containerID, name
 		} else if err != nil {
 			return fmt.Errorf("read %s: %w", m.Destination, err)
 		}
-		err = copyPrefixed(tw, body, "mounts/"+strconv.Itoa(m.Index)+"/")
+		err = copyPrefixed(tw, body, "mounts/"+strconv.Itoa(m.Index)+"/", path.Dir(m.Destination), skip)
 		body.Close()
 		if err != nil {
 			return fmt.Errorf("archive %s: %w", m.Destination, err)
@@ -166,8 +168,49 @@ func (a *Agent) writeArchive(ctx context.Context, w io.Writer, containerID, name
 	return gz.Close()
 }
 
-// copyPrefixed re-emits every entry of src under prefix.
-func copyPrefixed(tw *tar.Writer, src io.Reader, prefix string) error {
+// backupExcludes returns the container paths to leave out of a backup. The server names its own
+// backup folder (newline-separated); it is only skipped when it lies inside a backed-up mount and
+// carries the marker file the server puts there, so an unrelated container that merely has a
+// folder of the same name is backed up in full.
+func (a *Agent) backupExcludes(ctx context.Context, containerID string, mounts []backupMount, list string) []string {
+	var out []string
+	for _, p := range strings.Split(list, "\n") {
+		p = path.Clean(strings.TrimSpace(p))
+		if p == "." || p == "/" {
+			continue
+		}
+		inside := false
+		for _, m := range mounts {
+			if p == m.Destination || strings.HasPrefix(p, strings.TrimSuffix(m.Destination, "/")+"/") {
+				inside = true
+			}
+		}
+		if !inside {
+			continue
+		}
+		resp, err := a.docker.do(ctx, http.MethodHead, "/containers/"+containerID+"/archive", url.Values{"path": {path.Join(p, api.NoBackupMarker)}}, nil, "")
+		if err != nil {
+			continue
+		}
+		resp.Body.Close()
+		out = append(out, p)
+		a.log.Info("backup: skipping the server's own backup folder", "path", p)
+	}
+	return out
+}
+
+func excluded(full string, skip []string) bool {
+	for _, p := range skip {
+		if full == p || strings.HasPrefix(full, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// copyPrefixed re-emits every entry of src under prefix. Entries whose container path (base joined
+// with the entry name) lies under one of skip are dropped.
+func copyPrefixed(tw *tar.Writer, src io.Reader, prefix, base string, skip []string) error {
 	tr := tar.NewReader(src)
 	for {
 		h, err := tr.Next()
@@ -175,6 +218,9 @@ func copyPrefixed(tw *tar.Writer, src io.Reader, prefix string) error {
 			return nil
 		} else if err != nil {
 			return err
+		}
+		if len(skip) > 0 && excluded(path.Join(base, strings.TrimSuffix(h.Name, "/")), skip) {
+			continue
 		}
 		h.Name = prefix + h.Name
 		if h.Typeflag == tar.TypeLink {

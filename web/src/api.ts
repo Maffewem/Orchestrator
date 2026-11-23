@@ -809,7 +809,7 @@ export interface HTTPSView {
 
 export interface BackupDest {
   id: string;
-  kind: "s3" | "folder" | "device";
+  kind: "s3" | "folder" | "device" | "rclone";
   name: string;
   enabled: boolean;
   endpoint?: string;
@@ -821,6 +821,8 @@ export interface BackupDest {
   secret_set?: boolean;
   path?: string;
   device_id?: string;
+  rclone_conf?: string;
+  remote?: string;
   last_at?: string;
   last_error?: string;
 }

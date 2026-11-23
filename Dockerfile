@@ -26,6 +26,9 @@ RUN set -e; for t in amd64:amd64: arm64:arm64: armv7:arm:7 armv6:arm:6; do \
 
 RUN mkdir -p /out/data
 
+# rclone serves the cloud storage backup destinations (Google Drive, Dropbox, OneDrive and more).
+FROM rclone/rclone:1.76.0 AS rclone
+
 # Node.js and npm are in the final image because Cloudflare Pages and Workers projects are built here.
 FROM node:22-alpine3.22
 ARG VERSION=dev
@@ -33,6 +36,7 @@ LABEL org.opencontainers.image.version=$VERSION
 # CA certificates come from the build stage so this image builds without network access.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=build /out/orchestrator-server /usr/local/bin/
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=build /out/downloads /downloads
 COPY --from=build --chown=10001:10001 /out/data /data
 USER 10001

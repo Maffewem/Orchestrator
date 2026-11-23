@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
@@ -26,7 +27,7 @@ const settingBackupDests = "server_backup_destinations"
 
 type BackupDest struct {
 	ID      string `json:"id"`
-	Kind    string `json:"kind"` // s3 | folder | device
+	Kind    string `json:"kind"` // s3 | folder | device | rclone
 	Name    string `json:"name"`
 	Enabled bool   `json:"enabled"`
 
@@ -39,6 +40,9 @@ type BackupDest struct {
 
 	Path     string `json:"path,omitempty"`      // folder on the server, or on the device
 	DeviceID string `json:"device_id,omitempty"` // device kind
+
+	RcloneConf string `json:"rclone_conf,omitempty"` // rclone kind: the remote's config section (holds tokens)
+	Remote     string `json:"remote,omitempty"`      // rclone kind: remote name; defaults to the first section
 
 	LastAt    *time.Time `json:"last_at,omitempty"`
 	LastError string     `json:"last_error,omitempty"`
@@ -66,8 +70,8 @@ func (s *Server) saveBackupDests(ctx context.Context, d []BackupDest) error {
 func (s *Server) destViews(ctx context.Context) []destView {
 	out := []destView{}
 	for _, d := range s.backupDests(ctx) {
-		v := destView{BackupDest: d, SecretSet: d.SecretKey != ""}
-		v.SecretKey = ""
+		v := destView{BackupDest: d, SecretSet: d.SecretKey != "" || d.RcloneConf != ""}
+		v.SecretKey, v.RcloneConf = "", ""
 		out = append(out, v)
 	}
 	return out
@@ -89,6 +93,13 @@ func (d BackupDest) validate() error {
 	case "device":
 		if d.DeviceID == "" || !path.IsAbs(d.Path) {
 			return errors.New("pick a device and an absolute folder path on it")
+		}
+	case "rclone":
+		if err := validateRcloneConf(d.RcloneConf); err != nil {
+			return err
+		}
+		if _, err := exec.LookPath(rcloneBinary()); err != nil {
+			return errors.New("rclone is not installed on the server. The official image includes it; otherwise install rclone or set ORCH_RCLONE")
 		}
 	default:
 		return errors.New("unknown destination type")
@@ -126,6 +137,9 @@ func (s *Server) handleSetBackupDests(w http.ResponseWriter, r *http.Request) {
 		if o, ok := old[d.ID]; ok {
 			if d.SecretKey == "" {
 				d.SecretKey = o.SecretKey
+			}
+			if d.RcloneConf == "" {
+				d.RcloneConf = o.RcloneConf
 			}
 			d.LastAt, d.LastError = o.LastAt, o.LastError
 		}
@@ -188,6 +202,8 @@ func (s *Server) testDest(ctx context.Context, d BackupDest) error {
 		return os.Remove(filepath.Join(d.Path, probe))
 	case "device":
 		return s.deviceReady(ctx, d.DeviceID)
+	case "rclone":
+		return s.rcloneTest(ctx, d, probe, tmp.Name())
 	}
 	return errors.New("unknown destination type")
 }
@@ -273,6 +289,8 @@ func (s *Server) sendToDest(ctx context.Context, d BackupDest, name, src string,
 		}
 		pruneFolder(d.Path, keep)
 		return nil
+	case "rclone":
+		return s.rcloneSend(ctx, d, name, src, keep)
 	case "device":
 		if err := s.deviceReady(ctx, d.DeviceID); err != nil {
 			return err

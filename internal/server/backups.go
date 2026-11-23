@@ -18,6 +18,23 @@ import (
 // maxBackupBytes caps one uploaded backup archive.
 const maxBackupBytes = 50 << 30
 
+// minFreeForBackup is the free space the server insists on before it queues a backup.
+const minFreeForBackup = 512 << 20
+
+// prepareBackupDir creates the backup directory and drops a marker file in it. When a container
+// that holds this directory (the Orchestrator server itself) is backed up, an agent that sees the
+// marker leaves the directory out, so backups never contain earlier backups.
+func (s *Server) prepareBackupDir() error {
+	if err := os.MkdirAll(s.cfg.BackupDir, 0o700); err != nil {
+		return err
+	}
+	marker := filepath.Join(s.cfg.BackupDir, api.NoBackupMarker)
+	if _, err := os.Stat(marker); err != nil {
+		return os.WriteFile(marker, []byte("Orchestrator backups are stored here. Container backups skip this folder so they do not grow with every backup.\n"), 0o600)
+	}
+	return nil
+}
+
 func (s *Server) backupPath(id string) string { return filepath.Join(s.cfg.BackupDir, id+".tar.gz") }
 
 // backupFile is where a backup lives: password-protected ones get their own extension so a
@@ -73,14 +90,17 @@ func (s *Server) createBackup(ctx context.Context, d *store.Device, c *api.Conta
 	if !hasCap(d, api.CapBackup) {
 		return nil, errAgentTooOld(d, "backups")
 	}
-	if err := os.MkdirAll(s.cfg.BackupDir, 0o700); err != nil {
+	if err := s.prepareBackupDir(); err != nil {
 		return nil, err
+	}
+	if free, err := freeBytes(s.cfg.BackupDir); err == nil && free < minFreeForBackup {
+		return nil, fmt.Errorf("not enough free disk space on the server to store a backup (%s free in %s). Delete old backups or free some space", humanSize(int64(free)), s.cfg.BackupDir)
 	}
 	b := &store.Backup{DeviceID: d.ID, DeviceName: d.Name, ContainerName: c.Name, Image: c.Image, Source: source}
 	if err := s.store.CreateBackup(ctx, b); err != nil {
 		return nil, err
 	}
-	if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionBackup, c.ID, map[string]string{"backup_id": b.ID}); err != nil {
+	if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionBackup, c.ID, map[string]string{"backup_id": b.ID, "exclude": s.cfg.BackupDir}); err != nil {
 		return nil, err
 	}
 	s.event(ctx, d.ID, "info", "backup.queued", fmt.Sprintf("Backup of %s queued (%s)", c.Name, source))
@@ -249,7 +269,7 @@ func (s *Server) handleUploadBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "backup is not waiting for data")
 		return
 	}
-	if err := os.MkdirAll(s.cfg.BackupDir, 0o700); err != nil {
+	if err := s.prepareBackupDir(); err != nil {
 		s.internal(w, err)
 		return
 	}
@@ -278,8 +298,14 @@ func (s *Server) handleUploadBackup(w http.ResponseWriter, r *http.Request) {
 		err = cerr
 	}
 	if err != nil {
+		if isNoSpace(err) {
+			msg := "the server ran out of disk space while storing this backup. Free some space (delete old backups) or move the backup folder to a larger disk"
+			s.store.FinishBackup(r.Context(), b.ID, 0, msg)
+			writeError(w, http.StatusInsufficientStorage, msg)
+			return
+		}
 		s.store.FinishBackup(r.Context(), b.ID, 0, "upload failed: "+err.Error())
-		writeError(w, http.StatusBadRequest, "upload failed")
+		writeError(w, http.StatusBadRequest, "upload failed: "+err.Error())
 		return
 	}
 	b.Encrypted = pw != ""

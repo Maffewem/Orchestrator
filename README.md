@@ -358,9 +358,17 @@ Docker's `--restart unless-stopped` brings the server back on it, keeping the ol
 `<db>.pre-restore`. Worker data is not included; use the Backups page for that.
 
 Server backups can also be copied to destinations: an S3 compatible bucket (AWS, R2, B2, MinIO),
-a folder on the server (bind-mount a NAS share there), or a folder on another device. Folders and
-devices keep the same number of copies as the local retention; expire S3 objects with a bucket
-lifecycle rule.
+a folder on the server (bind-mount a NAS share there), a folder on another device, or cloud
+storage (Google Drive, Dropbox, OneDrive and others, through the rclone binary bundled in the
+server image). For cloud storage, run `rclone config` once on any computer, then paste the output
+of `rclone config show <remote>` into the destination; the server renews the sign-in itself.
+Folders, devices and cloud storage keep the same number of copies as the local retention; expire
+S3 objects with a bucket lifecycle rule.
+
+Container backups of the Orchestrator server itself leave out the server's own backup folder
+(marked with `.orchestrator-no-backup`), so they do not grow with every backup. Agents older than
+this change still include it; update them. The server also refuses to queue a backup when under
+512 MiB is free, and reports "ran out of disk space" instead of a generic upload error.
 
 ## Sign-in and HTTPS
 

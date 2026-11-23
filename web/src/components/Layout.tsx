@@ -214,7 +214,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-neutral-200 bg-white/90 px-4 backdrop-blur sm:px-6">
+          <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-neutral-200 bg-white px-4 sm:px-6">
             <button
               className="-ml-1 hidden rounded-md p-1.5 text-neutral-600 hover:bg-neutral-100 lg:block"
               onClick={toggleRail}
@@ -247,7 +247,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
       </div>
       <nav
         aria-label="Main"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-neutral-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
         {tabBar.map(({ to, label, icon: Icon, end }) => (
           <NavLink

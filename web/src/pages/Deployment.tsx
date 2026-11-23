@@ -309,7 +309,7 @@ function LogView({ d, projectName }: { d: Deployment; projectName: string }) {
 
   return (
     <div className="relative border-t border-neutral-200 bg-neutral-50">
-      <div className="sticky top-14 z-10 flex flex-wrap items-center justify-end gap-2 px-4 pt-3 sm:px-8">
+      <div className="sticky top-14 z-10 flex flex-wrap items-center justify-end gap-2 bg-neutral-50 px-4 pb-2 pt-3 sm:px-8">
         <input
           type="search"
           value={find}

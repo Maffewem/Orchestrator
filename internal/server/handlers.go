@@ -24,6 +24,9 @@ type DeviceView struct {
 	Proxy string `json:"proxy"`
 	// Link is how the agent reaches this server: https | http | unknown.
 	Link string `json:"agent_link"`
+	// NetworkNotice is a change to the device's addresses or to the address it reaches the server
+	// at, shown until someone acknowledges it.
+	NetworkNotice *NetNotice `json:"network_notice,omitempty"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
@@ -40,8 +43,9 @@ func (s *Server) view(d *store.Device) DeviceView {
 			v.Health = level
 		}
 	}
-	if n := s.netNotes.get(d.ID); n != "" {
-		raise("warning", n)
+	if n, ok := s.netNote(d.ID); ok {
+		v.NetworkNotice = &n
+		raise("warning", n.Message)
 	}
 	if d.Host.Docker == nil || d.Host.Docker.Error != "" {
 		raise("warning", "Docker engine is unreachable")

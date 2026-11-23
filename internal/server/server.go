@@ -288,6 +288,7 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/projects/{id}/metrics/prefs", s.handleGetProjectMetricPrefs)
 	admin("PUT /api/projects/{id}/metrics/prefs", s.handleSetProjectMetricPrefs)
 	admin("PATCH /api/devices/{id}", s.handleUpdateDevice)
+	admin("POST /api/devices/{id}/network-notice/ack", s.handleAckNetNotice)
 	admin("DELETE /api/devices/{id}", s.handleDeleteDevice)
 	admin("POST /api/devices/{id}/commands", s.handleCreateCommand)
 	admin("GET /api/containers", s.handleListContainers)

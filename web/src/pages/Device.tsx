@@ -58,7 +58,7 @@ export default function DevicePage() {
         />
       </div>
       <Routes>
-        <Route index element={<DeviceOverview d={d} />} />
+        <Route index element={<DeviceOverview d={d} onChanged={dev.reload} />} />
         <Route
           path="containers"
           element={
@@ -307,7 +307,22 @@ function TunnelCard({ d }: { d: Device }) {
 }
 
 /** Server Manager-style properties, health and performance for one device. */
-function DeviceOverview({ d }: { d: Device }) {
+function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) {
+  const canOperate = useCan("operator");
+  const [acking, setAcking] = useState(false);
+  const [ackError, setAckError] = useState<string | null>(null);
+  const ack = async () => {
+    setAcking(true);
+    setAckError(null);
+    try {
+      await api.ackNetworkNotice(d.id);
+      onChanged();
+    } catch (err) {
+      setAckError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAcking(false);
+    }
+  };
   const samples = usePoll(() => api.deviceMetrics(d.id), 5000, [d.id]);
   const s = samples.data ?? [];
   const m = d.metrics;
@@ -322,6 +337,15 @@ function DeviceOverview({ d }: { d: Device }) {
                 <li key={i}>• {i}</li>
               ))}
             </ul>
+            {d.network_notice && (
+              <div className="flex flex-wrap items-center gap-3 border-t border-amber-200 px-5 py-3 text-sm">
+                <p className="min-w-0 flex-1 text-neutral-600">
+                  Network change seen {ago(d.network_notice.at)}. Acknowledge it once you know the new address is expected; it comes back only if the network changes again.
+                </p>
+                {canOperate && <Button size="sm" loading={acking} onClick={ack}>Acknowledge</Button>}
+              </div>
+            )}
+            {ackError && <div className="px-5 pb-3"><ErrorNote>{ackError}</ErrorNote></div>}
           </Card>
         )}
         <Card>

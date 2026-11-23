@@ -366,7 +366,7 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		// Large volumes over a slow link can take a while.
 		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)
 		if c.Action == api.ActionBackup {
-			err = a.backup(bctx, c.Target, c.Args["backup_id"])
+			err = a.backup(bctx, c.Target, c.Args["backup_id"], c.Args["exclude"])
 		} else {
 			err = a.restoreBackup(bctx, c.Target, c.Args["backup_id"])
 		}

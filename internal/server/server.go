@@ -100,12 +100,15 @@ type Server struct {
 
 	pollMu sync.Mutex
 	// previewMu serialises preview syncs so a webhook and the poller can't race.
-	previewMu    sync.Mutex
-	streams      *streamHub
-	sso          ssoState
-	https        httpsState
-	ssoGitHubURL string            // overrides https://github.com in tests
-	polled       map[string]string // project ID -> last commit SHA the poller acted on
+	previewMu     sync.Mutex
+	streams       *streamHub
+	sso           ssoState
+	https         httpsState
+	ssoGitHubURL  string // overrides https://github.com in tests
+	oauth         oauthState
+	oauthOverride map[string][2]string // tests: provider -> {auth URL, token URL}
+	graphURL      string               // tests: OneDrive drive lookup
+	polled        map[string]string    // project ID -> last commit SHA the poller acted on
 
 	// Cloudflare deployments are built by the server itself.
 	cfBoxer     cfBoxFactory        // nil: a Docker container; tests replace it
@@ -269,6 +272,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/auth/sso/{provider}/start", s.handleSSOStart)
 	mux.HandleFunc("GET /api/auth/sso/{provider}/callback", s.handleSSOCallback)
 	mux.HandleFunc("POST /api/auth/sso/exchange", s.handleSSOExchange)
+	mux.HandleFunc("GET /api/backup-oauth/callback", s.handleBackupOAuthCallback)
 	mux.HandleFunc("/api/gate/verify", s.handleGateVerify)
 	admin("GET /api/auth/me", s.handleMe)
 	admin("POST /api/auth/logout", s.handleLogout)
@@ -305,6 +309,7 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/system/update/agents", s.handleUpdateAgents)
 	admin("GET /api/devices/{id}/workers/{name}/backup-policy", s.handleGetBackupPolicy)
 	admin("PUT /api/devices/{id}/workers/{name}/backup-policy", s.handleSetBackupPolicy)
+	admin("GET /api/backups/storage", s.handleBackupStorage)
 	admin("GET /api/backups", s.handleListBackups)
 	admin("GET /api/backups/{id}/download", s.handleDownloadBackup)
 	admin("DELETE /api/backups/{id}", s.handleDeleteBackup)
@@ -374,6 +379,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET "+moveBundlePath, s.agentAuth(s.handleMoveBundle))
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/sso", s.handleSetSSO)
+	admin("GET /api/backup-oauth", s.handleGetBackupOAuth)
+	admin("PUT /api/backup-oauth", s.handleSetBackupOAuth)
+	admin("POST /api/backup-oauth/{provider}/start", s.handleBackupOAuthStart)
 	admin("PUT /api/settings/https", s.handleSetHTTPS)
 	admin("GET /api/server-backups", s.handleListServerBackups)
 	admin("POST /api/server-backups", s.handleCreateServerBackup)

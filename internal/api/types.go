@@ -53,6 +53,10 @@ type NetAddr struct {
 }
 
 // Agent capabilities.
+// NoBackupMarker is a file the server places in its backup folder; agents leave a folder holding it
+// out of container backups.
+const NoBackupMarker = ".orchestrator-no-backup"
+
 const (
 	CapBackup        = "backup"         // container.backup and container.restore
 	CapUpdate        = "update"         // agent.update

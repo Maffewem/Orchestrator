@@ -88,6 +88,19 @@ export default function ProjectForm({
   const node = source.node;
   const setNode = (patch: Partial<NodeBuild>) => setSource((s) => ({ ...s, node: { ...s.node, ...patch } }));
 
+  // Host folder mounts, host networking and Compose files give a container control of the
+  // device, so only admins may add or change them. The server enforces this too.
+  const hostMounts = lines(volumes).filter((v) => !/^[A-Za-z0-9][A-Za-z0-9_.-]*:/.test(v));
+  const keptMounts = new Set((initial?.runtime.volumes ?? []).filter((v) => !/^[A-Za-z0-9][A-Za-z0-9_.-]*:/.test(v)));
+  const addsHostMount = hostMounts.some((v) => !keptMounts.has(v));
+  const composeChanged =
+    source.type === "compose" &&
+    (initial?.source.type !== "compose" ||
+      (source.compose ?? "") !== (initial.source.compose ?? "") ||
+      (source.repo ?? "") !== (initial.source.repo ?? "") ||
+      (source.compose_file ?? "") !== (initial.source.compose_file ?? ""));
+  const hostBlocked = !isAdmin && (addsHostMount || composeChanged);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -130,6 +143,7 @@ export default function ProjectForm({
             { type: "cloudflare" as const, icon: Cloud, title: "Cloudflare", sub: "Build here, deploy to Cloudflare Pages or Workers. No device needed" },
           ]
             .filter((o) => o.type !== "cloudflare" || isAdmin || source.type === "cloudflare")
+            .filter((o) => o.type !== "compose" || isAdmin || source.type === "compose")
             .map((o) => (
             <button
               type="button"
@@ -500,6 +514,11 @@ export default function ProjectForm({
         <Field label="Volumes" hint="One per line: name:/path for a named volume, /host/path:/path for a folder, add :ro for read-only. Existing data stays when the container is recreated.">
           <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
         </Field>
+        {!isAdmin && (
+          <p className="text-sm text-neutral-500">
+            Only administrators can mount host folders (a /path source), because that gives the container access to the device itself. Named volumes are fine.
+          </p>
+        )}
         </>)}
         <Field as="div" label="Environment variables" hint={isCF ? "Set while the build runs, so VITE_* style variables are baked into the site. They are not set on a deployed Worker." : source.type === "compose" ? "Fills the ${VAR} references in the compose file. They are not passed to the containers unless the file lists them under environment." : node?.static ? "Passed to the build, so VITE_* style variables are baked into the site." : "Edit line by line, paste a whole .env, or import a file."}>
           <EnvEditor value={env} onChange={setEnv} />
@@ -507,11 +526,17 @@ export default function ProjectForm({
       </fieldset>
 
       {error && <ErrorNote>{error}</ErrorNote>}
+      {hostBlocked && (
+        <p className="text-sm text-neutral-500">
+          Only administrators can add or change host folder mounts and Compose files, because they give containers control of the device. Remove the host folder
+          {source.type === "compose" ? " or leave the Compose file as it was" : ""} to save.
+        </p>
+      )}
       {isCF && !isAdmin && (
         <p className="text-sm text-neutral-500">Only administrators can change Cloudflare projects, because their builds run on the Orchestrator server itself.</p>
       )}
       <div className="flex justify-end">
-        <Button variant="primary" loading={busy} disabled={(!device && !isCF) || (isCF && !isAdmin)}>
+        <Button variant="primary" loading={busy} disabled={(!device && !isCF) || (isCF && !isAdmin) || hostBlocked}>
           {submitLabel}
         </Button>
       </div>

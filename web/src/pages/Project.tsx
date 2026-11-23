@@ -28,6 +28,7 @@ import {
   Toggle,
   inputClass,
   ErrorNote,
+  WarnNote,
   Loading,
   StatusDot,
   StatusIcon,
@@ -271,6 +272,15 @@ export default function ProjectPage() {
       {error && (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+      {!!p.host_access?.length && (
+        <div className="mb-4">
+          <WarnNote>
+            This project uses host-level options that give its containers control of the device:{" "}
+            {p.host_access.join("; ")}. It keeps running, but only an administrator can change these
+            {isAdmin ? "." : "; you can still deploy, restart, roll back and edit environment variables."}
+          </WarnNote>
         </div>
       )}
       <Routes>

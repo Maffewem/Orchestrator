@@ -217,6 +217,16 @@ export function ErrorNote({ children }: { children: ReactNode }) {
   );
 }
 
+/** An amber note for something that works but needs attention. */
+export function WarnNote({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+      <div>{children}</div>
+    </div>
+  );
+}
+
 /** Placeholder block shown while data loads, so the page does not jump when it arrives. */
 export function Skeleton({ className }: { className?: string }) {
   return <div aria-hidden className={cx("animate-pulse rounded-md bg-neutral-200/70 motion-reduce:animate-none", className)} />;

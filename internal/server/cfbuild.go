@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -55,10 +54,16 @@ func extractTarball(r io.Reader, dir string) (int, error) {
 		return 0, fmt.Errorf("reading the source archive: %w", err)
 	}
 	defer gz.Close()
+	return extractTar(gz, dir, true)
+}
+
+// extractTar unpacks a tar stream into dir, dropping the first path component when strip is set.
+// The stream may come from an untrusted build, so links, devices and paths that escape dir are skipped.
+func extractTar(r io.Reader, dir string, strip bool) (int, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return 0, err
 	}
-	tr := tar.NewReader(gz)
+	tr := tar.NewReader(r)
 	files := 0
 	var total int64
 	for {
@@ -68,8 +73,11 @@ func extractTarball(r io.Reader, dir string) (int, error) {
 		} else if err != nil {
 			return files, fmt.Errorf("reading the source archive: %w", err)
 		}
-		_, rel, ok := strings.Cut(path.Clean(h.Name), "/")
-		if !ok || rel == "" || h.Typeflag == tar.TypeXGlobalHeader {
+		rel, ok := path.Clean(h.Name), true
+		if strip {
+			_, rel, ok = strings.Cut(rel, "/")
+		}
+		if !ok || rel == "" || rel == "." || h.Typeflag == tar.TypeXGlobalHeader {
 			continue
 		}
 		dest := filepath.Join(dir, filepath.FromSlash(rel))
@@ -104,19 +112,18 @@ func extractTarball(r io.Reader, dir string) (int, error) {
 	}
 }
 
-// cfBuildEnv is the environment build commands run in. It is deliberately not the server's:
-// that holds the admin token and secret key. The Cloudflare Pages build variables are set too,
-// so a build written for Cloudflare's own builders behaves the same here.
-func (s *Server) cfBuildEnv(work string, cs *api.CloudflareSpec, project []string) []string {
-	home := filepath.Join(work, "home")
-	os.MkdirAll(home, 0o700)
+// cfBuildEnv is the environment build commands run in. It is built from nothing: the server's
+// own environment holds the admin token and secret key and never reaches a build. The Cloudflare
+// Pages build variables are set too, so a build written for Cloudflare's own builders behaves
+// the same here. Project variables come last so they win.
+func cfBuildEnv(cs *api.CloudflareSpec, project []string) []string {
 	env := []string{
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + home,
-		"TMPDIR=" + os.TempDir(),
+		"HOME=" + cfBoxWork + "/home",
 		"LANG=C.UTF-8",
 		"CI=true",
-		"npm_config_cache=" + filepath.Join(work, "npm-cache"),
+		"COREPACK_HOME=" + cfBoxWork + "/home/.corepack",
+		"COREPACK_ENABLE_DOWNLOAD_PROMPT=0",
+		"npm_config_cache=" + cfBoxWork + "/home/.npm",
 		"npm_config_update_notifier=false",
 		"npm_config_fund=false",
 		"npm_config_audit=false",
@@ -127,25 +134,19 @@ func (s *Server) cfBuildEnv(work string, cs *api.CloudflareSpec, project []strin
 	return append(env, project...)
 }
 
-// cfRun runs one shell command in dir, logging its output to a step.
-func (s *Server) cfRun(ctx context.Context, steps cfSteps, idx int, dir string, env []string, command string) error {
+// cfRun runs one shell command in the build sandbox, logging its output to a step.
+func (s *Server) cfRun(ctx context.Context, box cfBox, steps cfSteps, idx int, dir, command string) error {
 	steps.logf(idx, "$ %s", command)
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
-	cmd.Dir, cmd.Env = dir, env
-	ownProcessGroup(cmd)
 	w := steps.writer(idx)
-	cmd.Stdout, cmd.Stderr = w, w
-	err := cmd.Run()
+	code, err := box.Exec(ctx, dir, command, w)
 	w.Flush()
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	var ee *exec.ExitError
 	switch {
-	case errors.As(err, &ee):
-		return fmt.Errorf("%q exited with status %d", command, ee.ExitCode())
+	case ctx.Err() != nil:
+		return ctx.Err()
 	case err != nil:
 		return fmt.Errorf("could not run %q: %w", command, err)
+	case code != 0:
+		return fmt.Errorf("%q exited with status %d", command, code)
 	}
 	return nil
 }
@@ -175,17 +176,15 @@ func installCommand(dir, configured string, hasPackage bool) string {
 		return configured
 	case !hasPackage:
 		return ""
-	case exists(filepath.Join(dir, "pnpm-lock.yaml")) && hasTool("pnpm"):
-		return "pnpm install --frozen-lockfile"
-	case exists(filepath.Join(dir, "yarn.lock")) && hasTool("yarn"):
+	case exists(filepath.Join(dir, "pnpm-lock.yaml")):
+		return "corepack pnpm install --frozen-lockfile"
+	case exists(filepath.Join(dir, "yarn.lock")):
 		return "yarn install --frozen-lockfile"
 	case exists(filepath.Join(dir, "package-lock.json")), exists(filepath.Join(dir, "npm-shrinkwrap.json")):
 		return "npm ci"
 	}
 	return "npm install"
 }
-
-func hasTool(name string) bool { _, err := exec.LookPath(name); return err == nil }
 
 func buildCommand(configured string, pkg *packageJSON) string {
 	switch {

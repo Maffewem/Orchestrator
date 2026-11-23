@@ -26,7 +26,8 @@ RUN set -e; for t in amd64:amd64: arm64:arm64: armv7:arm:7 armv6:arm:6; do \
 
 RUN mkdir -p /out/data
 
-# Node.js and npm are in the final image because Cloudflare Pages and Workers projects are built here.
+# Cloudflare builds no longer run in this image (they use a throwaway container), so Node.js is only kept
+# here to leave the base unchanged; a plain alpine base would work too.
 FROM node:22-alpine3.22
 ARG VERSION=dev
 LABEL org.opencontainers.image.version=$VERSION

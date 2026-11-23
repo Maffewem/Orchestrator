@@ -5,6 +5,7 @@ import { api, type ClusterPolicy } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Card, CardHeader, Empty, ErrorNote, Loading, PageHeader, Toggle, inputClass } from "../components/ui";
 import { ago, usePoll } from "../lib";
+import ServerHA from "../components/ServerHA";
 
 export default function ClusterPage() {
   useCrumbs([{ label: "Cluster" }]);
@@ -38,6 +39,7 @@ export default function ClusterPage() {
         <Loading />
       ) : (
         <>
+          <ServerHA />
           <Card className="mb-6">
             <CardHeader title="Automatic failover" subtitle="Applies to the workers you switch on below." />
             <div className="flex flex-wrap items-center gap-6 p-4 text-sm">

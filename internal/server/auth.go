@@ -138,6 +138,7 @@ func routeRole(pattern string) string {
 		"GET /api/settings":                       true,
 		"GET /api/cloudflare/discover":            true,
 		"GET /api/users":                          true,
+		"GET /api/server-ha":                      true,
 		"GET /api/system/update":                  true,
 		"GET /api/github/repos":                   true,
 		"GET /api/server-backups":                 true,

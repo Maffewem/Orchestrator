@@ -12,3 +12,15 @@ Automatic failover of workers between devices. Off by default.
 ## Replicas
 
 A worker can also run an extra, independent copy on other devices. Tick devices under *Replicas* on the Cluster page. Every deployment of the worker (manual, push, retry) is repeated on each replica device, and a missing replica is started by the server (retried every 10 minutes), for example on a newly added device or when one comes back online. Nothing is synced or moved between copies: the application itself must handle several copies (own replication, or stateless). Domains and the Caddy proxy still point at the main copy only, so traffic is not load-balanced yet. Replica deployments show on the project's Deployments list with the trigger `replica`.
+
+## Server high availability: manual standby (Beta)
+
+A second server (the standby) keeps a verified copy of the active server and can be promoted by hand. Cluster page > Server high availability.
+
+1. On the active server, *Create a pairing token*.
+2. On a **fresh** second server, enter the active server's address, the token and this server's own address, then *Make this server a standby*.
+3. The standby is read-only (writes get HTTP 423), refuses agents (503) and runs no background work. Every 15 s it pulls a snapshot of the active database, including the secret key, encrypted with the token, checks that it opens, and keeps the newest good one. It shows *ready* while the last copy is under a minute old.
+4. *Promote to active* stages the newest copy as the next database and restarts (the container needs a restart policy). Choosing "switch over" first asks the active server to step down and takes a last copy, so nothing is lost. "It is down" promotes immediately and can lose up to 15 s of changes.
+5. The promoted server has a higher epoch (sent as `X-Orch-Epoch` on every response) and keeps telling the old server to step down until it answers. The old server then restarts as a standby of the new one, so there is never a second writer once the two can talk.
+
+Not included yet: agents ignoring a lower epoch (a stale server that cannot be reached could still instruct agents that can reach it), adding the standby's address to agents automatically, automatic promotion, installing the standby from the dashboard, and repointing the dashboard address (DNS or tunnel). Add the standby under Settings > Server addresses yourself. Everything here is untested live.

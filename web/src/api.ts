@@ -943,7 +943,29 @@ export interface ClusterView {
   }[];
 }
 
+export interface HAView {
+  role: "active" | "standby";
+  epoch: number;
+  peer_url?: string;
+  self_url?: string;
+  paired: boolean;
+  token?: string;
+  last_sync?: string;
+  sync_error?: string;
+  sync_version?: string;
+  ready: boolean;
+  standby_last_pull?: string;
+  previous?: string;
+  version: string;
+  can_restart: boolean;
+}
+
 export const api = {
+  serverHA: () => request<HAView>("GET", "/api/server-ha"),
+  haPair: () => request<HAView>("POST", "/api/server-ha/pair"),
+  haJoin: (b: { active_url: string; token: string; self_url: string }) => request<HAView>("POST", "/api/server-ha/join", b),
+  haLeave: () => request<{ status: string }>("POST", "/api/server-ha/leave"),
+  haPromote: (activeIsDown: boolean) => request<{ status: string }>("POST", "/api/server-ha/promote", { active_is_down: activeIsDown }),
   cluster: () => request<ClusterView>("GET", "/api/cluster"),
   setCluster: (c: { enabled: boolean; grace_seconds: number }) => request<ClusterView["config"]>("PUT", "/api/cluster", c),
   setClusterPolicy: (id: string, p: ClusterPolicy) => request<ClusterPolicy>("PUT", `/api/projects/${id}/cluster`, p),

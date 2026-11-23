@@ -16,37 +16,89 @@ import (
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
-// netNoticeFor is how long a device card keeps saying that its network changed.
-const netNoticeFor = 6 * time.Hour
+const settingNetNotices = "net_notices"
 
-type netNotice struct {
-	at  time.Time
-	msg string
+// NetNotice is the latest unacknowledged change to how a device is connected.
+type NetNotice struct {
+	Message string    `json:"message"`
+	At      time.Time `json:"at"`
 }
 
-// netNotices remembers the latest network change per device for the dashboard. It is kept in
-// memory: the activity log has the durable record.
+// netNotices remembers the latest network change per device until someone acknowledges it. It is
+// stored in settings so it survives a server restart; the activity log keeps the full history.
 type netNotices struct {
-	mu sync.Mutex
-	m  map[string]netNotice
+	mu     sync.Mutex
+	loaded bool
+	m      map[string]NetNotice
 }
 
-func (n *netNotices) set(id, msg string) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
+func (s *Server) loadNetNotices(ctx context.Context) {
+	n := &s.netNotes
+	if n.loaded {
+		return
+	}
+	n.loaded = true
+	n.m = map[string]NetNotice{}
+	if s.store == nil {
+		return
+	}
+	s.getJSON(ctx, settingNetNotices, &n.m)
 	if n.m == nil {
-		n.m = map[string]netNotice{}
+		n.m = map[string]NetNotice{}
 	}
-	n.m[id] = netNotice{time.Now(), msg}
 }
 
-func (n *netNotices) get(id string) string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if v, ok := n.m[id]; ok && time.Since(v.at) < netNoticeFor {
-		return v.msg
+// setNetNote records a change, replacing any earlier unacknowledged one for the device.
+func (s *Server) setNetNote(ctx context.Context, id, msg string) {
+	s.netNotes.mu.Lock()
+	defer s.netNotes.mu.Unlock()
+	s.loadNetNotices(ctx)
+	s.netNotes.m[id] = NetNotice{Message: msg, At: time.Now().UTC()}
+	if s.store == nil {
+		return
 	}
-	return ""
+	s.setJSON(ctx, settingNetNotices, s.netNotes.m)
+}
+
+// netNote returns the device's unacknowledged network change, if any.
+func (s *Server) netNote(id string) (NetNotice, bool) {
+	s.netNotes.mu.Lock()
+	defer s.netNotes.mu.Unlock()
+	s.loadNetNotices(context.Background())
+	v, ok := s.netNotes.m[id]
+	return v, ok
+}
+
+// ackNetNote clears the device's notice and reports whether there was one.
+func (s *Server) ackNetNote(ctx context.Context, id string) bool {
+	s.netNotes.mu.Lock()
+	defer s.netNotes.mu.Unlock()
+	s.loadNetNotices(ctx)
+	if _, ok := s.netNotes.m[id]; !ok {
+		return false
+	}
+	delete(s.netNotes.m, id)
+	if s.store == nil {
+		return true
+	}
+	s.setJSON(ctx, settingNetNotices, s.netNotes.m)
+	return true
+}
+
+func (s *Server) handleAckNetNotice(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.lookupDevice(w, r)
+	if !ok {
+		return
+	}
+	note, _ := s.netNote(d.ID)
+	if s.ackNetNote(r.Context(), d.ID) {
+		who := "someone"
+		if id := identityFrom(r); id != nil && id.Name != "" {
+			who = id.Name
+		}
+		s.event(r.Context(), d.ID, "info", "device.address_ack", d.Name+": "+who+" acknowledged the network change ("+note.Message+")")
+	}
+	writeJSON(w, http.StatusOK, s.view(d))
 }
 
 // noteNetworkChanges compares a heartbeat with the device's previous state and records what
@@ -75,7 +127,7 @@ func (s *Server) noteNetworkChanges(ctx context.Context, d *store.Device, now ap
 		}
 		if msg != "" {
 			s.event(ctx, d.ID, "warning", "device.address", d.Name+": "+msg)
-			s.netNotes.set(d.ID, msg)
+			s.setNetNote(ctx, d.ID, msg)
 		}
 	}
 	if d.Host.Server != "" && now.Server != "" && now.Server != d.Host.Server {
@@ -88,7 +140,7 @@ func (s *Server) noteNetworkChanges(ctx context.Context, d *store.Device, now ap
 		}
 		msg := fmt.Sprintf("Now reaches the server at %s instead of %s (%s)", now.Server, d.Host.Server, how)
 		s.event(ctx, d.ID, "warning", "device.server_url", d.Name+": "+msg)
-		s.netNotes.set(d.ID, msg)
+		s.setNetNote(ctx, d.ID, msg)
 		// The device proxy asks that address whether a visitor may enter, so it has to follow.
 		s.syncProxy(ctx, d.ID)
 	}

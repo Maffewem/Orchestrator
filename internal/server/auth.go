@@ -108,6 +108,7 @@ func (s *Server) identify(ctx context.Context, tok string) *identity {
 func routeRole(pattern string) string {
 	operator := map[string]bool{
 		"POST /api/devices/{id}/commands":                    true,
+		"POST /api/devices/{id}/network-notice/ack":          true,
 		"GET /api/commands/{id}":                             true,
 		"POST /api/devices/{id}/containers/{cid}/backup":     true,
 		"PUT /api/devices/{id}/workers/{name}/backup-policy": true,

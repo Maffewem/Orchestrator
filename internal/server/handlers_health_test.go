@@ -36,3 +36,29 @@ func TestDeviceViewHealthChecks(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkNoticeStaysUntilAcknowledged(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}}
+	d := &store.Device{ID: "d1", LastSeen: time.Now()}
+	d.Host.Docker = &api.DockerInfo{}
+	s.setNetNote(t.Context(), d.ID, "IP address changed from 10.0.0.2 to 10.0.0.9")
+	// Still shown long after the old six-hour expiry would have passed.
+	s.netNotes.m[d.ID] = NetNotice{Message: s.netNotes.m[d.ID].Message, At: time.Now().Add(-48 * time.Hour)}
+	v := s.view(d)
+	if v.NetworkNotice == nil || v.Health != "warning" {
+		t.Fatalf("notice should persist unacknowledged: %+v health=%s", v.NetworkNotice, v.Health)
+	}
+	if !s.ackNetNote(t.Context(), d.ID) {
+		t.Fatal("ack reported no notice")
+	}
+	if v := s.view(d); v.NetworkNotice != nil || v.Health != "ok" {
+		t.Fatalf("acknowledged notice should clear: %+v health=%s", v.NetworkNotice, v.Health)
+	}
+	if s.ackNetNote(t.Context(), d.ID) {
+		t.Fatal("second ack should find nothing")
+	}
+	s.setNetNote(t.Context(), d.ID, "Gained IP address 10.0.0.10")
+	if v := s.view(d); v.NetworkNotice == nil {
+		t.Fatal("a new change should raise a new notice")
+	}
+}

@@ -73,6 +73,8 @@ export interface Device {
   status: "online" | "offline";
   health: Health;
   issues: string[];
+  /** A change to the device's network, shown until acknowledged. */
+  network_notice?: { message: string; at: string };
   proxy: "running" | "stopped" | "none" | "agent_too_old";
   maintenance: boolean;
   maintenance_note?: string;
@@ -1020,6 +1022,7 @@ export const api = {
   setProjectMetricPrefs: (id: string, p: MetricPrefs) => request<MetricPrefsView>("PUT", `/api/projects/${id}/metrics/prefs`, p),
   updateDevice: (id: string, patch: { name?: string; labels?: string[]; maintenance?: boolean; maintenance_note?: string; maintenance_hours?: number }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
+  ackNetworkNotice: (id: string) => request<Device>("POST", `/api/devices/${id}/network-notice/ack`),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),
   updateTunnel: (id: string) => request<TunnelView>("POST", `/api/devices/${id}/tunnel/update`),

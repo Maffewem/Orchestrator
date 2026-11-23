@@ -566,6 +566,9 @@ func (s *Server) deployWith(ctx context.Context, p *store.Project, commit *store
 		msg = fmt.Sprintf("Deployment of %s queued for %s@%.7s (%s)", p.Name, commit.Branch, commit.SHA, trigger)
 	}
 	s.event(ctx, p.DeviceID, "info", "deployment.queued", msg)
+	if trigger != replicaTrigger && trigger != "migration" {
+		s.deployReplicas(ctx, p, commit, tweak)
+	}
 	return d, nil
 }
 

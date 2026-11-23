@@ -80,6 +80,21 @@ export default function ClusterPage() {
                         Fail over
                       </label>
                     </div>
+                    <div className="space-y-2 border-t border-neutral-100 p-4 text-sm">
+                      <p className="font-medium">Replicas <span className="font-normal text-neutral-500">(an extra, independent copy on each device ticked; deployed together with the main one. Nothing is synced or moved, so the app must cope with several copies)</span></p>
+                      <div className="flex flex-wrap gap-x-5 gap-y-1">
+                        {devices.filter((d) => d.id !== w.device_id).map((d) => {
+                          const st = w.replicas?.find((r) => r.device_id === d.id);
+                          return (
+                            <label key={d.id} className="flex items-center gap-1.5">
+                              <input type="checkbox" checked={(p.replicas ?? []).includes(d.id)} onChange={(e) => setPolicy(w.project_id, p, { replicas: e.target.checked ? [...(p.replicas ?? []), d.id] : (p.replicas ?? []).filter((x) => x !== d.id) })} />
+                              {d.name}
+                              {st && <Badge tone={st.running ? "ok" : st.online ? "warn" : "bad"}>{st.running ? "running" : st.online ? "starting" : "offline"}</Badge>}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
                     {p.failover && (
                       <div className="space-y-3 border-t border-neutral-100 p-4 text-sm">
                         <div>

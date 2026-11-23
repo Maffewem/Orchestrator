@@ -82,3 +82,44 @@ func TestClusterNoTargetAndAllOffline(t *testing.T) {
 		t.Fatal("moved with nothing online")
 	}
 }
+
+func TestClusterReplicas(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.srv.cluster.grace = time.Hour // failover stays out of the way
+	caps := api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview}}
+	a, b := h.register("pi-a"), h.register("pi-b")
+	h.do("POST", "/api/agent/heartbeat", a.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": a.DeviceID,
+		"source": map[string]any{"type": "image", "image": "nginx"}}, &p)
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Replicas: []string{a.DeviceID}}, nil); code != http.StatusBadRequest {
+		t.Fatalf("replica on the main device: %d", code)
+	}
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Replicas: []string{b.DeviceID}}, nil); code != http.StatusOK {
+		t.Fatalf("set replicas: %d", code)
+	}
+	// The sweep starts a missing replica on the chosen device.
+	h.srv.clusterSweep(ctx)
+	deps, _ := h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, Limit: 10})
+	if len(deps) != 1 || deps[0].DeviceID != b.DeviceID || deps[0].Trigger != replicaTrigger {
+		t.Fatalf("replica deployments: %+v", deps)
+	}
+	// A normal deployment fans out to the replica as well.
+	if code := h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, nil); code != http.StatusAccepted && code != http.StatusCreated {
+		t.Fatalf("deploy: %d", code)
+	}
+	deps, _ = h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, Limit: 10})
+	onA, onB := 0, 0
+	for _, d := range deps {
+		if d.DeviceID == a.DeviceID {
+			onA++
+		} else if d.DeviceID == b.DeviceID {
+			onB++
+		}
+	}
+	if onA != 1 || onB != 2 {
+		t.Fatalf("deployments a=%d b=%d", onA, onB)
+	}
+}

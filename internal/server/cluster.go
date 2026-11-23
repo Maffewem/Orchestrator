@@ -46,6 +46,9 @@ type ClusterPolicy struct {
 	Allowed []string `json:"allowed,omitempty"`
 	// FailBack moves the worker back to its home device once that has been online for the grace period.
 	FailBack bool `json:"fail_back"`
+	// Replicas are extra devices that run their own independent copy of the worker, deployed
+	// together with the main one. Nothing is synced or moved: the app must cope with several copies.
+	Replicas []string `json:"replicas,omitempty"`
 	// StartEmpty lets a failover go ahead without data when the server has no backup of the worker.
 	StartEmpty bool `json:"start_empty"`
 }
@@ -159,9 +162,6 @@ func (s *Server) clusterSweep(ctx context.Context) {
 		started = time.Time{}.Add(1)
 	}
 	cs.mu.Unlock()
-	if !cfg.Enabled {
-		return
-	}
 	grace := time.Duration(cfg.GraceSeconds) * time.Second
 	if cs.grace != 0 {
 		grace = cs.grace
@@ -195,7 +195,8 @@ func (s *Server) clusterSweep(ctx context.Context) {
 			continue
 		}
 		pol := s.clusterPolicy(ctx, p.ID)
-		if !pol.Failover {
+		s.reconcileReplicas(ctx, p, pol, byID)
+		if !cfg.Enabled || !pol.Failover {
 			continue
 		}
 		rec := s.failoverRecord(ctx, p.ID)
@@ -334,6 +335,14 @@ type clusterWorker struct {
 	Device    string          `json:"device"`
 	Policy    ClusterPolicy   `json:"policy"`
 	Failover  *failoverRecord `json:"last_failover,omitempty"`
+	Replicas  []replicaState  `json:"replicas,omitempty"`
+}
+
+type replicaState struct {
+	DeviceID string `json:"device_id"`
+	Device   string `json:"device"`
+	Online   bool   `json:"online"`
+	Running  bool   `json:"running"`
 }
 
 type clusterView struct {
@@ -350,15 +359,27 @@ func (s *Server) handleGetCluster(w http.ResponseWriter, r *http.Request) {
 	}
 	devices, _ := s.store.ListDevices(ctx)
 	names := map[string]string{}
+	byID := map[string]*store.Device{}
 	for _, d := range devices {
 		names[d.ID] = d.Name
+		byID[d.ID] = d
 	}
 	v := clusterView{Config: s.clusterConfig(ctx), Workers: []clusterWorker{}}
 	for _, p := range projects {
 		if p.Source.Type == store.SourceCloudflare {
 			continue
 		}
-		v.Workers = append(v.Workers, clusterWorker{ProjectID: p.ID, Name: p.Name, DeviceID: p.DeviceID, Device: names[p.DeviceID], Policy: s.clusterPolicy(ctx, p.ID), Failover: s.failoverRecord(ctx, p.ID)})
+		pol := s.clusterPolicy(ctx, p.ID)
+		cw := clusterWorker{ProjectID: p.ID, Name: p.Name, DeviceID: p.DeviceID, Device: names[p.DeviceID], Policy: pol, Failover: s.failoverRecord(ctx, p.ID)}
+		for _, id := range pol.Replicas {
+			st := replicaState{DeviceID: id, Device: names[id]}
+			if d := byID[id]; d != nil {
+				c := findByName(d, serviceOf(p))
+				st.Online, st.Running = !d.Offline, c != nil && c.State == "running"
+			}
+			cw.Replicas = append(cw.Replicas, st)
+		}
+		v.Workers = append(v.Workers, cw)
 	}
 	sort.Slice(v.Workers, func(i, j int) bool { return v.Workers[i].Name < v.Workers[j].Name })
 	writeJSON(w, http.StatusOK, v)
@@ -401,10 +422,81 @@ func (s *Server) handleSetClusterPolicy(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "choose at least one device other than the one it runs on")
 		return
 	}
+	seen := map[string]bool{}
+	for _, id := range pol.Replicas {
+		if id == p.DeviceID || seen[id] {
+			writeError(w, http.StatusBadRequest, "a replica must be on a different device from the main copy, and each device can be chosen once")
+			return
+		}
+		seen[id] = true
+		if _, err := s.store.GetDevice(r.Context(), id); err != nil {
+			writeError(w, http.StatusBadRequest, "a replica device no longer exists")
+			return
+		}
+	}
 	b, _ := json.Marshal(pol)
 	if err := s.store.SetSetting(r.Context(), clusterPolicyKey+p.ID, string(b)); err != nil {
 		s.internal(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, pol)
+}
+
+// replicaTrigger marks deployments that only exist to run an extra copy; they never fan out again.
+const replicaTrigger = "replica"
+
+// deployReplicas deploys the same revision to every replica device of a worker. It is called
+// after the main deployment is queued and never fails it: a replica that can't be reached is
+// retried by reconcileReplicas.
+func (s *Server) deployReplicas(ctx context.Context, p *store.Project, commit *store.Commit, tweak func(*api.DeploySpec)) {
+	if p.Source.Type == store.SourceCloudflare {
+		return
+	}
+	pol := s.clusterPolicy(ctx, p.ID)
+	for _, id := range pol.Replicas {
+		s.deployReplica(ctx, p, id, commit, tweak)
+	}
+}
+
+func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID string, commit *store.Commit, tweak func(*api.DeploySpec)) {
+	if deviceID == p.DeviceID {
+		return
+	}
+	d, err := s.store.GetDevice(ctx, deviceID)
+	if err != nil || d.Offline || d.Maintenance {
+		return
+	}
+	cp := *p
+	cp.DeviceID = deviceID
+	if _, err := s.deployWith(ctx, &cp, commit, replicaTrigger, tweak); err != nil {
+		s.event(ctx, deviceID, "error", "cluster.replica", fmt.Sprintf("Deploying a replica of %s to %s failed: %s", p.Name, d.Name, err))
+	}
+}
+
+// reconcileReplicas starts a replica on any chosen device that has none, for example a newly
+// added device or one that came back. A device is tried at most every failoverRetry.
+func (s *Server) reconcileReplicas(ctx context.Context, p *store.Project, pol ClusterPolicy, byID map[string]*store.Device) {
+	for _, id := range pol.Replicas {
+		d := byID[id]
+		if d == nil || d.Offline || d.Maintenance || d.ID == p.DeviceID || findByName(d, serviceOf(p)) != nil {
+			continue
+		}
+		key := p.ID + "@" + id
+		s.cluster.mu.Lock()
+		last, seen := s.cluster.tried[key]
+		if seen && time.Since(last) < failoverRetry {
+			s.cluster.mu.Unlock()
+			continue
+		}
+		s.cluster.tried[key] = time.Now()
+		s.cluster.mu.Unlock()
+		var commit *store.Commit
+		if p.Source.FromRepo() {
+			var err error
+			if commit, err = s.latestCommit(ctx, p.Source.Repo, p.Source.Branch); err != nil {
+				continue
+			}
+		}
+		s.deployReplica(ctx, p, id, commit, nil)
+	}
 }

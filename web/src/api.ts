@@ -928,6 +928,7 @@ export interface ClusterPolicy {
   allowed?: string[];
   fail_back: boolean;
   start_empty: boolean;
+  replicas?: string[];
 }
 export interface ClusterView {
   config: { enabled: boolean; grace_seconds: number };
@@ -937,6 +938,7 @@ export interface ClusterView {
     device_id: string;
     device: string;
     policy: ClusterPolicy;
+    replicas?: { device_id: string; device: string; online: boolean; running: boolean }[];
     last_failover?: { from_name: string; to_name: string; at: string; with_data: boolean; home: boolean };
   }[];
 }

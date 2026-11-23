@@ -88,7 +88,7 @@ func TestPrepareBackupDirMarker(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(srv.cfg.BackupDir, api.NoBackupMarker)); err != nil {
 		t.Fatal(err)
 	}
-	if free, err := freeBytes(srv.cfg.BackupDir); err != nil || free == 0 {
-		t.Fatalf("free space: %d %v", free, err)
+	if total, free, err := diskSpace(srv.cfg.BackupDir); err != nil || free == 0 || total < free {
+		t.Fatalf("disk space: %d %d %v", total, free, err)
 	}
 }

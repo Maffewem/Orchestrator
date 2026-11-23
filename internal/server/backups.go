@@ -93,8 +93,17 @@ func (s *Server) createBackup(ctx context.Context, d *store.Device, c *api.Conta
 	if err := s.prepareBackupDir(); err != nil {
 		return nil, err
 	}
-	if free, err := freeBytes(s.cfg.BackupDir); err == nil && free < minFreeForBackup {
-		return nil, fmt.Errorf("not enough free disk space on the server to store a backup (%s free in %s). Delete old backups or free some space", humanSize(int64(free)), s.cfg.BackupDir)
+	est, _ := s.estimateBackup(ctx, d.ID, c.Name)
+	need := uint64(minFreeForBackup)
+	if e := uint64(est) * 12 / 10; e > need {
+		need = e
+	}
+	if _, free, err := diskSpace(s.cfg.BackupDir); err == nil && free < need {
+		msg := fmt.Sprintf("not enough free disk space on the server to store a backup (%s free in %s", humanSize(int64(free)), s.cfg.BackupDir)
+		if est > 0 {
+			msg += fmt.Sprintf("; this worker's backups are about %s", humanSize(est))
+		}
+		return nil, errors.New(msg + "). Delete old backups or free some space")
 	}
 	b := &store.Backup{DeviceID: d.ID, DeviceName: d.Name, ContainerName: c.Name, Image: c.Image, Source: source}
 	if err := s.store.CreateBackup(ctx, b); err != nil {

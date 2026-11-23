@@ -294,6 +294,28 @@ function Backups({ w, canBackup, deviceLoaded }: { w: FleetContainer; canBackup:
                 </>
               )}
             </div>
+            {p.mode === "daily" && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={p.consolidate} onChange={(e) => set({ consolidate: e.target.checked, weekly_keep: p.weekly_keep || 4 })} />
+                  Thin older daily backups to one per week
+                </label>
+                {p.consolidate && (
+                  <div className="flex flex-wrap items-center gap-2 pl-6 text-sm text-neutral-600">
+                    Keep the newest {p.keep} daily backups, then one per week for
+                    <input type="number" min={1} max={52} className={`${inputClass} w-20`} aria-label="Weekly backups to keep" value={p.weekly_keep || 4} onChange={(e) => set({ weekly_keep: Number(e.target.value) })} />
+                    weeks.
+                  </div>
+                )}
+              </div>
+            )}
+            {p.mode !== "off" && (
+              <p className="text-sm text-neutral-600">
+                {p.estimated_size
+                  ? `Estimated ${bytes(p.estimated_size)} per backup (from the latest backups), about ${bytes(p.estimated_size * (p.keep + (p.mode === "daily" && p.consolidate ? p.weekly_keep || 4 : 0)))} when ${p.keep + (p.mode === "daily" && p.consolidate ? p.weekly_keep || 4 : 0)} are kept.`
+                  : "No size estimate yet: it appears after the first backup completes."}
+              </p>
+            )}
             {p.mode !== "off" && p.next_run && <p className="text-sm text-neutral-600">Next backup: {new Date(p.next_run).toLocaleString()}{p.last_run ? ` · last run ${ago(p.last_run)}` : ""}</p>}
             <div className="flex items-center gap-3">
               {isAdmin && <Button variant="primary" onClick={save}>Save</Button>}

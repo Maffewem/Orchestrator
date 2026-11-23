@@ -362,8 +362,16 @@ a folder on the server (bind-mount a NAS share there), a folder on another devic
 storage (Google Drive, Dropbox, OneDrive and others, through the rclone binary bundled in the
 server image). For cloud storage, run `rclone config` once on any computer, then paste the output
 of `rclone config show <remote>` into the destination; the server renews the sign-in itself.
+Google Drive, Dropbox and OneDrive can also be connected with a sign-in button: register your own
+OAuth app with the provider, enter its client ID and secret under Settings > Server backups, and
+add `<dashboard URL>/api/backup-oauth/callback` as the redirect URI (providers require HTTPS, or
+localhost). The dashboard writes the rclone configuration itself.
 Folders, devices and cloud storage keep the same number of copies as the local retention; expire
 S3 objects with a bucket lifecycle rule.
+
+The Backups page shows how much of the disk the backups use, and the alerts bell warns admins when
+backups hold most of what is left. A worker's schedule shows an estimated size (from its latest
+backups), and a daily schedule can thin older backups to one per week.
 
 Container backups of the Orchestrator server itself leave out the server's own backup folder
 (marked with `.orchestrator-no-backup`), so they do not grow with every backup. Agents older than

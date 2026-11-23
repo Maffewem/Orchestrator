@@ -21,7 +21,13 @@ type BackupPolicy struct {
 	Weekday int    `json:"weekday"`
 	TZ      string `json:"tz"`
 	Keep    int    `json:"keep"` // scheduled backups to keep
+	// Consolidate (daily mode) keeps the newest Keep daily backups and thins older ones to a
+	// single backup per week, keeping WeeklyKeep weeks.
+	Consolidate bool `json:"consolidate"`
+	WeeklyKeep  int  `json:"weekly_keep"`
 }
+
+const defaultWeeklyKeep = 4
 
 func defaultBackupPolicy() BackupPolicy {
 	return BackupPolicy{Mode: "off", Time: "02:00", TZ: "UTC", Keep: defaultKeep}
@@ -38,6 +44,9 @@ func (p BackupPolicy) validate() error {
 	if p.Keep < 1 || p.Keep > 100 {
 		return errors.New("keep must be between 1 and 100")
 	}
+	if p.Consolidate && p.WeeklyKeep != 0 && (p.WeeklyKeep < 1 || p.WeeklyKeep > 52) {
+		return errors.New("weekly backups to keep must be between 1 and 52")
+	}
 	return nil
 }
 
@@ -45,6 +54,77 @@ type backupPolicyView struct {
 	BackupPolicy
 	NextRun *time.Time `json:"next_run,omitempty"`
 	LastRun *time.Time `json:"last_run,omitempty"`
+	// EstimatedSize is the expected size of one backup, taken from this worker's recent backups
+	// (0 when it has none). EstimatedTotal is that size times the backups kept under the policy.
+	EstimatedSize  int64 `json:"estimated_size"`
+	EstimatedTotal int64 `json:"estimated_total"`
+}
+
+// retained is the largest number of scheduled backups the policy keeps at once.
+func (p BackupPolicy) retained() int {
+	n := p.Keep
+	if p.Mode == "daily" && p.Consolidate {
+		n += p.weeklyKeep()
+	}
+	return n
+}
+
+func (p BackupPolicy) weeklyKeep() int {
+	if p.WeeklyKeep < 1 {
+		return defaultWeeklyKeep
+	}
+	return p.WeeklyKeep
+}
+
+// estimateBackup predicts the size of the next backup of a worker as the largest of its three
+// most recent completed backups. Compressed size varies little between backups of the same data.
+func (s *Server) estimateBackup(ctx context.Context, deviceID, name string) (int64, int) {
+	all, err := s.store.ListBackups(ctx, deviceID)
+	if err != nil {
+		return 0, 0
+	}
+	var est int64
+	n := 0
+	for _, b := range all { // newest first
+		if b.ContainerName != name || b.Status != store.BackupComplete || b.Size <= 0 {
+			continue
+		}
+		if b.Size > est {
+			est = b.Size
+		}
+		if n++; n == 3 {
+			break
+		}
+	}
+	return est, n
+}
+
+// consolidationVictims picks the scheduled backups (newest first) to delete: beyond the newest
+// keep, only the newest backup of each calendar week (UTC, Monday start) survives, for weeks not
+// already covered by a kept daily backup, and only weeklyKeep of those weeks.
+func consolidationVictims(list []*store.Backup, keep, weeklyKeep int) []string {
+	week := func(t time.Time) string {
+		y, w := t.UTC().ISOWeek()
+		return fmt.Sprintf("%d-%02d", y, w)
+	}
+	covered := map[string]bool{}
+	var victims []string
+	for i, b := range list {
+		if i < keep {
+			covered[week(b.CreatedAt)] = true
+			continue
+		}
+		wk := week(b.CreatedAt)
+		if covered[wk] {
+			victims = append(victims, b.ID)
+			continue
+		}
+		covered[wk] = true
+		if weeklyKeep--; weeklyKeep < 0 {
+			victims = append(victims, b.ID)
+		}
+	}
+	return victims
 }
 
 func (s *Server) loadBackupPolicy(ctx context.Context, deviceID, name string) (BackupPolicy, *store.BackupPolicy) {
@@ -60,6 +140,10 @@ func (s *Server) loadBackupPolicy(ctx context.Context, deviceID, name string) (B
 func (s *Server) policyView(ctx context.Context, deviceID, name string) backupPolicyView {
 	pol, row := s.loadBackupPolicy(ctx, deviceID, name)
 	v := backupPolicyView{BackupPolicy: pol}
+	if est, _ := s.estimateBackup(ctx, deviceID, name); est > 0 {
+		v.EstimatedSize = est
+		v.EstimatedTotal = est * int64(pol.retained())
+	}
 	if next, ok := pol.schedule().nextSlot(time.Now()); ok {
 		n := next.UTC()
 		v.NextRun = &n
@@ -101,6 +185,12 @@ func (s *Server) handleSetBackupPolicy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "no worker with that name on this device")
 		return
 	}
+	if pol.Mode != "daily" {
+		pol.Consolidate = false
+	}
+	if pol.Consolidate && pol.WeeklyKeep == 0 {
+		pol.WeeklyKeep = defaultWeeklyKeep
+	}
 	if pol.Mode != "off" && !hasCap(d, api.CapBackup) {
 		writeError(w, http.StatusConflict, errAgentTooOld(d, "backups").Error())
 		return
@@ -116,9 +206,31 @@ func (s *Server) handleSetBackupPolicy(w http.ResponseWriter, r *http.Request) {
 // pruneBackups applies a worker's retention to its scheduled backups.
 func (s *Server) pruneBackups(ctx context.Context, deviceID, name string) {
 	pol, _ := s.loadBackupPolicy(ctx, deviceID, name)
-	ids, err := s.store.PruneScheduledBackups(ctx, deviceID, name, pol.Keep)
-	if err != nil {
-		s.log.Error("prune backups", "err", err)
+	var ids []string
+	if pol.Mode == "daily" && pol.Consolidate {
+		all, err := s.store.ListBackups(ctx, deviceID)
+		if err != nil {
+			s.log.Error("prune backups", "err", err)
+			return
+		}
+		var sched []*store.Backup
+		for _, b := range all { // newest first
+			if b.ContainerName == name && b.Source == "scheduled" && b.Status == store.BackupComplete {
+				sched = append(sched, b)
+			}
+		}
+		for _, id := range consolidationVictims(sched, pol.Keep, pol.weeklyKeep()) {
+			if err := s.store.DeleteBackup(ctx, id); err != nil {
+				s.log.Error("prune backups", "err", err)
+				continue
+			}
+			ids = append(ids, id)
+		}
+	} else {
+		var err error
+		if ids, err = s.store.PruneScheduledBackups(ctx, deviceID, name, pol.Keep); err != nil {
+			s.log.Error("prune backups", "err", err)
+		}
 	}
 	for _, id := range ids {
 		s.removeBackupFiles(id)

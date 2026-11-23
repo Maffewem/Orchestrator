@@ -14,6 +14,8 @@ export default function BackupsPage() {
   useCrumbs([{ label: "Backups" }]);
   const { data, error, reload } = usePoll(api.backups, 3000);
   const canOperate = useCan("operator");
+  const isAdmin = useCan("admin");
+  const storage = usePoll(() => (isAdmin ? api.backupStorage() : Promise.resolve(null)), 60000, [isAdmin]);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -44,6 +46,13 @@ export default function BackupsPage() {
         description="Each backup holds a container's configuration and the data in its volumes and bind mounts. Start one from the Workers page. Restoring writes the data back into the running container on its original device. Set a backup password in Settings to encrypt new backups."
       />
       {error && <ErrorNote>{error}</ErrorNote>}
+      {storage.data && storage.data.total_bytes > 0 && (
+        <p className={`mb-4 rounded-lg px-4 py-2 text-sm ${storage.data.level === "ok" ? "bg-neutral-100 text-neutral-700" : storage.data.level === "warning" ? "bg-amber-50" : "bg-red-50"}`}>
+          {storage.data.level !== "ok" && <strong>Backups are using most of the disk. </strong>}
+          {bytes(storage.data.backup_bytes)} of backups in <code>{storage.data.dir}</code>, {bytes(storage.data.free_bytes)} free of {bytes(storage.data.total_bytes)}.
+          {storage.data.level !== "ok" && " Delete old backups, keep fewer, or move them to a larger disk."}
+        </p>
+      )}
       {msg && (msg.ok ? <p className="mb-4 rounded-lg bg-blue-50 px-4 py-2 text-sm">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
       {!data ? (
         <Loading />

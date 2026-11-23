@@ -771,8 +771,28 @@ export interface BackupPolicy {
   weekday: number;
   tz: string;
   keep: number;
+  consolidate: boolean;
+  weekly_keep: number;
+  estimated_size?: number;
+  estimated_total?: number;
   next_run?: string;
   last_run?: string;
+}
+
+export interface BackupStorage {
+  dir: string;
+  backup_bytes: number;
+  free_bytes: number;
+  total_bytes: number;
+  level: "ok" | "warning" | "critical";
+}
+export interface BackupOAuthProvider {
+  id: "google" | "dropbox" | "onedrive";
+  name: string;
+  client_id: string;
+  secret_set: boolean;
+  console: string;
+  setup: string;
 }
 
 export interface ServerBackupPolicy {
@@ -934,6 +954,10 @@ export const api = {
   acceptServerMove: () => request<MoveResult>("POST", "/api/server-move/accept"),
   moveServerBack: () => request<MoveResult>("POST", "/api/server-move/back"),
   exportServerCopy,
+  backupStorage: () => request<BackupStorage>("GET", "/api/backups/storage"),
+  backupOAuth: () => request<BackupOAuthProvider[]>("GET", "/api/backup-oauth"),
+  setBackupOAuth: (c: Record<string, { client_id: string; client_secret?: string }>) => request<BackupOAuthProvider[]>("PUT", "/api/backup-oauth", c),
+  startBackupOAuth: (provider: string, destId?: string) => request<{ url: string }>("POST", `/api/backup-oauth/${provider}/start`, destId ? { dest_id: destId } : undefined),
   setBackupDests: (d: BackupDest[]) => request<ServerBackups>("PUT", "/api/server-backups/destinations", d),
   testBackupDest: (id: string) => request<{ status: string }>("POST", `/api/server-backups/destinations/${encodeURIComponent(id)}/test`),
   ssoProviders: () => request<{ providers: { id: string; name: string }[]; hide_password: boolean }>("GET", "/api/auth/sso/providers", undefined, null),

@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, RotateCcw, Trash2, Upload } from "lucide-react";
-import { api, type BackupDest, type ServerBackupPolicy } from "../api";
+import { api, type BackupDest, type BackupOAuthProvider, type ServerBackupPolicy } from "../api";
 import { Badge, Button, ErrorNote, Field, Loading, inputClass, SecretInput } from "./ui";
 import { confirmDialog } from "./dialogs";
 import { ago, bytes, usePoll } from "../lib";
@@ -160,11 +160,65 @@ function Schedule({ saved, nextRun, dir, onSaved }: { saved: ServerBackupPolicy;
 
 const kinds: Record<BackupDest["kind"], string> = { s3: "S3 compatible (AWS, R2, B2, MinIO)", folder: "Folder on this server (mount a NAS here)", device: "Another device running an agent", rclone: "Cloud storage (Google Drive, Dropbox, OneDrive and more via rclone)" };
 
+// CloudSignIn connects Google Drive, Dropbox or OneDrive with the administrator's own OAuth app.
+function CloudSignIn({ onMessage }: { onMessage: (m: { ok: boolean; text: string } | null) => void }) {
+  const providers = usePoll(api.backupOAuth, 0);
+  const [draft, setDraft] = useState<Record<string, { client_id: string; client_secret: string }>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const redirect = `${window.location.origin}/api/backup-oauth/callback`;
+  const get = (p: BackupOAuthProvider) => draft[p.id] ?? { client_id: p.client_id, client_secret: "" };
+  const fail = (e: unknown) => onMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
+  const connect = async (p: BackupOAuthProvider) => {
+    setBusy(p.id);
+    onMessage(null);
+    try {
+      const c = get(p);
+      if (draft[p.id]) await api.setBackupOAuth({ [p.id]: c });
+      const { url } = await api.startBackupOAuth(p.id);
+      window.location.href = url;
+    } catch (e) {
+      fail(e);
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="space-y-2 rounded-lg border border-neutral-200 p-3">
+      <h4 className="text-sm font-medium">Connect cloud storage</h4>
+      <p className="text-sm text-neutral-500">
+        Sign in to Google Drive, Dropbox or OneDrive from here. You register a free OAuth app with the provider once and enter its client ID and secret; the redirect URI to register is <code className="break-all">{redirect}</code>. Providers only accept <code>https://</code> addresses (or <code>localhost</code>), so open the dashboard over HTTPS first. Prefer another provider, or no app? Add a <em>Cloud storage</em> destination below and paste an rclone config instead.
+      </p>
+      {(providers.data ?? []).map((p) => (
+        <details key={p.id} className="rounded border border-neutral-100 p-2">
+          <summary className="cursor-pointer text-sm font-medium">{p.name}{p.client_id && p.secret_set ? " · app saved" : ""}</summary>
+          <div className="mt-2 space-y-3">
+            <p className="text-xs text-neutral-500">{p.setup} <a className="underline" href={p.console} target="_blank" rel="noreferrer">Open the developer console</a>.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Client ID"><input className={inputClass} value={get(p).client_id} onChange={(e) => setDraft({ ...draft, [p.id]: { ...get(p), client_id: e.target.value } })} /></Field>
+              <Field label="Client secret"><SecretInput className={inputClass} value={get(p).client_secret} placeholder={p.secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => setDraft({ ...draft, [p.id]: { ...get(p), client_secret: e.target.value } })} /></Field>
+            </div>
+            <Button size="sm" variant="primary" loading={busy === p.id} disabled={!get(p).client_id || (!p.secret_set && !get(p).client_secret)} onClick={() => connect(p)}>Sign in with {p.name}</Button>
+          </div>
+        </details>
+      ))}
+    </div>
+  );
+}
+
 function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: () => void }) {
   const devices = usePoll(api.devices, 0);
   const [draft, setDraft] = useState<BackupDest[] | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const ok = q.get("cloud"), bad = q.get("cloud_error");
+    if (ok || bad) {
+      setMsg({ ok: !!ok, text: ok ? `${ok}. It now receives every new server backup; use Test to check it.` : `Could not connect: ${bad}` });
+      onChanged();
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const list = draft ?? dests;
   const set = (i: number, patch: Partial<BackupDest>) => setDraft(list.map((d, j) => (j === i ? { ...d, ...patch } : d)));
   const add = (kind: BackupDest["kind"]) =>
@@ -250,6 +304,7 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
           )}
         </div>
       ))}
+      <CloudSignIn onMessage={setMsg} />
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-neutral-500">Add a destination:</span>
         {(Object.keys(kinds) as BackupDest["kind"][]).map((k) => (

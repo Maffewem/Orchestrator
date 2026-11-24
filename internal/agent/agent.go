@@ -312,7 +312,13 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 	switch c.Action {
 	case api.ActionStart:
 		err = a.docker.Start(cctx, c.Target)
+		if err == nil {
+			a.restoreDedicated(cctx) // brings the device's access address and route back
+		}
 	case api.ActionStop:
+		// A stopped worker gives up the device's access address too, so the same address can be
+		// brought up for it on another device.
+		a.releaseHostAccess(cctx, c.Target)
 		err = a.docker.Stop(cctx, c.Target)
 	case api.ActionRestart:
 		err = a.docker.Restart(cctx, c.Target)
@@ -339,6 +345,7 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		var id string
 		if id, err = a.docker.ContainerByName(cctx, c.Target); err == nil && id != "" {
 			parent, ip := a.docker.containerParentOn(cctx, id), a.docker.containerIPOn(cctx, id, macvlanPrefix)
+			a.releaseHostAccess(cctx, id) // the device's access address goes with the worker
 			if c.Args["volumes"] == "delete" {
 				output, err = a.docker.RemoveWithVolumes(cctx, id)
 			} else {

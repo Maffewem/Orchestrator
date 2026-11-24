@@ -181,3 +181,31 @@ func (a *Agent) restoreDedicated(ctx context.Context) {
 		}
 	}
 }
+
+// releaseHostAccess removes the device's access address and route for a worker that is about to
+// stop (target is its container id or name). The worker keeps its own address; only the device's
+// way of reaching it goes, and restoreDedicated brings it back when the worker starts again.
+func (a *Agent) releaseHostAccess(ctx context.Context, target string) {
+	cs, err := a.docker.Containers(ctx)
+	if err != nil {
+		return
+	}
+	for _, c := range cs {
+		if c.ID != target && c.Name != target && !strings.HasPrefix(c.ID, target) {
+			continue
+		}
+		hip := c.Labels[labelDedHost]
+		if hip == "" {
+			return
+		}
+		for _, n := range c.Networks {
+			if !strings.HasPrefix(n.Name, macvlanPrefix) {
+				continue
+			}
+			parent := strings.TrimPrefix(n.Name, macvlanPrefix)
+			dropShimRoute(ctx, parent, n.IP)
+			_ = ipRun(ctx, "addr", "del", hip+"/32", "dev", shimFor(parent))
+		}
+		return
+	}
+}

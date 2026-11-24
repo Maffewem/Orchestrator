@@ -40,11 +40,21 @@ type ProjectView struct {
 	// MainRunningURL is where the main copy's running container answers, and MainPending says the saved
 	// own-address settings differ from it and wait for a redeploy.
 	MainRunningURL string `json:"main_running_url,omitempty"`
-	MainPending    bool   `json:"main_pending,omitempty"`
+	// NetworkAccess describes each copy's own network address in plain words. Only administrators
+	// can change these, because an address can place a worker on another VLAN or on addresses the
+	// network trusts.
+	NetworkAccess []string `json:"network_access,omitempty"`
+	MainPending   bool     `json:"main_pending,omitempty"`
 }
 
 func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView, error) {
-	v := ProjectView{Project: p, HostAccess: hostAccessOf(p.Source, p.Runtime)}
+	v := ProjectView{Project: p}
+	for _, h := range hostAccessOf(p.Source, p.Runtime) {
+		if !strings.HasPrefix(h, dedicatedAccessPrefix) {
+			v.HostAccess = append(v.HostAccess, h)
+		}
+	}
+	v.NetworkAccess = s.networkAccessLines(ctx, p)
 	if p.Source.Type == store.SourceCloudflare {
 		v.DeviceName = "Cloudflare"
 		v.Cloudflare = s.cfStatusOf(ctx, p.ID)

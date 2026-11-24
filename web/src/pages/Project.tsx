@@ -324,12 +324,20 @@ export default function ProjectPage() {
           <ErrorNote>{error}</ErrorNote>
         </div>
       )}
-      {!!p.host_access?.length && (
+      {!isAdmin && !!p.host_access?.length && (
         <div className="mb-4">
           <WarnNote>
-            This project uses host-level options that give its containers control of the device:{" "}
-            {p.host_access.join("; ")}. It keeps running, but only an administrator can change these
-            {isAdmin ? "." : "; you can still deploy, restart, roll back and edit environment variables."}
+            This project uses options that give its containers control of the device: {p.host_access.join("; ")}. It keeps
+            running, but only an administrator can change these. You can still deploy, restart, roll back and edit environment variables.
+          </WarnNote>
+        </div>
+      )}
+      {!isAdmin && !!p.network_access?.length && (
+        <div className="mb-4">
+          <WarnNote>
+            This project has its own network address{p.network_access.length > 1 ? "es" : ""}: {p.network_access.join("; ")}. Only an
+            administrator can change them, because an own address can put a worker on another VLAN or on an address the network
+            trusts. You can still deploy, restart, roll back and edit environment variables.
           </WarnNote>
         </div>
       )}

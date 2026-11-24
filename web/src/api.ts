@@ -436,6 +436,7 @@ export interface Project {
   cloudflare?: CloudflareStatus | null;
   /** Host-level options in use (host folder mounts, host networking, Compose files); only admins can change them. */
   host_access?: string[];
+  network_access?: string[];
 }
 
 export interface Event {

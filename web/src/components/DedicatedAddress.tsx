@@ -121,7 +121,7 @@ export default function DedicatedAddress({
                   <input
                     className={inputClass}
                     disabled={!canEdit}
-                    placeholder={value.vlan ? "192.168.5.250" : "192.168.0.250"}
+                    placeholder="A spare address on this network"
                     value={value.host_ip ?? ""}
                     onChange={(e) => set({ host_ip: e.target.value })}
                     onBlur={() => {
@@ -141,12 +141,12 @@ export default function DedicatedAddress({
             </div>
             <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="VLAN ID" hint="Optional, 1 to 4094. Puts the worker on another VLAN of the same cable. Empty: the device's own network.">
+                <Field label="VLAN ID" hint="Optional, a number from 1 to 4094. Leave empty for the device's normal network: nothing VLAN-related is created.">
                   <input
                     className={inputClass}
                     disabled={!canEdit}
                     inputMode="numeric"
-                    placeholder="1005"
+                    placeholder="None"
                     value={value.vlan ?? ""}
                     onChange={(e) => {
                       const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
@@ -156,12 +156,12 @@ export default function DedicatedAddress({
                 </Field>
                 {!!value.vlan && value.mode === "static" && (
                   <Field label="VLAN subnet" hint="The VLAN's network, like 192.168.5.0/24. It isn't taken from the VLAN ID.">
-                    <input className={inputClass} disabled={!canEdit} placeholder="192.168.5.0/24" value={value.subnet ?? ""} onChange={(e) => set({ subnet: e.target.value })} />
+                    <input className={inputClass} disabled={!canEdit} placeholder="Like 192.168.5.0/24" value={value.subnet ?? ""} onChange={(e) => set({ subnet: e.target.value })} />
                   </Field>
                 )}
                 {!!value.vlan && value.mode === "static" && (
                   <Field label="VLAN gateway" hint="The router's address on the VLAN. Needed for the worker to reach other networks.">
-                    <input className={inputClass} disabled={!canEdit} placeholder="192.168.5.1" value={value.gateway ?? ""} onChange={(e) => set({ gateway: e.target.value })} />
+                    <input className={inputClass} disabled={!canEdit} placeholder="The router's address on the VLAN" value={value.gateway ?? ""} onChange={(e) => set({ gateway: e.target.value })} />
                   </Field>
                 )}
               </div>

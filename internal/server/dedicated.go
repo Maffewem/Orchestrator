@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,12 +64,34 @@ func subnetOf(n *api.NetAddr) *net.IPNet {
 func cleanDedicated(d *api.DedicatedIP) error {
 	d.Parent = strings.TrimSpace(d.Parent)
 	d.IP, d.HostIP = strings.TrimSpace(d.IP), strings.TrimSpace(d.HostIP)
+	d.Subnet, d.Gateway = strings.TrimSpace(d.Subnet), strings.TrimSpace(d.Gateway)
 	d.MAC = strings.ToLower(strings.TrimSpace(d.MAC))
 	if d.MAC == "" {
 		d.MAC = newMAC()
 	}
 	if mac, err := net.ParseMAC(d.MAC); err != nil || len(mac) != 6 || mac[0]&1 != 0 {
 		return fmt.Errorf("%q is not a usable MAC address (like 02:ab:cd:12:34:56)", d.MAC)
+	}
+	if d.VLAN < 0 || d.VLAN > 4094 {
+		return errors.New("the VLAN ID must be between 1 and 4094 (leave it empty for no VLAN)")
+	}
+	if d.VLAN == 0 || d.Mode == api.DedicatedDHCP {
+		// Without a VLAN the subnet is the device's own; with DHCP it is learned from the lease.
+		d.Subnet, d.Gateway = "", ""
+	}
+	if d.VLAN > 0 && d.Mode == api.DedicatedStatic {
+		_, sn, err := net.ParseCIDR(d.Subnet)
+		if err != nil || sn.IP.To4() == nil {
+			return fmt.Errorf("a static address on a VLAN needs the VLAN's subnet, like 192.168.5.0/24 (got %q)", d.Subnet)
+		}
+		d.Subnet = sn.String()
+		if d.Gateway != "" {
+			gw := net.ParseIP(d.Gateway)
+			if gw == nil || !sn.Contains(gw) {
+				return fmt.Errorf("the gateway %q is not an address inside %s", d.Gateway, sn)
+			}
+			d.Gateway = gw.String()
+		}
 	}
 	switch d.Mode {
 	case api.DedicatedDHCP:
@@ -103,6 +126,9 @@ func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.De
 		out = append(out, errAgentTooOld(dev, "dedicated addresses").Error())
 		return out
 	}
+	if d.VLAN > 0 && !hasCap(dev, api.CapDedicatedVLAN) {
+		return append(out, errAgentTooOld(dev, "VLANs for dedicated addresses").Error())
+	}
 	var lan *net.IPNet
 	var gw string
 	if n := lanOn(dev, d.Parent); n == nil {
@@ -112,6 +138,14 @@ func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.De
 			out = append(out, fmt.Sprintf("%s is a Wi-Fi interface, which can't carry a worker's own address. Use a wired interface", n.Interface))
 		}
 		lan, gw = subnetOf(n), n.Gateway
+	}
+	if d.VLAN > 0 {
+		// The VLAN has its own network: the one typed in (static) or learned from DHCP (checked by
+		// the agent), not the physical port's own.
+		lan, gw = nil, d.Gateway
+		if _, sn, err := net.ParseCIDR(d.Subnet); err == nil {
+			lan = sn
+		}
 	}
 	taken := map[string]string{} // address -> who holds it
 	devs, _ := s.store.ListDevices(ctx)
@@ -230,6 +264,7 @@ func (s *Server) handleCheckDedicated(w http.ResponseWriter, r *http.Request) {
 	}
 	cmd, err := s.store.CreateCommand(r.Context(), dev.ID, api.ActionNetworkCheck, "", map[string]string{
 		"mode": d.Mode, "ip": d.IP, "mac": d.MAC, "parent": d.Parent, "host_ip": d.HostIP, "service": service,
+		"vlan": strconv.Itoa(d.VLAN), "subnet": d.Subnet, "gateway": d.Gateway,
 	})
 	if err != nil {
 		s.internal(w, err)
@@ -275,6 +310,9 @@ func dedicatedMoveProblem(p *store.Project, dst *store.Device) error {
 	if !hasCap(dst, api.CapDedicatedIP) {
 		return errAgentTooOld(dst, "dedicated addresses")
 	}
+	if d.VLAN > 0 && !hasCap(dst, api.CapDedicatedVLAN) {
+		return errAgentTooOld(dst, "VLANs for dedicated addresses")
+	}
 	n := lanOn(dst, d.Parent)
 	switch {
 	case n == nil:
@@ -282,7 +320,9 @@ func dedicatedMoveProblem(p *store.Project, dst *store.Device) error {
 	case n.Wireless:
 		return fmt.Errorf("%s reaches the network over Wi-Fi, which can't carry a dedicated address", dst.Name)
 	}
-	if lan := subnetOf(n); lan != nil {
+	// A VLAN has its own network, so the device's own subnet doesn't matter; the destination's
+	// switch port must carry the VLAN, which can't be checked from here.
+	if lan := subnetOf(n); lan != nil && d.VLAN == 0 {
 		for _, ip := range []string{d.IP, d.HostIP} {
 			if ip != "" && !lan.Contains(net.ParseIP(ip)) {
 				return fmt.Errorf("%s is outside %s's network %s. Give %s a new address, or use DHCP, before moving it", ip, dst.Name, lan, p.Name)

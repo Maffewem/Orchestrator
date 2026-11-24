@@ -15,6 +15,30 @@ Project settings, Runtime, **Own address on the network** (administrators only, 
 
 List the worker's ports as `80:80` or just `80`. The host side of a mapping is ignored. Redeploy to apply a change.
 
+## Putting a worker on another VLAN (Beta)
+
+A worker can live on a different VLAN from the device while the device keeps using its single ethernet port. Under **Advanced**, enter a **VLAN ID** (1 to 4094). The agent creates an 802.1Q tagged sub-interface on the chosen network interface, named `<interface>.<id>`, and uses it as the macvlan parent. Example: VLAN ID `1005`, which carries the `192.168.5.0/24` network, gives `eth0.1005` and a worker address such as `192.168.5.20`. Different workers can use different VLANs on the same port.
+
+What has to exist outside Orchestrator:
+
+- **The switch port must carry the VLAN tagged.** It must be a trunk (or "tagged member") for that VLAN, in addition to whatever untagged network the device uses. Without it, nothing leaves the sub-interface and DHCP gets no answer.
+- **The router must serve the VLAN.** For DHCP it needs a DHCP server on that VLAN; for any traffic outside the VLAN (including from other VLANs to the worker) it needs routing and firewall rules between the networks.
+
+Addressing:
+
+- **DHCP**: the agent asks on the VLAN under the worker's own MAC. The subnet and gateway come from the DHCP answer, not from the VLAN ID. Reserve the MAC in the router to keep the address fixed.
+- **Static**: enter the address, the **VLAN subnet** (for example `192.168.5.0/24`) and the **VLAN gateway** (for example `192.168.5.1`). The subnet is never guessed from the VLAN ID. The address must be inside the subnet, not the network, broadcast or gateway address, and not used by another worker or device. **Check on the network** also probes the VLAN for an answer from that address.
+
+Details:
+
+- The sub-interface is created when you check or deploy, brought up, and recreated when the agent starts. Docker also recreates it for its macvlan network (`orch-lan-eth0.1005`) when the Docker daemon starts, so restart-policy containers come back after a reboot.
+- The device itself is not on the VLAN. As above, set **Address for the device itself** (a spare address on the VLAN's subnet) if Caddy or the Cloudflare Tunnel on this device must reach the worker. Each VLAN gets its own access interface (`orch-shimv1005`).
+- **Port conflicts**: none, as for any worker with its own address, so the worker can take 80 and 443 on the VLAN. Domains and the tunnel work only through the device access address.
+- Agents older than this feature refuse a VLAN (an older agent would silently attach the worker to the untagged network). Update the agent first.
+- **Moving the worker** to another device: that device's switch port must carry the VLAN too, which can't be checked from here. A static address keeps working because the subnet belongs to the VLAN, not the device.
+- **Removing it**: when no worker uses a VLAN any more (the worker moved to another VLAN, the feature was turned off and redeployed, or the worker was deleted), the agent deletes the macvlan network and the sub-interface, and with it the access interface on that VLAN. A sub-interface that already carries an IPv4 address (one you set up yourself) is left alone.
+- The agent needs root and the `8021q` kernel module (loaded automatically by `ip link add ... type vlan` on Raspberry Pi OS and Ubuntu) and `ip` (iproute2).
+
 ## Removing it
 
 Turn the switch off and redeploy. The worker goes back to the default bridge network and published ports, the DHCP lease is no longer renewed (it expires), and the device's route to the worker is removed.
@@ -42,4 +66,4 @@ Linux device with the agent running on the host (not as a container), a wired in
 
 ## Not tested live
 
-Everything here is covered by unit tests (address and subnet checks, DHCP client against a fake server, settings validation, routing and migration rules), but none of it has run against a real router, Docker macvlan network or Pi yet. First things to try: a DHCP worker on an ethernet Pi with a router reservation, a static worker, the device access address, and moving a dedicated worker between devices.
+Everything here is covered by unit tests (address and subnet checks, DHCP client against a fake server, settings validation, routing and migration rules), but none of it has run against a real router, Docker macvlan network or Pi yet. The VLAN option adds to that: creating the sub-interface, DHCP and static addressing on a tagged VLAN, the access interface per VLAN, restoring it after a reboot and cleanup are all untested against a real trunk port. First things to try: a DHCP worker on VLAN 1005 (192.168.5.0/24), then a DHCP worker on an ethernet Pi with a router reservation, a static worker, the device access address, and moving a dedicated worker between devices.

@@ -338,15 +338,23 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 	case api.ActionRemove:
 		var id string
 		if id, err = a.docker.ContainerByName(cctx, c.Target); err == nil && id != "" {
+			parent, ip := a.docker.containerParentOn(cctx, id), a.docker.containerIPOn(cctx, id, macvlanPrefix)
 			if c.Args["volumes"] == "delete" {
 				output, err = a.docker.RemoveWithVolumes(cctx, id)
 			} else {
 				err = a.docker.Remove(cctx, id)
 			}
+			if err == nil && parent != "" {
+				a.dropLease(c.Target)
+				dropShimRoute(cctx, parent, ip)
+				a.releaseParent(cctx, parent)
+			}
 		}
 	case api.ActionNetworkCheck:
 		var d api.DedicatedIP
 		d.Mode, d.IP, d.MAC, d.Parent, d.HostIP = c.Args["mode"], c.Args["ip"], c.Args["mac"], c.Args["parent"], c.Args["host_ip"]
+		d.VLAN, _ = strconv.Atoi(c.Args["vlan"])
+		d.Subnet, d.Gateway = c.Args["subnet"], c.Args["gateway"]
 		current := ""
 		if id, _ := a.docker.ContainerByName(cctx, c.Args["service"]); id != "" {
 			current = a.docker.containerIPOn(cctx, id, macvlanPrefix)

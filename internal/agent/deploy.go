@@ -176,8 +176,9 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		}
 	}
 	labels := map[string]string{"orchestrator.deployment": deploymentID, "orchestrator.service": spec.Service}
-	var prevIP, prevDedicated string
+	var prevIP, prevDedicated, prevParent string
 	if previous != "" {
+		prevParent = a.docker.containerParentOn(ctx, previous)
 		prevDedicated, _ = a.docker.LabelOf(ctx, previous, labelDedicated)
 		prevIP = a.docker.containerIPOn(ctx, previous, macvlanPrefix)
 	}
@@ -204,7 +205,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		if err := ensureShim(ctx, att.LAN.Parent, spec.Dedicated.HostIP, att.IP); err != nil {
 			st.logf("Warning: the device can't reach the worker's address: %v", err)
 		} else {
-			st.logf("This device reaches the worker at %s through %s (own address %s)", att.IP, shimName, spec.Dedicated.HostIP)
+			st.logf("This device reaches the worker at %s through %s (own address %s)", att.IP, shimFor(att.LAN.Parent), spec.Dedicated.HostIP)
 		}
 	}
 	st.begin(ctx, api.StepIndex(spec, api.StepVerify))
@@ -263,7 +264,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		a.dropLease(spec.Service)
 	}
 	if prevIP != "" && (att == nil || !att.IP.Equal(net.ParseIP(prevIP))) {
-		dropShimRoute(ctx, prevIP)
+		dropShimRoute(ctx, prevParent, prevIP)
 	}
 	if previous != "" {
 		if err := a.docker.Remove(ctx, previous); err != nil {
@@ -271,6 +272,9 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		} else {
 			st.logf("Removed previous version")
 		}
+	}
+	if prevParent != "" && (att == nil || att.LAN.Parent != prevParent) {
+		a.releaseParent(ctx, prevParent) // the worker left this network or VLAN
 	}
 	return nil
 }

@@ -34,10 +34,32 @@ type lan struct {
 	Subnet  *net.IPNet
 	Gateway net.IP
 	Own     []net.IP // addresses the device itself holds on any interface
+	// Phys is the physical interface under a VLAN sub-interface (empty without a VLAN). Subnet is
+	// nil for a DHCP VLAN until a lease or offer says what the VLAN's network is.
+	Phys string
 }
 
-// findLAN describes the network of parent (or of the default route when parent is empty).
-func findLAN(parent string) (*lan, error) {
+// physical is the interface that actually carries the traffic.
+func (l *lan) physical() string {
+	if l.Phys != "" {
+		return l.Phys
+	}
+	return l.Parent
+}
+
+// adopt takes the network from a DHCP lease or offer (used on a VLAN, where the device itself
+// has no address to read the subnet from).
+func (l *lan) adopt(d *dhcpLease) {
+	l.Subnet = d.Subnet()
+	if d.Router != nil && l.Subnet.Contains(d.Router) {
+		l.Gateway = d.Router
+	}
+}
+
+// findLAN describes the network d attaches to: the network of d.Parent (or of the default route
+// when it is empty), or with a VLAN, the tagged sub-interface on that port, created if missing.
+func findLAN(ctx context.Context, d api.DedicatedIP) (*lan, error) {
+	parent := d.Parent
 	route, gw := defaultRoute()
 	if parent == "" {
 		parent = route
@@ -50,6 +72,13 @@ func findLAN(parent string) (*lan, error) {
 		return nil, fmt.Errorf("network interface %q not found on this device", parent)
 	}
 	l := &lan{Parent: parent}
+	if d.VLAN > 0 {
+		name, err := ensureVLAN(ctx, parent, d.VLAN)
+		if err != nil {
+			return nil, err
+		}
+		l.Parent, l.Phys = name, parent
+	}
 	all, _ := net.Interfaces()
 	for _, i := range all {
 		addrs, _ := i.Addrs()
@@ -58,6 +87,20 @@ func findLAN(parent string) (*lan, error) {
 				l.Own = append(l.Own, ipn.IP)
 			}
 		}
+	}
+	if d.VLAN > 0 {
+		// The device has no address on the VLAN: the subnet is given (static) or learned (DHCP).
+		if d.Subnet != "" {
+			_, sn, err := net.ParseCIDR(d.Subnet)
+			if err != nil || sn.IP.To4() == nil {
+				return nil, fmt.Errorf("%q is not an IPv4 subnet like 192.168.5.0/24", d.Subnet)
+			}
+			l.Subnet = sn
+			if g := net.ParseIP(d.Gateway); g != nil && sn.Contains(g) {
+				l.Gateway = g
+			}
+		}
+		return l, nil
 	}
 	addrs, _ := ifc.Addrs()
 	for _, a := range addrs {
@@ -159,19 +202,33 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		bad("dedicated addresses need a Linux device")
 		return out
 	}
-	l, err := findLAN(d.Parent)
+	if d.VLAN < 0 || d.VLAN > 4094 {
+		bad("the VLAN ID must be between 1 and 4094")
+		return out
+	}
+	if d.VLAN > 0 && d.Mode == api.DedicatedStatic && d.Subnet == "" {
+		bad("a static address on a VLAN needs the VLAN's subnet, like 192.168.5.0/24")
+		return out
+	}
+	l, err := findLAN(ctx, d)
 	if err != nil {
 		bad("%v", err)
 		return out
 	}
-	out.Parent, out.Subnet = l.Parent, l.Subnet.String()
+	out.Parent = l.Parent
+	if l.Subnet != nil {
+		out.Subnet = l.Subnet.String()
+	}
 	if l.Gateway != nil {
 		out.Gateway = l.Gateway.String()
 	}
-	if isWireless(l.Parent) {
+	if isWireless(l.physical()) {
 		out.Wireless = true
-		bad("%s is a Wi-Fi interface. Wi-Fi access points accept only one MAC address per client, so a worker with its own MAC can't join the network that way. Use a wired interface.", l.Parent)
+		bad("%s is a Wi-Fi interface. Wi-Fi access points accept only one MAC address per client, so a worker with its own MAC can't join the network that way. Use a wired interface.", l.physical())
 		return out
+	}
+	if d.VLAN > 0 {
+		out.Notes = append(out.Notes, fmt.Sprintf("VLAN %d is carried on %s as %s. The switch port must carry VLAN %d tagged, and the router must serve it (DHCP and routing).", d.VLAN, l.physical(), l.Parent, d.VLAN))
 	}
 	mac, err := parseMAC(d.MAC)
 	if err != nil {
@@ -202,10 +259,21 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		offer, err := newDHCPClient(l.Parent, mac).Offer(cctx)
 		cancel()
 		if err != nil {
-			bad("DHCP: %v", err)
+			if d.VLAN > 0 {
+				bad("DHCP: %v. Check that VLAN %d is tagged on the switch port and that the router runs DHCP for it.", err, d.VLAN)
+			} else {
+				bad("DHCP: %v", err)
+			}
 			break
 		}
 		out.Offer = offer.IP.String()
+		if l.Subnet == nil {
+			l.adopt(offer)
+			out.Subnet = l.Subnet.String()
+			if l.Gateway != nil {
+				out.Gateway = l.Gateway.String()
+			}
+		}
 		if !l.Subnet.Contains(offer.IP) {
 			bad("the DHCP server offered %s, which is outside %s", offer.IP, l.Subnet)
 		}
@@ -218,6 +286,8 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		switch {
 		case hip == nil:
 			bad("%q is not an IP address for the device's own access", d.HostIP)
+		case l.Subnet == nil:
+			// a DHCP VLAN whose subnet isn't known yet (no offer)
 		default:
 			if ps := staticProblems(hip, l); len(ps) > 0 {
 				for _, p := range ps {
@@ -279,9 +349,23 @@ func (d *Docker) macvlanNet(ctx context.Context, l *lan) (string, error) {
 	return name, nil
 }
 
-// removeMacvlanIfUnused deletes the macvlan network for parent when no container uses it.
-func (d *Docker) removeMacvlanIfUnused(ctx context.Context, parent string) {
-	_ = d.call(ctx, http.MethodDelete, "/networks/"+macvlanPrefix+parent, nil, nil, nil)
+// removeMacvlanIfUnused deletes the macvlan network for parent when no container uses it and
+// reports whether it is gone (Docker refuses while a container is attached).
+func (d *Docker) removeMacvlanIfUnused(ctx context.Context, parent string) bool {
+	err := d.call(ctx, http.MethodDelete, "/networks/"+macvlanPrefix+parent, nil, nil, nil)
+	return err == nil || strings.Contains(strings.ToLower(err.Error()), "not found")
+}
+
+// releaseParent cleans up after a worker has left parent: it removes the then-unused macvlan
+// network and, for a VLAN sub-interface Orchestrator made, the sub-interface (and with it the
+// device access shim on it).
+func (a *Agent) releaseParent(ctx context.Context, parent string) {
+	if parent == "" || !a.docker.removeMacvlanIfUnused(ctx, parent) {
+		return
+	}
+	if _, _, ok := splitVLAN(parent); ok {
+		deleteVLAN(ctx, parent)
+	}
 }
 
 // attachment is what Create needs to put a container on its dedicated address.
@@ -321,7 +405,7 @@ func (a *Agent) prepareDedicated(ctx context.Context, st *steps, spec api.Deploy
 	for _, n := range chk.Notes {
 		st.logf("Note: %s", n)
 	}
-	l, err := findLAN(d.Parent)
+	l, err := findLAN(ctx, d)
 	if err != nil {
 		return nil, err
 	}
@@ -333,6 +417,9 @@ func (a *Agent) prepareDedicated(ctx context.Context, st *steps, spec api.Deploy
 		cancel()
 		if err != nil {
 			return nil, fmt.Errorf("DHCP: %w", err)
+		}
+		if l.Subnet == nil {
+			l.adopt(lease)
 		}
 		if !l.Subnet.Contains(lease.IP) {
 			return nil, fmt.Errorf("the DHCP server leased %s, which is outside %s", lease.IP, l.Subnet)
@@ -348,6 +435,24 @@ func (a *Agent) prepareDedicated(ctx context.Context, st *steps, spec api.Deploy
 	}
 	st.logf("Attaching to %s on %s as %s (%s)", at.Network, l.Parent, at.IP, mac)
 	return at, nil
+}
+
+// containerParentOn returns the parent interface of the container's macvlan network.
+func (d *Docker) containerParentOn(ctx context.Context, id string) string {
+	var v struct {
+		NetworkSettings struct {
+			Networks map[string]struct{ IPAddress string }
+		}
+	}
+	if err := d.call(ctx, http.MethodGet, "/containers/"+id+"/json", nil, nil, &v); err != nil {
+		return ""
+	}
+	for n := range v.NetworkSettings.Networks {
+		if strings.HasPrefix(n, macvlanPrefix) {
+			return strings.TrimPrefix(n, macvlanPrefix)
+		}
+	}
+	return ""
 }
 
 // containerIPOn returns the container's address on a network whose name starts with prefix.

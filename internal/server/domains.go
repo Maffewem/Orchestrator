@@ -450,7 +450,11 @@ func upstreamPort(p *store.Project) string {
 // the chosen web port (matched against the host side of a mapping, else taken as the container
 // port) or the first TCP port.
 func dedicatedWebPort(p *store.Project) string {
-	for _, m := range p.Runtime.Ports {
+	ports := p.Runtime.Ports
+	if d := p.Runtime.Dedicated; d != nil && len(d.Ports) > 0 {
+		ports = d.Ports // this address has its own ports
+	}
+	for _, m := range ports {
 		if strings.HasSuffix(m, "/udp") {
 			continue
 		}

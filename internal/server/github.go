@@ -269,6 +269,9 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 	if d := p.Runtime.Dedicated; d != nil {
 		cp := *d
 		spec.Dedicated = &cp
+		if len(d.Ports) > 0 {
+			spec.Ports = d.Ports
+		}
 	}
 	for k, v := range p.Runtime.Labels {
 		spec.Labels[k] = v

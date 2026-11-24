@@ -101,6 +101,10 @@ type Runtime struct {
 	// Dedicated gives the worker its own address on the device's LAN (a macvlan network), so it can
 	// use ports such as 80 and 443 that the device holds. Its ports are served there, not on the device.
 	Dedicated *api.DedicatedIP `json:"dedicated,omitempty"`
+	// CopyAddresses are the own-address settings of other devices the worker runs on (replicas, or
+	// a device it may move to), by device id. Dedicated belongs to the project's own device.
+	// Every copy has its own MAC and address; none can share one.
+	CopyAddresses map[string]*api.DedicatedIP `json:"copy_addresses,omitempty"`
 	// Container is the name of the container when it differs from the project name (adopted containers).
 	Container string `json:"container,omitempty"`
 	// Adopted marks a project created from a container that already existed. Orchestrator left that

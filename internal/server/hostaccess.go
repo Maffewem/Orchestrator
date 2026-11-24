@@ -42,6 +42,13 @@ func hostAccessOf(src store.Source, rt store.Runtime) []string {
 	if d := rt.Dedicated; d != nil {
 		out = append(out, "Dedicated network address ("+d.Mode+" "+d.IP+" "+d.HostIP+")")
 	}
+	copies := make([]string, 0, len(rt.CopyAddresses))
+	for dev, d := range rt.CopyAddresses {
+		if d != nil {
+			copies = append(copies, "Dedicated network address for another copy ("+dev+" "+d.Mode+" "+d.IP+" "+d.HostIP+")")
+		}
+	}
+	out = append(out, copies...)
 	if src.Type == store.SourceCompose {
 		if src.Repo != "" {
 			out = append(out, "Compose file "+src.ComposeFile+" from "+src.Repo)

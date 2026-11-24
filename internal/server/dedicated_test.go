@@ -249,3 +249,89 @@ func TestSubnetFrom(t *testing.T) {
 		t.Errorf("empty: %v", err)
 	}
 }
+
+func TestDedicatedCopyAddresses(t *testing.T) {
+	h := newHarness(t)
+	one, two := h.register("pi"), h.register("pi2")
+	for _, r := range []struct {
+		reg  api.RegisterResponse
+		addr string
+	}{{one, "192.168.0.184"}, {two, "192.168.0.185"}} {
+		host := dedicatedHost(api.CapDedicatedIP, api.CapDedicatedVLAN)
+		host.Network[0].Address = r.addr
+		h.do("POST", "/api/agent/heartbeat", r.reg.AgentToken, api.HeartbeatRequest{Host: host}, &api.HeartbeatResponse{})
+	}
+	body := func(main map[string]any, copies map[string]any) map[string]any {
+		rt := map[string]any{"ports": []string{"80:80"}, "dedicated": main}
+		if copies != nil {
+			rt["copy_addresses"] = copies
+		}
+		return map[string]any{"name": "web", "device_id": one.DeviceID, "source": map[string]any{"type": "image", "image": "caddy"}, "runtime": rt}
+	}
+	var p store.Project
+	if code := h.do("POST", "/api/projects", adminToken, body(map[string]any{"mode": "static", "ip": "192.168.0.201"}, map[string]any{two.DeviceID: map[string]any{"mode": "dhcp"}}), &p); code != http.StatusCreated {
+		t.Fatalf("create with a copy address: %d", code)
+	}
+	cp := p.Runtime.CopyAddresses[two.DeviceID]
+	if cp == nil || cp.MAC == "" || cp.MAC == p.Runtime.Dedicated.MAC {
+		t.Fatalf("each copy needs its own MAC: main %+v copy %+v", p.Runtime.Dedicated, cp)
+	}
+	patch := func(main map[string]any, copies map[string]any) int {
+		return h.do("PATCH", "/api/projects/"+p.ID, adminToken, body(main, copies), &store.Project{})
+	}
+	for name, c := range map[string]struct{ main, copy map[string]any }{
+		"same MAC":                 {map[string]any{"mode": "dhcp", "mac": cp.MAC}, map[string]any{"mode": "dhcp", "mac": cp.MAC}},
+		"same address":             {map[string]any{"mode": "static", "ip": "192.168.0.201"}, map[string]any{"mode": "static", "ip": "192.168.0.201"}},
+		"same device-side address": {map[string]any{"mode": "dhcp", "host_ip": "192.168.0.250"}, map[string]any{"mode": "dhcp", "host_ip": "192.168.0.250"}},
+		"no interface":             {map[string]any{"mode": "dhcp"}, map[string]any{"mode": "dhcp", "parent": "eth9"}},
+	} {
+		if code := patch(c.main, map[string]any{two.DeviceID: c.copy}); code != http.StatusBadRequest {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+	if code := patch(map[string]any{"mode": "static", "ip": "192.168.0.201"}, map[string]any{two.DeviceID: map[string]any{"mode": "static", "ip": "192.168.0.202", "mac": cp.MAC}}); code != http.StatusOK {
+		t.Fatalf("a different address on the other copy: %d", code)
+	}
+	// Another project can't take a copy's address either.
+	var other store.Project
+	if code := h.do("POST", "/api/projects", adminToken, map[string]any{"name": "other", "device_id": two.DeviceID, "source": map[string]any{"type": "image", "image": "caddy"},
+		"runtime": map[string]any{"ports": []string{"80:80"}, "dedicated": map[string]any{"mode": "static", "ip": "192.168.0.202"}}}, &other); code != http.StatusBadRequest {
+		t.Fatalf("another project on a copy's address: %d", code)
+	}
+}
+
+func TestAdoptCopyAddress(t *testing.T) {
+	main := &api.DedicatedIP{Mode: api.DedicatedStatic, IP: "192.168.0.201", MAC: "02:00:00:00:00:01"}
+	copyA := &api.DedicatedIP{Mode: api.DedicatedStatic, IP: "192.168.0.202", MAC: "02:00:00:00:00:02"}
+	p := &store.Project{DeviceID: "a", Runtime: store.Runtime{Dedicated: main, CopyAddresses: map[string]*api.DedicatedIP{"b": copyA}}}
+	undo := adoptCopyAddress(p, "a", "b")
+	if p.Runtime.Dedicated != copyA || p.Runtime.CopyAddresses["a"] != main || len(p.Runtime.CopyAddresses) != 1 {
+		t.Fatalf("after the move: %+v %+v", p.Runtime.Dedicated, p.Runtime.CopyAddresses)
+	}
+	p.DeviceID = "b"
+	if dedicatedFor(p, "b") != copyA || dedicatedFor(p, "a") != main {
+		t.Fatal("each device uses its own setting")
+	}
+	undo()
+	if p.Runtime.Dedicated != main || p.Runtime.CopyAddresses["b"] != copyA {
+		t.Fatal("undo should restore both")
+	}
+	// Without an entry for the destination nothing changes.
+	q := &store.Project{DeviceID: "a", Runtime: store.Runtime{Dedicated: main}}
+	adoptCopyAddress(q, "a", "c")
+	if q.Runtime.Dedicated != main || q.Runtime.CopyAddresses != nil {
+		t.Fatalf("%+v", q.Runtime)
+	}
+}
+
+func TestCopyRunningPending(t *testing.T) {
+	p := &store.Project{Name: "w", Runtime: store.Runtime{Ports: []string{"8000:8080"}, Dedicated: &api.DedicatedIP{Mode: api.DedicatedStatic, IP: "192.168.5.200"}}}
+	d := &store.Device{ID: "d1", Containers: []api.Container{{Name: "w", State: "running"}}}
+	if _, pending := copyRunning(p, d, true); !pending {
+		t.Fatal("a saved address on a container still on the device network must be pending")
+	}
+	d.Containers[0].Networks = []api.ContainerNet{{Name: "orch-lan-eth0", IP: "192.168.5.200"}}
+	if _, pending := copyRunning(p, d, true); pending {
+		t.Fatal("matching address must not be pending")
+	}
+}

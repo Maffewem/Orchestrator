@@ -1,13 +1,16 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/Maffewem/Orchestrator/internal/api"
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
@@ -18,7 +21,10 @@ import (
 // take over the device, so changing them needs an administrator. Operators keep deploying,
 // restarting, rolling back and editing environment variables.
 
-const errHostAccessAdmin = "only administrators can use host-level options (host folder mounts, host or shared networking, a dedicated network address, Compose files), because they give a container control of the device; operators can still deploy, restart, roll back and edit environment variables"
+const errHostAccessAdmin = "only administrators can change host-level options (host folder mounts, host or shared networking, Compose files) or a worker's own network address: the first give a container control of the device, and an own address can place a worker on another VLAN or on an address the network trusts. Operators can still deploy, restart, roll back and edit environment variables"
+
+// dedicatedAccessPrefix starts the host-access strings that describe own network addresses.
+const dedicatedAccessPrefix = "Dedicated network address"
 
 // namedVolumeRe matches a Docker named volume; anything else in a volume source is a host path.
 var namedVolumeRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
@@ -40,12 +46,12 @@ func hostAccessOf(src store.Source, rt store.Runtime) []string {
 		out = append(out, "Network mode "+n)
 	}
 	if d := rt.Dedicated; d != nil {
-		out = append(out, "Dedicated network address ("+d.Mode+" "+d.IP+" "+d.HostIP+")")
+		out = append(out, dedicatedAccessPrefix+" ("+d.Mode+" "+d.IP+" "+d.HostIP+")")
 	}
 	copies := make([]string, 0, len(rt.CopyAddresses))
 	for dev, d := range rt.CopyAddresses {
 		if d != nil {
-			copies = append(copies, "Dedicated network address for another copy ("+dev+" "+d.Mode+" "+d.IP+" "+d.HostIP+")")
+			copies = append(copies, dedicatedAccessPrefix+" for another copy ("+dev+" "+d.Mode+" "+d.IP+" "+d.HostIP+")")
 		}
 	}
 	out = append(out, copies...)
@@ -83,4 +89,42 @@ func hostAccessAllowed(r *http.Request, had, want []string) bool {
 		}
 	}
 	return true
+}
+
+// networkAccessLines lists each copy's own address in plain words, naming the copy by its device,
+// for example "Claude (main): own address 192.168.5.2, device access address 192.168.5.250".
+func (s *Server) networkAccessLines(ctx context.Context, p *store.Project) []string {
+	line := func(deviceID, role string, d *api.DedicatedIP) string {
+		name := "A removed device"
+		if dev, err := s.store.GetDevice(ctx, deviceID); err == nil {
+			name = dev.Name
+		}
+		own := "own address from DHCP"
+		if d.Mode == api.DedicatedStatic {
+			own = "own address " + d.IP
+		}
+		out := fmt.Sprintf("%s (%s): %s", name, role, own)
+		if d.HostIP != "" {
+			out += ", device access address " + d.HostIP
+		}
+		if d.VLAN > 0 {
+			out += fmt.Sprintf(", VLAN %d", d.VLAN)
+		}
+		return out
+	}
+	var out []string
+	if d := p.Runtime.Dedicated; d != nil {
+		out = append(out, line(p.DeviceID, "main", d))
+	}
+	var ids []string
+	for id, d := range p.Runtime.CopyAddresses {
+		if d != nil {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		out = append(out, line(id, "replica", p.Runtime.CopyAddresses[id]))
+	}
+	return out
 }

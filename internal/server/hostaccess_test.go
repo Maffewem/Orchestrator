@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/Maffewem/Orchestrator/internal/api"
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
@@ -85,5 +87,18 @@ func TestOperatorCannotUseHostLevelOptions(t *testing.T) {
 	// Adopting containers is admin only.
 	if code := h.do("POST", "/api/devices/"+reg.DeviceID+"/adopt", op, map[string]any{}, nil); code != http.StatusForbidden {
 		t.Errorf("operator adopt: %d", code)
+	}
+}
+
+func TestNetworkAccessLinesNameDevices(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	p := &store.Project{DeviceID: reg.DeviceID, Runtime: store.Runtime{
+		Dedicated:     &api.DedicatedIP{Mode: api.DedicatedStatic, IP: "192.168.5.2", HostIP: "192.168.5.250"},
+		CopyAddresses: map[string]*api.DedicatedIP{"dev_missing": {Mode: api.DedicatedDHCP}},
+	}}
+	got := h.srv.networkAccessLines(context.Background(), p)
+	if len(got) != 2 || !strings.HasSuffix(got[0], "(main): own address 192.168.5.2, device access address 192.168.5.250") || !strings.Contains(got[1], "(replica): own address from DHCP") {
+		t.Fatalf("unexpected lines: %q", got)
 	}
 }

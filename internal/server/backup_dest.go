@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -45,6 +46,7 @@ type BackupDest struct {
 	Remote     string `json:"remote,omitempty"`      // rclone kind: remote name; defaults to the first section
 
 	LastAt    *time.Time `json:"last_at,omitempty"`
+	LastSize  int64      `json:"last_size,omitempty"` // size of the last copy sent
 	LastError string     `json:"last_error,omitempty"`
 }
 
@@ -52,6 +54,59 @@ type BackupDest struct {
 type destView struct {
 	BackupDest
 	SecretSet bool `json:"secret_set"`
+	// Location says in words where the copies land: device and folder, bucket and prefix, or
+	// remote and folder. UsedBytes is the space the copies take, known only for folders on the
+	// server (other kinds report the size of the last copy sent).
+	Location  string `json:"location"`
+	UsedBytes *int64 `json:"used_bytes,omitempty"`
+}
+
+func (s *Server) destLocation(ctx context.Context, d BackupDest) (string, *int64) {
+	switch d.Kind {
+	case "s3":
+		where := "bucket " + d.Bucket
+		if p := strings.Trim(d.Prefix, "/"); p != "" {
+			where += ", folder " + p
+		}
+		if d.Endpoint != "" {
+			where += " at " + d.Endpoint
+		}
+		return where, nil
+	case "folder":
+		loc := s.locate(ctx, d.Path)
+		out := d.Path + " inside the server container"
+		switch {
+		case loc.HostPath != "" && loc.Device != "":
+			out = "folder " + d.Path + ", which is " + loc.HostPath + " on " + loc.Device
+		case loc.HostPath != "":
+			out = "folder " + d.Path + ", which is " + loc.HostPath + " on the server's host"
+		case loc.Note != "":
+			out = "folder " + d.Path + " (" + loc.Note + ")"
+		}
+		var n int64
+		filepath.WalkDir(d.Path, func(_ string, e fs.DirEntry, err error) error {
+			if err == nil && e.Type().IsRegular() {
+				if info, err := e.Info(); err == nil {
+					n += info.Size()
+				}
+			}
+			return nil
+		})
+		return out, &n
+	case "device":
+		name := "an unknown device"
+		if dev, err := s.store.GetDevice(ctx, d.DeviceID); err == nil {
+			name = dev.Name
+		}
+		return "folder " + d.Path + " on " + name, nil
+	case "rclone":
+		remote := d.Remote
+		if remote == "" {
+			remote = "the remote"
+		}
+		return "cloud storage " + remote + ", folder " + d.Path, nil
+	}
+	return "", nil
 }
 
 func (s *Server) backupDests(ctx context.Context) []BackupDest {
@@ -72,6 +127,7 @@ func (s *Server) destViews(ctx context.Context) []destView {
 	for _, d := range s.backupDests(ctx) {
 		v := destView{BackupDest: d, SecretSet: d.SecretKey != "" || d.RcloneConf != ""}
 		v.SecretKey, v.RcloneConf = "", ""
+		v.Location, v.UsedBytes = s.destLocation(ctx, d)
 		out = append(out, v)
 	}
 	return out
@@ -269,6 +325,9 @@ func (s *Server) replicateServerBackup(name string, keep int) {
 	for i := range cur {
 		if err, ok := results[cur[i].ID]; ok {
 			cur[i].LastAt = &now
+			if fi, e := os.Stat(src); e == nil && err == nil {
+				cur[i].LastSize = fi.Size()
+			}
 			cur[i].LastError = ""
 			if err != nil {
 				cur[i].LastError = err.Error()

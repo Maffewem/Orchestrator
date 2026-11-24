@@ -27,6 +27,16 @@ type Self struct {
 	ImageRef string
 	// SocketBind is the host path of the Docker socket mounted into this container.
 	SocketBind string
+	// Mounts are the container's mounts; they tell where its folders really live on the host.
+	Mounts []Mount
+}
+
+// Mount is one mount of the server container.
+type Mount struct {
+	Type        string `json:"Type"`
+	Name        string `json:"Name"`
+	Source      string `json:"Source"`
+	Destination string `json:"Destination"`
 }
 
 // Identify finds the container this process runs in. It fails when there is no Docker
@@ -52,10 +62,10 @@ func Identify(ctx context.Context, d *agent.Docker) (*Self, error) {
 		return nil, err
 	}
 	var v struct {
-		Mounts []struct{ Source, Destination string } `json:"Mounts"`
+		Mounts []Mount `json:"Mounts"`
 	}
 	json.Unmarshal(raw, &v)
-	s := &Self{ID: id, Name: name, ImageID: imageID, ImageRef: ref, SocketBind: socketPath}
+	s := &Self{ID: id, Name: name, ImageID: imageID, ImageRef: ref, SocketBind: socketPath, Mounts: v.Mounts}
 	for _, m := range v.Mounts {
 		if m.Destination == socketPath {
 			s.SocketBind = m.Source

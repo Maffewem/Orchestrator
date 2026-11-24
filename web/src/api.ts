@@ -45,6 +45,11 @@ export interface DedicatedIP {
   parent?: string;
   /** Spare address that lets the device itself reach the worker. */
   host_ip?: string;
+  /** 802.1Q VLAN ID (1-4094): the agent creates a tagged sub-interface such as eth0.1005. */
+  vlan?: number;
+  /** The VLAN's network (static mode); learned from DHCP otherwise. */
+  subnet?: string;
+  gateway?: string;
 }
 
 export interface DedicatedCheck {

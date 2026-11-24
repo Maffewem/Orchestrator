@@ -44,3 +44,34 @@ func TestParseMAC(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitVLANAndShim(t *testing.T) {
+	phys, id, ok := splitVLAN("eth0.1005")
+	if !ok || phys != "eth0" || id != 1005 {
+		t.Fatalf("got %q %d %v", phys, id, ok)
+	}
+	for _, n := range []string{"eth0", "eth0.", "eth0.0", "eth0.4095", "eth0.x", ".5"} {
+		if _, _, ok := splitVLAN(n); ok {
+			t.Errorf("%q is not a VLAN sub-interface", n)
+		}
+	}
+	if shimFor("eth0") != "orch-shim" || shimFor("eth0.1005") != "orch-shimv1005" {
+		t.Fatalf("shim names: %s %s", shimFor("eth0"), shimFor("eth0.1005"))
+	}
+	if len(shimFor("eth0.4094")) > 15 {
+		t.Fatal("interface names are limited to 15 characters")
+	}
+}
+
+func TestVLANLearnsSubnetFromLease(t *testing.T) {
+	l := &lan{Parent: "eth0.1005", Phys: "eth0"}
+	l.adopt(&dhcpLease{IP: net.ParseIP("192.168.5.77"), Mask: net.CIDRMask(24, 32), Router: net.ParseIP("192.168.5.1")})
+	if l.Subnet.String() != "192.168.5.0/24" || l.Gateway.String() != "192.168.5.1" || l.physical() != "eth0" {
+		t.Fatalf("%+v", l)
+	}
+	l = &lan{Parent: "eth0.1005", Phys: "eth0"}
+	l.adopt(&dhcpLease{IP: net.ParseIP("192.168.5.77"), Mask: net.CIDRMask(24, 32), Router: net.ParseIP("10.0.0.1")})
+	if l.Gateway != nil {
+		t.Fatal("a router outside the subnet isn't a usable gateway")
+	}
+}

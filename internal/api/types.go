@@ -74,6 +74,14 @@ type DedicatedIP struct {
 	// interface on the device with this spare address in the same subnet (macvlan otherwise
 	// blocks traffic between a device and its own containers).
 	HostIP string `json:"host_ip,omitempty"`
+	// VLAN, when set (1-4094), puts the worker on that 802.1Q VLAN: the agent creates a tagged
+	// sub-interface (for example eth0.1005) on Parent and uses it as the macvlan parent. The
+	// switch port must carry the VLAN tagged and the router must serve it.
+	VLAN int `json:"vlan,omitempty"`
+	// Subnet (like 192.168.5.0/24) and Gateway describe the VLAN's network in static mode. In DHCP
+	// mode they are learned from the DHCP server. Unused without a VLAN.
+	Subnet  string `json:"subnet,omitempty"`
+	Gateway string `json:"gateway,omitempty"`
 }
 
 // Dedicated IP modes.
@@ -114,6 +122,7 @@ const (
 	CapTunnelUpdate  = "tunnel-update"  // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
 	CapDiscover      = "discover"       // finds the server again by itself when its address changes
 	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
+	CapDedicatedVLAN = "dedicated-vlan" // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
 	CapDedicatedIP   = "dedicated-ip"   // deploy with DeploySpec.Dedicated, and network.check
 	CapStats         = "stats"          // sends per-container StatsReport with heartbeats, and proxy metrics
 )

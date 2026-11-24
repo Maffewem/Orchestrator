@@ -32,24 +32,34 @@ func ensureShim(ctx context.Context, parent, hostIP string, workerIP net.IP) err
 	if _, err := exec.LookPath("ip"); err != nil {
 		return fmt.Errorf("the ip command (iproute2) is missing on this device")
 	}
-	if ifc, err := net.InterfaceByName(shimName); err != nil || ifc == nil {
-		if err := ipRun(ctx, "link", "add", shimName, "link", parent, "type", "macvlan", "mode", "bridge"); err != nil {
+	shim := shimFor(parent)
+	if ifc, err := net.InterfaceByName(shim); err != nil || ifc == nil {
+		if err := ipRun(ctx, "link", "add", shim, "link", parent, "type", "macvlan", "mode", "bridge"); err != nil {
 			return err
 		}
 	}
-	if err := ipRun(ctx, "addr", "replace", hostIP+"/32", "dev", shimName); err != nil {
+	if err := ipRun(ctx, "addr", "replace", hostIP+"/32", "dev", shim); err != nil {
 		return err
 	}
-	if err := ipRun(ctx, "link", "set", shimName, "up"); err != nil {
+	if err := ipRun(ctx, "link", "set", shim, "up"); err != nil {
 		return err
 	}
-	return ipRun(ctx, "route", "replace", workerIP.String()+"/32", "dev", shimName)
+	return ipRun(ctx, "route", "replace", workerIP.String()+"/32", "dev", shim)
+}
+
+// shimFor names the device access interface for parent: orch-shim on a plain interface and
+// orch-shimv<id> on a VLAN sub-interface, so each VLAN keeps its own.
+func shimFor(parent string) string {
+	if _, id, ok := splitVLAN(parent); ok {
+		return fmt.Sprintf("%sv%d", shimName, id)
+	}
+	return shimName
 }
 
 // dropShimRoute removes the route to a worker that has left its dedicated address.
-func dropShimRoute(ctx context.Context, workerIP string) {
+func dropShimRoute(ctx context.Context, parent, workerIP string) {
 	if workerIP != "" {
-		_ = ipRun(ctx, "route", "del", workerIP+"/32", "dev", shimName)
+		_ = ipRun(ctx, "route", "del", workerIP+"/32", "dev", shimFor(parent))
 	}
 }
 
@@ -151,6 +161,13 @@ func (a *Agent) restoreDedicated(ctx context.Context) {
 		}
 		if ip == nil {
 			continue
+		}
+		if phys, id, ok := splitVLAN(parent); ok {
+			// The sub-interface is not persistent: bring it back (Docker also recreates it for
+			// its network at daemon start, which usually happens first).
+			if _, err := ensureVLAN(ctx, phys, id); err != nil {
+				a.log.Warn("could not restore a VLAN sub-interface", "worker", c.Name, "vlan", parent, "err", err)
+			}
 		}
 		if mode == api.DedicatedDHCP {
 			if mac, err := parseMAC(c.Labels[labelDedMAC]); err == nil {

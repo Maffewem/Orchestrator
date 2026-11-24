@@ -170,3 +170,52 @@ func TestDedicatedWorkerUpstream(t *testing.T) {
 		t.Fatalf("a worker the device can't reach must say why: %v", err)
 	}
 }
+
+func TestDedicatedVLANSettings(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	beat := func(caps ...string) {
+		h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: dedicatedHost(caps...)}, &api.HeartbeatResponse{})
+	}
+	create := func(name string, ded map[string]any) (int, store.Project) {
+		var p store.Project
+		code := h.do("POST", "/api/projects", adminToken, map[string]any{"name": name, "device_id": reg.DeviceID,
+			"source": map[string]any{"type": "image", "image": "caddy"}, "runtime": map[string]any{"ports": []string{"80:80"}, "dedicated": ded}}, &p)
+		return code, p
+	}
+	// An agent that knows dedicated addresses but not VLANs would use the untagged network.
+	beat(api.CapDedicatedIP)
+	if code, _ := create("old", map[string]any{"mode": "dhcp", "vlan": 1005}); code != http.StatusBadRequest {
+		t.Fatalf("agent without VLAN support: %d", code)
+	}
+	beat(api.CapDedicatedIP, api.CapDedicatedVLAN)
+	for name, ded := range map[string]map[string]any{
+		"id too big":          {"mode": "dhcp", "vlan": 4095},
+		"negative":            {"mode": "dhcp", "vlan": -1},
+		"static no subnet":    {"mode": "static", "ip": "192.168.5.20", "vlan": 1005},
+		"ip outside subnet":   {"mode": "static", "ip": "192.168.6.20", "vlan": 1005, "subnet": "192.168.5.0/24"},
+		"gateway outside":     {"mode": "static", "ip": "192.168.5.20", "vlan": 1005, "subnet": "192.168.5.0/24", "gateway": "10.0.0.1"},
+		"ip is the gateway":   {"mode": "static", "ip": "192.168.5.1", "vlan": 1005, "subnet": "192.168.5.0/24", "gateway": "192.168.5.1"},
+		"device-subnet clash": {"mode": "static", "ip": "192.168.0.184", "vlan": 1005, "subnet": "192.168.0.0/24"},
+	} {
+		if code, _ := create("bad", ded); code != http.StatusBadRequest {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+	// An address outside the device's own subnet is fine on a VLAN with its own subnet.
+	code, p := create("vlan", map[string]any{"mode": "static", "ip": "192.168.5.20", "vlan": 1005, "subnet": "192.168.5.7/24", "gateway": "192.168.5.1", "host_ip": "192.168.5.250"})
+	if code != http.StatusCreated {
+		t.Fatalf("static vlan: %d", code)
+	}
+	d := p.Runtime.Dedicated
+	if d.VLAN != 1005 || d.Subnet != "192.168.5.0/24" || d.Gateway != "192.168.5.1" {
+		t.Fatalf("settings not normalised: %+v", d)
+	}
+	if code, p := create("vlan-dhcp", map[string]any{"mode": "dhcp", "vlan": 4094, "subnet": "10.0.0.0/8"}); code != http.StatusCreated || p.Runtime.Dedicated.Subnet != "" {
+		t.Fatalf("dhcp vlan learns its subnet: %d %+v", code, p.Runtime.Dedicated)
+	}
+	// The address is still unique across workers, whatever the VLAN.
+	if code, _ := create("dup", map[string]any{"mode": "static", "ip": "192.168.5.20", "vlan": 1005, "subnet": "192.168.5.0/24"}); code != http.StatusBadRequest {
+		t.Fatalf("duplicate: %d", code)
+	}
+}

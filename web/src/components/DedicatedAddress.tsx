@@ -102,8 +102,8 @@ export default function DedicatedAddress({
               </Field>
             )}
           </div>
-          <details className="text-sm">
-            <summary className="cursor-pointer text-neutral-600">Advanced</summary>
+          <details className="text-sm" open={!!value.vlan || undefined}>
+            <summary className="cursor-pointer text-neutral-600">Advanced{value.vlan ? ` · VLAN ${value.vlan}` : ""}</summary>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <Field label="Network interface" hint="Empty: the one with the default route.">
                 <select className={inputClass} disabled={!canEdit} value={value.parent ?? ""} onChange={(e) => set({ parent: e.target.value })}>
@@ -117,8 +117,46 @@ export default function DedicatedAddress({
                 </select>
               </Field>
               <Field label="Address for the device itself" hint="Optional spare address on the same network. Linux blocks a device from reaching its own macvlan workers; this adds an interface that can. Needed only if something on this device must talk to the worker.">
-                <input className={inputClass} disabled={!canEdit} placeholder="192.168.0.250" value={value.host_ip ?? ""} onChange={(e) => set({ host_ip: e.target.value })} />
+                <input className={inputClass} disabled={!canEdit} placeholder={value.vlan ? "192.168.5.250" : "192.168.0.250"} value={value.host_ip ?? ""} onChange={(e) => set({ host_ip: e.target.value })} />
               </Field>
+            </div>
+            <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="VLAN ID" hint="Optional, 1 to 4094. Puts the worker on another VLAN of the same cable. Empty: the device's own network.">
+                  <input
+                    className={inputClass}
+                    disabled={!canEdit}
+                    inputMode="numeric"
+                    placeholder="1005"
+                    value={value.vlan ?? ""}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
+                      set({ vlan: Number.isFinite(n) ? Math.min(n, 4094) : undefined });
+                    }}
+                  />
+                </Field>
+                {!!value.vlan && value.mode === "static" && (
+                  <Field label="VLAN subnet" hint="The VLAN's network, like 192.168.5.0/24. It isn't taken from the VLAN ID.">
+                    <input className={inputClass} disabled={!canEdit} placeholder="192.168.5.0/24" value={value.subnet ?? ""} onChange={(e) => set({ subnet: e.target.value })} />
+                  </Field>
+                )}
+                {!!value.vlan && value.mode === "static" && (
+                  <Field label="VLAN gateway" hint="The router's address on the VLAN. Needed for the worker to reach other networks.">
+                    <input className={inputClass} disabled={!canEdit} placeholder="192.168.5.1" value={value.gateway ?? ""} onChange={(e) => set({ gateway: e.target.value })} />
+                  </Field>
+                )}
+              </div>
+              {!!value.vlan && (
+                <div className="mt-3 space-y-1.5 text-xs text-neutral-600">
+                  <p>
+                    The agent adds a tagged interface <span className="font-mono">{(value.parent || "eth0")}.{value.vlan}</span> on the device's network port and attaches the worker to it, so one cable can serve several VLANs. For example, VLAN ID 1005 for the 192.168.5.0/24 network gives <span className="font-mono">eth0.1005</span>.
+                  </p>
+                  <p>
+                    Before this works: the <strong>switch port must carry VLAN {value.vlan} tagged</strong> (a trunk, alongside the untagged network), and the <strong>router must serve it</strong>: {value.mode === "dhcp" ? "DHCP for the VLAN (the subnet is learned from it)" : "a gateway address on the VLAN"} and routing to the networks that should reach the worker.
+                  </p>
+                  <p>The device itself still can't reach the worker at that address unless you set an address for the device itself, which must be a spare address on the VLAN's subnet.</p>
+                </div>
+              )}
             </div>
             {value.mode === "static" && value.mac && (
               <p className="mt-3 text-xs text-neutral-500">

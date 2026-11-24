@@ -261,7 +261,7 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		cancel()
 		if err != nil {
 			if d.VLAN > 0 {
-				bad("DHCP: %v. Check that VLAN %d is tagged on the switch port and that the router runs DHCP for it.", err, d.VLAN)
+				bad("DHCP: %v. %s Check that the network for VLAN %d (its VLAN ID must be exactly %d, with DHCP enabled) is tagged on the switch port.", err, vlanState(l), d.VLAN, d.VLAN)
 			} else {
 				bad("DHCP: %v", err)
 			}

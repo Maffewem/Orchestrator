@@ -14,8 +14,10 @@ import (
 
 // A small DHCPv4 client (RFC 2131) so a worker's macvlan address can be leased under the
 // worker's own MAC address, which lets a router hand out and reserve a fixed address for it.
-// It speaks to the LAN through UDP sockets bound to the parent interface, so it needs no
-// raw sockets and no external DHCP program.
+// It sends through a UDP socket bound to the interface and, on Linux, receives through a packet
+// socket on that interface: the kernel's reverse-path filter drops UDP replies from a router whose
+// network the interface has no address in (always the case on a fresh VLAN sub-interface), while
+// a packet socket sees every frame, as real DHCP clients do. No external DHCP program is needed.
 
 const (
 	dhcpDiscover = 1
@@ -49,12 +51,17 @@ type dhcpClient struct {
 	// timeout is how long to wait for each answer, and tries how many times to ask.
 	timeout time.Duration
 	tries   int
+	// recv, when set, opens the reader for replies (a packet socket); UDP is used when it fails.
+	recv func(iface string) (rawReader, error)
+	// sent counts the requests sent by the last exchange, for the error message.
+	sent     int
+	recvMode string // how replies are received, for the error message
 	// control, set per platform, binds the socket to iface and allows broadcast and port sharing.
 	control func(iface string) func(network, address string, c syscall.RawConn) error
 }
 
 func newDHCPClient(iface string, mac net.HardwareAddr) *dhcpClient {
-	return &dhcpClient{iface: iface, mac: mac, server: "255.255.255.255:67", listen: ":68", timeout: 3 * time.Second, tries: 3, control: dhcpControl}
+	return &dhcpClient{iface: iface, mac: mac, server: "255.255.255.255:67", listen: ":68", timeout: 3 * time.Second, tries: 3, control: dhcpControl, recv: newRawRecv}
 }
 
 func (c *dhcpClient) build(kind byte, xid uint32, ciaddr, want, server net.IP) []byte {
@@ -129,12 +136,13 @@ func (c *dhcpClient) parse(b []byte, xid uint32) (*dhcpReply, bool) {
 }
 
 // exchange sends one message until an answer of one of the wanted kinds arrives.
-func (c *dhcpClient) exchange(ctx context.Context, conn net.PacketConn, dst net.Addr, msg []byte, xid uint32, kinds ...byte) (*dhcpReply, error) {
+func (c *dhcpClient) exchange(ctx context.Context, conn dhcpIO, dst net.Addr, msg []byte, xid uint32, kinds ...byte) (*dhcpReply, error) {
 	buf := make([]byte, 1500)
 	for try := 0; try < c.tries; try++ {
 		if _, err := conn.WriteTo(msg, dst); err != nil {
 			return nil, fmt.Errorf("send: %w", err)
 		}
+		c.sent++
 		deadline := time.Now().Add(c.timeout)
 		for time.Now().Before(deadline) {
 			if err := ctx.Err(); err != nil {
@@ -157,10 +165,72 @@ func (c *dhcpClient) exchange(ctx context.Context, conn net.PacketConn, dst net.
 			}
 		}
 	}
-	return nil, errors.New("no answer from a DHCP server on this network")
+	seen := 0
+	if s, ok := conn.(interface{ Seen() int }); ok {
+		seen = s.Seen()
+	}
+	return nil, fmt.Errorf("no answer from a DHCP server on this network (%d requests sent%s)", c.sent, seenNote(c.recvMode, seen))
 }
 
-func (c *dhcpClient) open() (net.PacketConn, net.Addr, error) {
+// dhcpIO is what exchange needs from a connection.
+type dhcpIO interface {
+	WriteTo(b []byte, addr net.Addr) (int, error)
+	ReadFrom(b []byte) (int, net.Addr, error)
+	SetReadDeadline(t time.Time) error
+	Close() error
+}
+
+// rawReader receives the UDP payloads of DHCP replies (server port 67 to client port 68).
+type rawReader interface {
+	ReadFrom(b []byte) (int, net.Addr, error)
+	SetReadDeadline(t time.Time) error
+	Close() error
+	Seen() int
+}
+
+// splitConn sends through UDP and receives through a packet socket.
+type splitConn struct {
+	net.PacketConn
+	r rawReader
+}
+
+func (s *splitConn) ReadFrom(b []byte) (int, net.Addr, error) { return s.r.ReadFrom(b) }
+func (s *splitConn) SetReadDeadline(t time.Time) error        { return s.r.SetReadDeadline(t) }
+func (s *splitConn) Seen() int                                { return s.r.Seen() }
+func (s *splitConn) Close() error {
+	_ = s.r.Close()
+	return s.PacketConn.Close()
+}
+
+func seenNote(mode string, seen int) string {
+	if mode == "" {
+		return ""
+	}
+	return fmt.Sprintf(", %d DHCP packets seen on the interface via %s", seen, mode)
+}
+
+// dhcpPayload returns the UDP payload of an IPv4 packet that is a DHCP server-to-client message,
+// or nil for anything else.
+func dhcpPayload(p []byte) []byte {
+	if len(p) < 28 || p[0]>>4 != 4 || p[9] != 17 {
+		return nil
+	}
+	ihl := int(p[0]&0x0f) * 4
+	if ihl < 20 || len(p) < ihl+8 {
+		return nil
+	}
+	u := p[ihl:]
+	if binary.BigEndian.Uint16(u[0:]) != 67 || binary.BigEndian.Uint16(u[2:]) != 68 {
+		return nil
+	}
+	n := int(binary.BigEndian.Uint16(u[4:]))
+	if n < 8 || n > len(u) {
+		return nil
+	}
+	return u[8:n]
+}
+
+func (c *dhcpClient) open() (dhcpIO, net.Addr, error) {
 	dst, err := net.ResolveUDPAddr("udp4", c.server)
 	if err != nil {
 		return nil, nil, err
@@ -172,6 +242,13 @@ func (c *dhcpClient) open() (net.PacketConn, net.Addr, error) {
 	conn, err := lc.ListenPacket(context.Background(), "udp4", c.listen)
 	if err != nil {
 		return nil, nil, fmt.Errorf("listen for DHCP answers: %w", err)
+	}
+	c.sent, c.recvMode = 0, "UDP"
+	if c.recv != nil && c.iface != "" {
+		if r, err := c.recv(c.iface); err == nil {
+			c.recvMode = "a packet socket"
+			return &splitConn{PacketConn: conn, r: r}, dst, nil
+		}
 	}
 	return conn, dst, nil
 }

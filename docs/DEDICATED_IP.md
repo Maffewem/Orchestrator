@@ -39,6 +39,10 @@ Details:
 - **Removing it**: when no worker uses a VLAN any more (the worker moved to another VLAN, the feature was turned off and redeployed, or the worker was deleted), the agent deletes the macvlan network and the sub-interface, and with it the access interface on that VLAN. A sub-interface that already carries an IPv4 address (one you set up yourself) is left alone.
 - The agent needs root and the `8021q` kernel module (loaded automatically by `ip link add ... type vlan` on Raspberry Pi OS and Ubuntu) and `ip` (iproute2).
 
+### If DHCP on the VLAN gets no answer
+
+The error lists what the agent saw: whether the sub-interface exists, its state and carrier, the reverse-path filter (`rp_filter`) setting, how many requests were sent and how many DHCP packets were seen on the interface. Replies are read through a packet socket on the sub-interface, because the kernel's reverse-path filter drops ordinary UDP replies from a router whose network the interface has no address in. "0 DHCP packets seen" means nothing came back on that VLAN: check that the UniFi (or other) network's VLAN ID is exactly the ID you entered, that DHCP is enabled for it and that the switch port carries it tagged. To test by hand on the device, create the interface with `ip link add link eth0 name eth0.<id> type vlan id <id>`, bring it up and watch `tcpdump -n -e -i eth0 vlan <id> and port 67 or port 68`.
+
 ## Removing it
 
 Turn the switch off and redeploy. The worker goes back to the default bridge network and published ports, the DHCP lease is no longer renewed (it expires), and the device's route to the worker is removed.

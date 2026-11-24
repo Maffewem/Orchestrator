@@ -247,7 +247,7 @@ export default function DedicatedAddress({
               </div>
               {!!value.vlan && (
                 <p className="mt-3 text-xs text-neutral-600">
-                  The switch port must carry VLAN {value.vlan} tagged and the router must serve it. See the Dedicated address docs.
+                  The switch port must carry VLAN {value.vlan} tagged and the router must serve it. Other networks reach this address only if the router routes to this VLAN and its firewall allows it.
                 </p>
               )}
             </div>

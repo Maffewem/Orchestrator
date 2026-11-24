@@ -651,8 +651,32 @@ function ProjectSettings({ p, onSaved, viewId, viewName, formKey, dirty }: { p: 
   const nav = useNavigate();
   const isAdmin = useCan("admin");
   const [saved, setSaved] = useState(false);
+  // Saving changes the stored settings only; the running container keeps what it was deployed with.
+  const [needsDeploy, setNeedsDeploy] = useState(false);
+  const [deployErr, setDeployErr] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  async function deployNow() {
+    setStarting(true);
+    setDeployErr(null);
+    try {
+      await api.deployProject(p.id);
+      nav(`/projects/${p.id}/deployments`);
+    } catch (e) {
+      setDeployErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStarting(false);
+    }
+  }
   return (
     <div className="space-y-6">
+      {needsDeploy && p.source.type !== "cloudflare" && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm">
+          <span>Saved. The running worker keeps its old settings until you deploy it again.{deployErr ? ` ${deployErr}` : ""}</span>
+          <Button onClick={deployNow} loading={starting}>
+            Deploy now
+          </Button>
+        </div>
+      )}
       {p.source.type === "cloudflare" && <CloudflareSettings p={p} />}
       {(p.replicas?.length ?? 0) > 0 && (
         <p className="rounded-lg bg-blue-50 px-4 py-2 text-sm">
@@ -669,6 +693,7 @@ function ProjectSettings({ p, onSaved, viewId, viewName, formKey, dirty }: { p: 
           onSubmit={async (input, previews) => {
             await api.updateProject(p.id, input);
             if (previews) await api.setPreviewSettings(p.id, previews);
+            if (JSON.stringify(input.runtime) !== JSON.stringify(p.runtime)) setNeedsDeploy(true);
             setSaved(true);
             setTimeout(() => setSaved(false), 1500);
             onSaved();

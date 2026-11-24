@@ -30,8 +30,11 @@ export default function DedicatedAddress({
   useEffect(() => {
     setCheck(null);
     setErr(null);
+    setAutoHost(null);
   }, [device?.id, projectId, copyLabel]);
   const [busy, setBusy] = useState(false);
+  // The device-side address the last check filled in; shown with a note until it is edited.
+  const [autoHost, setAutoHost] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const supported = !!device?.host.capabilities?.includes("dedicated-ip");
   const nets = device?.host.network ?? [];
@@ -49,7 +52,11 @@ export default function DedicatedAddress({
     try {
       const r = await api.checkDedicated(device.id, { ...value, project_id: projectId });
       setCheck(r);
-      if (!value.mac && r.mac) onChange({ ...value, mac: r.mac });
+      const fillHost = !value.host_ip && !!r.suggest_host_ip;
+      if ((!value.mac && r.mac) || fillHost) {
+        onChange({ ...value, mac: value.mac || r.mac || "", ...(fillHost ? { host_ip: r.suggest_host_ip } : {}) });
+      }
+      setAutoHost(fillHost ? r.suggest_host_ip ?? null : null);
     } catch (e) {
       setCheck(null);
       setErr(e instanceof Error ? e.message : String(e));
@@ -195,6 +202,9 @@ export default function DedicatedAddress({
                   )}
                 </div>
                 {hostStatus}
+                {autoHost && value.host_ip === autoHost && (
+                  <p className="mt-1.5 text-xs text-neutral-600">Filled in for you from a free address. Change it if you like; it is only saved when you save the settings.</p>
+                )}
                 <p className="mt-1.5 text-xs text-amber-700">
                   Pick an address outside your router's DHCP range.
                 </p>

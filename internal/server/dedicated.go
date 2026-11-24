@@ -118,6 +118,33 @@ func cleanDedicated(d *api.DedicatedIP) error {
 	return nil
 }
 
+// takenAddresses maps every address Orchestrator knows to who holds it (devices' own addresses and
+// other workers' addresses and device access addresses), and every other worker's MAC to its name.
+func (s *Server) takenAddresses(ctx context.Context, exceptProject string) (taken, macs map[string]string) {
+	taken, macs = map[string]string{}, map[string]string{}
+	devs, _ := s.store.ListDevices(ctx)
+	for _, od := range devs {
+		for _, n := range od.Host.Network {
+			taken[n.Address] = "the device " + od.Name
+		}
+	}
+	projects, _ := s.store.ListProjects(ctx)
+	for _, p := range projects {
+		o := p.Runtime.Dedicated
+		if p.ID == exceptProject || o == nil {
+			continue
+		}
+		if o.IP != "" {
+			taken[o.IP] = "the worker " + p.Name
+		}
+		if o.HostIP != "" {
+			taken[o.HostIP] = "the device access address of " + p.Name
+		}
+		macs[o.MAC] = p.Name
+	}
+	return taken, macs
+}
+
 // dedicatedProblems lists why d can't be used by project id on device dev, from what the server
 // already knows: the device's reported network and every other worker's claim on an address.
 func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.Device, d *api.DedicatedIP) []string {
@@ -147,28 +174,7 @@ func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.De
 			lan = sn
 		}
 	}
-	taken := map[string]string{} // address -> who holds it
-	devs, _ := s.store.ListDevices(ctx)
-	for _, od := range devs {
-		for _, n := range od.Host.Network {
-			taken[n.Address] = "the device " + od.Name
-		}
-	}
-	macs := map[string]string{}
-	projects, _ := s.store.ListProjects(ctx)
-	for _, p := range projects {
-		o := p.Runtime.Dedicated
-		if p.ID == id || o == nil {
-			continue
-		}
-		if o.IP != "" {
-			taken[o.IP] = "the worker " + p.Name
-		}
-		if o.HostIP != "" {
-			taken[o.HostIP] = "the device access address of " + p.Name
-		}
-		macs[o.MAC] = p.Name
-	}
+	taken, macs := s.takenAddresses(ctx, id)
 	if who, dup := macs[d.MAC]; dup {
 		out = append(out, "that MAC address already belongs to "+who)
 	}
@@ -262,9 +268,14 @@ func (s *Server) handleCheckDedicated(w http.ResponseWriter, r *http.Request) {
 			service = serviceOf(p)
 		}
 	}
+	taken, _ := s.takenAddresses(r.Context(), req.ProjectID)
+	avoid := make([]string, 0, len(taken))
+	for ip := range taken {
+		avoid = append(avoid, ip)
+	}
 	cmd, err := s.store.CreateCommand(r.Context(), dev.ID, api.ActionNetworkCheck, "", map[string]string{
 		"mode": d.Mode, "ip": d.IP, "mac": d.MAC, "parent": d.Parent, "host_ip": d.HostIP, "service": service,
-		"vlan": strconv.Itoa(d.VLAN), "subnet": d.Subnet, "gateway": d.Gateway,
+		"avoid": strings.Join(avoid, ","), "vlan": strconv.Itoa(d.VLAN), "subnet": d.Subnet, "gateway": d.Gateway,
 	})
 	if err != nil {
 		s.internal(w, err)

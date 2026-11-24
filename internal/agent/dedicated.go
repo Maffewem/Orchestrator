@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -195,7 +196,7 @@ func probeIP(ctx context.Context, iface string, ip net.IP) (inUse, checked bool)
 
 // checkDedicated validates a dedicated address without changing anything. current is the address
 // the worker's own running container already holds, which is allowed to answer.
-func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current string) api.NetworkCheck {
+func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current string, avoid map[string]bool) api.NetworkCheck {
 	var out api.NetworkCheck
 	bad := func(f string, args ...any) { out.Problems = append(out.Problems, fmt.Sprintf(f, args...)) }
 	if runtime.GOOS != "linux" {
@@ -260,7 +261,7 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		cancel()
 		if err != nil {
 			if d.VLAN > 0 {
-				bad("DHCP: %v. Check that VLAN %d is tagged on the switch port and that the router runs DHCP for it.", err, d.VLAN)
+				bad("DHCP: %v. %s Check that the network for VLAN %d (its VLAN ID must be exactly %d, with DHCP enabled) is tagged on the switch port.", err, vlanState(l), d.VLAN, d.VLAN)
 			} else {
 				bad("DHCP: %v", err)
 			}
@@ -289,13 +290,40 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		case l.Subnet == nil:
 			// a DHCP VLAN whose subnet isn't known yet (no offer)
 		default:
-			if ps := staticProblems(hip, l); len(ps) > 0 {
-				for _, p := range ps {
-					bad("device access address: %s", p)
+			ps := staticProblems(hip, l)
+			for _, p := range ps {
+				bad("device access address: %s", p)
+			}
+			if len(ps) == 0 && avoid[hip.String()] {
+				bad("device access address: %s is already used by another worker or device known to Orchestrator", hip)
+			} else if len(ps) == 0 && !heldByShim(l.Parent, hip) && !hip.Equal(net.ParseIP(d.IP)) {
+				// Our own access interface answers for its address, so only a different one is probed.
+				switch inUse, checked := probeIP(ctx, l.Parent, hip); {
+				case inUse:
+					bad("device access address: something on the network already answers for %s", hip)
+				case !checked:
+					out.Notes = append(out.Notes, "Couldn't check whether the device access address is free: install arping or ping on the device.")
 				}
+			} else if len(ps) == 0 && hip.Equal(net.ParseIP(d.IP)) {
+				bad("device access address: it must differ from the worker's address")
 			}
 		}
-	} else {
+	} else if len(out.Problems) == 0 && l.Subnet != nil {
+		skip := []net.IP{net.ParseIP(d.IP)}
+		if out.Offer != "" {
+			skip = append(skip, net.ParseIP(out.Offer))
+		}
+		ip, checked := suggestHost(ctx, l, avoid, skip...)
+		switch {
+		case ip == "":
+			out.Notes = append(out.Notes, "Couldn't find a free address for the device itself near the top of "+l.Subnet.String()+". Pick one by hand.")
+		case !checked:
+			out.SuggestHostIP = ip
+			out.Notes = append(out.Notes, "Couldn't check whether "+ip+" is free (install arping or ping on the device). Make sure it is outside your DHCP range and unused.")
+		default:
+			out.SuggestHostIP = ip
+			out.Notes = append(out.Notes, ip+" didn't answer on the network. Make sure it is outside your router's DHCP range.")
+		}
 		out.Notes = append(out.Notes, "Without a device access address, this device itself can't reach the worker: the Linux macvlan driver blocks traffic between a host and its own containers. Other devices on the network can.")
 	}
 	return out
@@ -395,7 +423,7 @@ func (a *Agent) prepareDedicated(ctx context.Context, st *steps, spec api.Deploy
 	} else {
 		st.logf("Asking the network's DHCP server for an address for %s…", d.MAC)
 	}
-	chk := a.checkDedicated(ctx, d, current)
+	chk := a.checkDedicated(ctx, d, current, nil)
 	if len(chk.Problems) > 0 {
 		for _, p := range chk.Problems {
 			st.logf("Error: %s", p)
@@ -471,4 +499,72 @@ func (d *Docker) containerIPOn(ctx context.Context, id, prefix string) string {
 		}
 	}
 	return ""
+}
+
+// heldByShim reports whether the device's own access interface for parent already holds ip.
+func heldByShim(parent string, ip net.IP) bool {
+	ifc, err := net.InterfaceByName(shimFor(parent))
+	if err != nil {
+		return false
+	}
+	addrs, _ := ifc.Addrs()
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostCandidates lists addresses worth suggesting for the device's own access, most preferred
+// first: the top of the subnet (leaving the very last ones to routers), skipping the gateway, the
+// device itself, anything in avoid and anything in skip.
+func hostCandidates(l *lan, avoid map[string]bool, skip []net.IP, max int) []net.IP {
+	if l.Subnet == nil || l.Subnet.IP.To4() == nil {
+		return nil
+	}
+	ones, bits := l.Subnet.Mask.Size()
+	if bits-ones < 2 {
+		return nil
+	}
+	base := binary.BigEndian.Uint32(l.Subnet.IP.To4())
+	last := base + uint32(1)<<(bits-ones) - 2 // last usable host
+	start := last
+	if last-base > 16 {
+		start = last - 4 // .250 on a /24
+	}
+	var out []net.IP
+	for cand, n := start, 0; cand > base && n < 80 && len(out) < max; cand, n = cand-1, n+1 {
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], cand)
+		ip := net.IP(b[:])
+		if len(staticProblems(ip, l)) > 0 || avoid[ip.String()] {
+			continue
+		}
+		skipped := false
+		for _, s := range skip {
+			if s != nil && s.Equal(ip) {
+				skipped = true
+			}
+		}
+		if !skipped {
+			out = append(out, ip)
+		}
+	}
+	return out
+}
+
+// suggestHost finds an address near the top of the subnet that nothing answers for. checked is
+// false when no probe tool was available, so the address is only likely to be free.
+func suggestHost(ctx context.Context, l *lan, avoid map[string]bool, skip ...net.IP) (ip string, checked bool) {
+	for _, c := range hostCandidates(l, avoid, skip, 5) {
+		inUse, ok := probeIP(ctx, l.Parent, c)
+		if !ok {
+			return c.String(), false
+		}
+		if !inUse {
+			return c.String(), true
+		}
+	}
+	return "", false
 }

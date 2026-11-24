@@ -99,3 +99,23 @@ func TestDHCPIgnoresOtherClients(t *testing.T) {
 		t.Fatal("a reply for another transaction must be ignored")
 	}
 }
+
+func TestDHCPPayload(t *testing.T) {
+	udp := func(src, dst uint16, payload []byte) []byte {
+		ip := make([]byte, 20, 28+len(payload))
+		ip[0], ip[9] = 0x45, 17
+		u := make([]byte, 8)
+		binary.BigEndian.PutUint16(u[0:], src)
+		binary.BigEndian.PutUint16(u[2:], dst)
+		binary.BigEndian.PutUint16(u[4:], uint16(8+len(payload)))
+		return append(append(ip, u...), payload...)
+	}
+	if got := dhcpPayload(udp(67, 68, []byte("hello"))); string(got) != "hello" {
+		t.Fatalf("got %q", got)
+	}
+	for name, p := range map[string][]byte{"request": udp(68, 67, []byte("x")), "dns": udp(53, 68, []byte("x")), "short": {0x45, 0}} {
+		if dhcpPayload(p) != nil {
+			t.Errorf("%s should be ignored", name)
+		}
+	}
+}

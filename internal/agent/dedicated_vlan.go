@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -68,4 +69,34 @@ func deleteVLAN(ctx context.Context, name string) {
 		}
 	}
 	_ = ipRun(ctx, "link", "del", name)
+}
+
+// avoidSet reads the comma-separated addresses the server knows are taken.
+func avoidSet(list string) map[string]bool {
+	m := map[string]bool{}
+	for _, a := range strings.Split(list, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			m[a] = true
+		}
+	}
+	return m
+}
+
+// vlanState describes the sub-interface for an error message: whether it exists, is up and has a
+// carrier, and the reverse-path filter setting that can drop replies.
+func vlanState(l *lan) string {
+	ifc, err := net.InterfaceByName(l.Parent)
+	if err != nil {
+		return fmt.Sprintf("The sub-interface %s does not exist.", l.Parent)
+	}
+	read := func(path string) string {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return "?"
+		}
+		return strings.TrimSpace(string(b))
+	}
+	return fmt.Sprintf("Sub-interface %s on %s: exists, flags %v, state %s, carrier %s, rp_filter %s/%s.",
+		l.Parent, l.physical(), ifc.Flags, read("/sys/class/net/"+l.Parent+"/operstate"), read("/sys/class/net/"+l.Parent+"/carrier"),
+		read("/proc/sys/net/ipv4/conf/all/rp_filter"), read("/proc/sys/net/ipv4/conf/"+l.Parent+"/rp_filter"))
 }

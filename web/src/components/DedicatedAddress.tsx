@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Network } from "lucide-react";
 import { api, type DedicatedCheck, type DedicatedIP, type Device } from "../api";
 import { Button, CopyButton, Field, Toggle, inputClass } from "./ui";
@@ -14,14 +14,23 @@ export default function DedicatedAddress({
   device,
   projectId,
   canEdit,
+  replicaView,
 }: {
   value: DedicatedIP | null;
   onChange: (v: DedicatedIP | null) => void;
   device?: Device;
   projectId?: string;
   canEdit: boolean;
+  /** Set to the replica's device name while a replica is being viewed. */
+  replicaView?: string;
 }) {
   const [check, setCheck] = useState<DedicatedCheck | null>(null);
+  // A network check belongs to the device it ran on (this form's device) and to the settings it
+  // checked: drop it when either changes, or when the viewed copy changes.
+  useEffect(() => {
+    setCheck(null);
+    setErr(null);
+  }, [device?.id, projectId, replicaView]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const supported = !!device?.host.capabilities?.includes("dedicated-ip");
@@ -80,6 +89,11 @@ export default function DedicatedAddress({
           <AlertTriangle className="mt-0.5 size-4 shrink-0" /> This device is on Wi-Fi. Access points allow one MAC address per client, so this normally doesn't work. Use a wired device.
         </p>
       )}
+      {value && replicaView && (
+        <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm">
+          You are viewing the copy on {replicaView}, a replica. Replicas run on their device's normal ports and ignore this worker's own address and VLAN: they never take it. It belongs to the main copy{device ? ` on ${device.name}` : ""}, and network checks are not run for replicas.
+        </p>
+      )}
       {value && (
         <div className="mt-4 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -116,18 +130,37 @@ export default function DedicatedAddress({
                   ))}
                 </select>
               </Field>
-              <Field label="Address for the device itself" hint="Optional spare address on the same network. Linux blocks a device from reaching its own macvlan workers; this adds an interface that can. Needed only if something on this device must talk to the worker.">
-                <input className={inputClass} disabled={!canEdit} placeholder={value.vlan ? "192.168.5.250" : "192.168.0.250"} value={value.host_ip ?? ""} onChange={(e) => set({ host_ip: e.target.value })} />
+              <Field label="Address for the device itself" hint="Optional spare address on the same network. Linux blocks a device from reaching its own macvlan workers; this adds an interface that can. Needed only if something on this device must talk to the worker, including domains and the Cloudflare Tunnel on this device. It is checked on the network when you leave the field.">
+                <div className="flex items-center gap-2">
+                  <input
+                    className={inputClass}
+                    disabled={!canEdit}
+                    placeholder="A spare address on this network"
+                    value={value.host_ip ?? ""}
+                    onChange={(e) => set({ host_ip: e.target.value })}
+                    onBlur={() => {
+                      if (value.host_ip && canEdit && supported && !replicaView && device?.status !== "offline") void run();
+                    }}
+                  />
+                  {canEdit && !value.host_ip && !replicaView && (
+                    <Button type="button" onClick={run} loading={busy} disabled={!device || !supported || device.status === "offline"}>
+                      Suggest
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-1.5 text-xs text-amber-700">
+                  The device holds this address itself, so nothing else may use it. Choose one <strong>outside your router's DHCP range</strong>, or reserve it there, or the router may hand it to another device.
+                </p>
               </Field>
             </div>
             <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="VLAN ID" hint="Optional, 1 to 4094. Puts the worker on another VLAN of the same cable. Empty: the device's own network.">
+                <Field label="VLAN ID" hint="Optional, a number from 1 to 4094. Leave empty for the device's normal network: nothing VLAN-related is created.">
                   <input
                     className={inputClass}
                     disabled={!canEdit}
                     inputMode="numeric"
-                    placeholder="1005"
+                    placeholder="None"
                     value={value.vlan ?? ""}
                     onChange={(e) => {
                       const n = parseInt(e.target.value.replace(/\D/g, ""), 10);
@@ -137,12 +170,12 @@ export default function DedicatedAddress({
                 </Field>
                 {!!value.vlan && value.mode === "static" && (
                   <Field label="VLAN subnet" hint="The VLAN's network, like 192.168.5.0/24. It isn't taken from the VLAN ID.">
-                    <input className={inputClass} disabled={!canEdit} placeholder="192.168.5.0/24" value={value.subnet ?? ""} onChange={(e) => set({ subnet: e.target.value })} />
+                    <input className={inputClass} disabled={!canEdit} placeholder="Like 192.168.5.0/24" value={value.subnet ?? ""} onChange={(e) => set({ subnet: e.target.value })} />
                   </Field>
                 )}
                 {!!value.vlan && value.mode === "static" && (
                   <Field label="VLAN gateway" hint="The router's address on the VLAN. Needed for the worker to reach other networks.">
-                    <input className={inputClass} disabled={!canEdit} placeholder="192.168.5.1" value={value.gateway ?? ""} onChange={(e) => set({ gateway: e.target.value })} />
+                    <input className={inputClass} disabled={!canEdit} placeholder="The router's address on the VLAN" value={value.gateway ?? ""} onChange={(e) => set({ gateway: e.target.value })} />
                   </Field>
                 )}
               </div>
@@ -164,15 +197,18 @@ export default function DedicatedAddress({
               </p>
             )}
           </details>
+          {!replicaView && (
           <div className="flex flex-wrap items-center gap-3">
             <Button type="button" onClick={run} loading={busy} disabled={!device || !supported || device.status === "offline"}>
               Check on the network
             </Button>
             {device?.status === "offline" && <span className="text-xs text-neutral-500">The device is offline.</span>}
           </div>
-          {err && <p className="text-sm text-bad">{err}</p>}
-          {check && (
+          )}
+          {!replicaView && err && <p className="text-sm text-bad">{err}</p>}
+          {!replicaView && check && (
             <div className="space-y-1.5 text-sm">
+              <p className="text-xs text-neutral-500">Checked on {device?.name ?? "this device"}.</p>
               {check.problems?.map((p) => (
                 <p key={p} className="flex items-start gap-2 text-bad">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" /> {p}
@@ -181,7 +217,17 @@ export default function DedicatedAddress({
               {!check.problems?.length && (
                 <p className="flex items-start gap-2 text-ok">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                  {value.host_ip ? `Device access address ${value.host_ip} looks free. ` : ""}
                   {value.mode === "static" ? `${value.ip} looks free on ${check.subnet ?? "the network"}.` : `DHCP would offer ${check.offer ?? "an address"} on ${check.subnet ?? "the network"}.`}
+                </p>
+              )}
+              {check.suggest_host_ip && !value.host_ip && (
+                <p className="flex flex-wrap items-center gap-2 text-neutral-700">
+                  Suggested address for the device itself: <span className="font-mono font-medium">{check.suggest_host_ip}</span>
+                  <Button type="button" onClick={() => set({ host_ip: check.suggest_host_ip })}>
+                    Use suggestion
+                  </Button>
+                  <span className="text-xs text-neutral-500">Not saved until you save the settings. Outside the DHCP range? Check your router.</span>
                 </p>
               )}
               {check.notes?.map((n) => (

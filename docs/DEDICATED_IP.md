@@ -39,6 +39,10 @@ Details:
 - **Removing it**: when no worker uses a VLAN any more (the worker moved to another VLAN, the feature was turned off and redeployed, or the worker was deleted), the agent deletes the macvlan network and the sub-interface, and with it the access interface on that VLAN. A sub-interface that already carries an IPv4 address (one you set up yourself) is left alone.
 - The agent needs root and the `8021q` kernel module (loaded automatically by `ip link add ... type vlan` on Raspberry Pi OS and Ubuntu) and `ip` (iproute2).
 
+### If DHCP on the VLAN gets no answer
+
+The error lists what the agent saw: whether the sub-interface exists, its state and carrier, the reverse-path filter (`rp_filter`) setting, how many requests were sent and how many DHCP packets were seen on the interface. Replies are read through a packet socket on the sub-interface, because the kernel's reverse-path filter drops ordinary UDP replies from a router whose network the interface has no address in. "0 DHCP packets seen" means nothing came back on that VLAN: check that the UniFi (or other) network's VLAN ID is exactly the ID you entered, that DHCP is enabled for it and that the switch port carries it tagged. To test by hand on the device, create the interface with `ip link add link eth0 name eth0.<id> type vlan id <id>`, bring it up and watch `tcpdump -n -e -i eth0 vlan <id> and port 67 or port 68`.
+
 ## Removing it
 
 Turn the switch off and redeploy. The worker goes back to the default bridge network and published ports, the DHCP lease is no longer renewed (it expires), and the device's route to the worker is removed.
@@ -58,7 +62,9 @@ Turn the switch off and redeploy. The worker goes back to the default bridge net
 
 ## The device can't reach its own macvlan workers
 
-This is a Linux macvlan rule: the device and its macvlan containers can't talk to each other directly. Everything else on the network can. If something on the device must reach the worker, set **Address for the device itself** (Advanced). The agent then creates an `orch-shim` macvlan interface on the device with that spare address and a route to the worker, and rebuilds it when the agent restarts. Pick an unused address, outside your DHCP range. Without it the deploy skips its reachability check (it can't test from the device).
+This is a Linux macvlan rule: the device and its macvlan containers can't talk to each other directly. Everything else on the network can. If something on the device must reach the worker, set **Address for the device itself** (Advanced). The agent then creates an `orch-shim` macvlan interface on the device with that spare address and a route to the worker, and rebuilds it when the agent restarts. Pick an unused address, outside your DHCP range.
+
+The device holds this address itself, so nothing else may use it, yet your router doesn't know that: its DHCP server could hand the same address to another device. Choose an address **outside the router's DHCP pool**, or reserve it in the router. Orchestrator helps in two ways. **Suggest** (or the check) proposes an address near the top of the subnet or VLAN that nothing answers for and that isn't the gateway, the device, another worker or another known device; **Use suggestion** copies it into the form, and it is never saved without you saving the settings. A typed address gets the same check when you leave the field and again before saving: inside the subnet, not the gateway, network or broadcast address, not another worker's or device's address, and nothing answering for it on the network (the device's own existing access interface is allowed to answer). The check can't see your router's DHCP pool, so keeping the address outside it is up to you. Without it the deploy skips its reachability check (it can't test from the device).
 
 ## Requirements
 

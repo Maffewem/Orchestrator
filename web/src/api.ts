@@ -56,6 +56,8 @@ export interface DedicatedCheck {
   problems?: string[];
   notes?: string[];
   offer?: string;
+  /** A free address near the top of the network for the device's own access; never saved automatically. */
+  suggest_host_ip?: string;
   subnet?: string;
   gateway?: string;
   parent?: string;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { useCan } from "../components/auth";
 import { Shell } from "../components/Streams";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router";
@@ -136,6 +136,23 @@ export default function ProjectPage() {
   // With replicas a project runs on several devices; this picks the copy the runtime views
   // (container, power, shell, metrics) are about. Settings and deployments apply to all copies.
   const [picked, setPicked] = useState<string | null>(null);
+  // Unsaved edits in the Settings form (reported by the form) and a counter that resets it.
+  const formDirty = useRef(false);
+  const [formKey, setFormKey] = useState(0);
+  async function pickCopy(id: string) {
+    if (id === picked || (picked === null && id === p?.device_id)) return;
+    if (formDirty.current) {
+      const ok = await confirmDialog({
+        title: "Discard unsaved changes?",
+        message: "You have unsaved edits in this project's settings. Switching copies reloads the saved settings and discards them.",
+        confirmLabel: "Discard and switch",
+      });
+      if (!ok) return;
+    }
+    formDirty.current = false;
+    setFormKey((k) => k + 1);
+    setPicked(id);
+  }
   const instances = p && !isCF ? [{ id: p.device_id, name: p.device_name, main: true }, ...(p.replicas ?? []).map((r) => ({ id: r.device_id, name: r.device, main: false }))] : [];
   const viewId = instances.find((i) => i.id === picked)?.id ?? p?.device_id ?? "";
   const viewName = instances.find((i) => i.id === viewId)?.name ?? "";
@@ -219,7 +236,7 @@ export default function ProjectPage() {
               <button
                 key={i.id}
                 type="button"
-                onClick={() => setPicked(i.id)}
+                onClick={() => void pickCopy(i.id)}
                 aria-pressed={i.id === viewId}
                 className={"rounded-lg border px-3 py-1.5 " + (i.id === viewId ? "border-primary bg-primary/10 font-medium text-primary" : "border-neutral-300 bg-white hover:bg-neutral-50")}
               >
@@ -316,7 +333,7 @@ export default function ProjectPage() {
           </WarnNote>
         </div>
       )}
-      <Routes>
+      <Routes key={viewId}>
         <Route
           index
           element={
@@ -362,7 +379,7 @@ export default function ProjectPage() {
         {canOperate && (
           <Route
             path="settings"
-            element={<ProjectSettings p={p} onSaved={project.reload} />}
+            element={<ProjectSettings p={p} onSaved={project.reload} viewId={viewId} viewName={viewName} formKey={formKey} dirty={formDirty} />}
           />
         )}
       </Routes>
@@ -630,7 +647,7 @@ function ProjectDeployments({ p }: { p: Project }) {
   );
 }
 
-function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
+function ProjectSettings({ p, onSaved, viewId, viewName, formKey, dirty }: { p: Project; onSaved: () => void; viewId: string; viewName: string; formKey: number; dirty: MutableRefObject<boolean> }) {
   const nav = useNavigate();
   const isAdmin = useCan("admin");
   const [saved, setSaved] = useState(false);
@@ -644,7 +661,10 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
       )}
       <Card className="p-6">
         <ProjectForm
+          key={formKey}
+          onDirty={(d) => (dirty.current = d)}
           initial={p}
+          replicaView={viewId && viewId !== p.device_id ? viewName : undefined}
           submitLabel={saved ? "Saved" : "Save changes"}
           onSubmit={async (input, previews) => {
             await api.updateProject(p.id, input);

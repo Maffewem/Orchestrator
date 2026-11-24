@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Box, Cloud, Github, Globe, Layers, Package, Server } from "lucide-react";
 import { api, type DedicatedIP, type NodeBuild, type PreviewBuild, type Project, type ProjectInput, type Source } from "../api";
 import DedicatedAddress from "../components/DedicatedAddress";
@@ -43,8 +43,14 @@ export default function ProjectForm({
   initial,
   submitLabel,
   onSubmit,
+  replicaView,
+  onDirty,
 }: {
+  /** Told whether the form has unsaved edits. */
+  onDirty?: (dirty: boolean) => void;
   initial?: Project;
+  /** Name of the replica's device when the page is showing a replica rather than the main copy. */
+  replicaView?: string;
   submitLabel: string;
   /** previews is set only when the Previews switch differs from what the project has now. */
   onSubmit: (p: ProjectInput, previews?: { enabled: boolean; max: number }) => Promise<void>;
@@ -67,6 +73,16 @@ export default function ProjectForm({
   const [restart, setRestart] = useState(initial?.runtime.restart || "unless-stopped");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Unsaved edits are reported so a page can ask before throwing them away.
+  const snapshot = JSON.stringify([name, deviceId, source, ports, webPort, dedicated, env, volumes, restart]);
+  const baseline = useRef(snapshot);
+  const report = useRef(onDirty);
+  report.current = onDirty;
+  useEffect(() => {
+    report.current?.(snapshot !== baseline.current);
+  }, [snapshot]);
+  useEffect(() => () => report.current?.(false), []);
 
   // Cloudflare builds run on the server, so only admins may set them up or change them.
   const isAdmin = useCan("admin");
@@ -132,6 +148,8 @@ export default function ProjectForm({
         { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, env: normalizeEnv(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
+      baseline.current = snapshot;
+      onDirty?.(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -519,7 +537,7 @@ export default function ProjectForm({
             </select>
           </Field>
         </div>
-        <DedicatedAddress value={dedicated} onChange={setDedicated} device={devices.data?.find((d) => d.id === device)} projectId={initial?.id} canEdit={isAdmin} />
+        <DedicatedAddress value={dedicated} onChange={setDedicated} device={devices.data?.find((d) => d.id === device)} projectId={initial?.id} canEdit={isAdmin} replicaView={replicaView} />
         <Field label="Volumes" hint="One per line: name:/path for a named volume, /host/path:/path for a folder, add :ro for read-only. Existing data stays when the container is recreated.">
           <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
         </Field>

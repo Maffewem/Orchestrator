@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Network } from "lucide-react";
 import { api, type DedicatedCheck, type DedicatedIP, type Device } from "../api";
 import { Button, CopyButton, Field, Toggle, inputClass } from "./ui";
@@ -14,14 +14,23 @@ export default function DedicatedAddress({
   device,
   projectId,
   canEdit,
+  replicaView,
 }: {
   value: DedicatedIP | null;
   onChange: (v: DedicatedIP | null) => void;
   device?: Device;
   projectId?: string;
   canEdit: boolean;
+  /** Set to the replica's device name while a replica is being viewed. */
+  replicaView?: string;
 }) {
   const [check, setCheck] = useState<DedicatedCheck | null>(null);
+  // A network check belongs to the device it ran on (this form's device) and to the settings it
+  // checked: drop it when either changes, or when the viewed copy changes.
+  useEffect(() => {
+    setCheck(null);
+    setErr(null);
+  }, [device?.id, projectId, replicaView]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const supported = !!device?.host.capabilities?.includes("dedicated-ip");
@@ -80,6 +89,11 @@ export default function DedicatedAddress({
           <AlertTriangle className="mt-0.5 size-4 shrink-0" /> This device is on Wi-Fi. Access points allow one MAC address per client, so this normally doesn't work. Use a wired device.
         </p>
       )}
+      {value && replicaView && (
+        <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm">
+          You are viewing the copy on {replicaView}, a replica. Replicas run on their device's normal ports and ignore this worker's own address and VLAN: they never take it. It belongs to the main copy{device ? ` on ${device.name}` : ""}, and network checks are not run for replicas.
+        </p>
+      )}
       {value && (
         <div className="mt-4 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -125,10 +139,10 @@ export default function DedicatedAddress({
                     value={value.host_ip ?? ""}
                     onChange={(e) => set({ host_ip: e.target.value })}
                     onBlur={() => {
-                      if (value.host_ip && canEdit && supported && device?.status !== "offline") void run();
+                      if (value.host_ip && canEdit && supported && !replicaView && device?.status !== "offline") void run();
                     }}
                   />
-                  {canEdit && !value.host_ip && (
+                  {canEdit && !value.host_ip && !replicaView && (
                     <Button type="button" onClick={run} loading={busy} disabled={!device || !supported || device.status === "offline"}>
                       Suggest
                     </Button>
@@ -183,15 +197,18 @@ export default function DedicatedAddress({
               </p>
             )}
           </details>
+          {!replicaView && (
           <div className="flex flex-wrap items-center gap-3">
             <Button type="button" onClick={run} loading={busy} disabled={!device || !supported || device.status === "offline"}>
               Check on the network
             </Button>
             {device?.status === "offline" && <span className="text-xs text-neutral-500">The device is offline.</span>}
           </div>
-          {err && <p className="text-sm text-bad">{err}</p>}
-          {check && (
+          )}
+          {!replicaView && err && <p className="text-sm text-bad">{err}</p>}
+          {!replicaView && check && (
             <div className="space-y-1.5 text-sm">
+              <p className="text-xs text-neutral-500">Checked on {device?.name ?? "this device"}.</p>
               {check.problems?.map((p) => (
                 <p key={p} className="flex items-start gap-2 text-bad">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0" /> {p}

@@ -98,8 +98,12 @@ type NetworkCheck struct {
 	Wireless bool     `json:"wireless,omitempty"`
 	Problems []string `json:"problems,omitempty"`
 	// SuggestHostIP is a free address the device itself could use to reach the worker (the
-	// "address for the device itself"), offered when none is set. It is only a suggestion.
+	// "address for this device to reach the worker"), offered when none is set. It is only a suggestion.
 	SuggestHostIP string `json:"suggest_host_ip,omitempty"`
+	// VLANReachable says whether anything on the VLAN answered: "yes" (the gateway or the DHCP
+	// server did), "no" (nothing did, so the VLAN may not be reaching the device) or "" when it
+	// couldn't be told. Only set for a worker on a VLAN.
+	VLANReachable string `json:"vlan_reachable,omitempty"`
 	// Offer is the address DHCP would hand out right now (dhcp mode only).
 	Offer string `json:"offer,omitempty"`
 	// Notes are things worth knowing that don't block the worker.
@@ -112,22 +116,23 @@ type NetworkCheck struct {
 const NoBackupMarker = ".orchestrator-no-backup"
 
 const (
-	CapBackup        = "backup"         // container.backup and container.restore
-	CapUpdate        = "update"         // agent.update
-	CapProxy         = "proxy"          // proxy.sync
-	CapProxyDNS      = "proxy-dns"      // proxy.sync with a Cloudflare token (DNS challenge)
-	CapPreview       = "preview"        // container.remove
-	CapStream        = "stream"         // live log following and container shells
-	CapInspect       = "inspect"        // container.inspect, used to adopt existing containers
-	CapFileStore     = "filestore"      // file.store, receives server backups
-	CapCompose       = "compose"        // deploy of a Compose stack, and stack.start/stop/down
-	CapTunnel        = "tunnel"         // tunnel.sync, runs cloudflared
-	CapTunnelUpdate  = "tunnel-update"  // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
-	CapDiscover      = "discover"       // finds the server again by itself when its address changes
-	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
-	CapDedicatedVLAN = "dedicated-vlan" // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
-	CapDedicatedIP   = "dedicated-ip"   // deploy with DeploySpec.Dedicated, and network.check
-	CapStats         = "stats"          // sends per-container StatsReport with heartbeats, and proxy metrics
+	CapBackup           = "backup"             // container.backup and container.restore
+	CapUpdate           = "update"             // agent.update
+	CapProxy            = "proxy"              // proxy.sync
+	CapProxyDNS         = "proxy-dns"          // proxy.sync with a Cloudflare token (DNS challenge)
+	CapPreview          = "preview"            // container.remove
+	CapStream           = "stream"             // live log following and container shells
+	CapInspect          = "inspect"            // container.inspect, used to adopt existing containers
+	CapFileStore        = "filestore"          // file.store, receives server backups
+	CapCompose          = "compose"            // deploy of a Compose stack, and stack.start/stop/down
+	CapTunnel           = "tunnel"             // tunnel.sync, runs cloudflared
+	CapTunnelUpdate     = "tunnel-update"      // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
+	CapDiscover         = "discover"           // finds the server again by itself when its address changes
+	CapServerInstall    = "server-install"     // server.install, sets up a new Orchestrator server from a transfer bundle
+	CapDedicatedDHCPRaw = "dedicated-dhcp-raw" // DHCP replies read on a packet socket, with a detailed "no answer" error
+	CapDedicatedVLAN    = "dedicated-vlan"     // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
+	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
+	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
 )
 
 // DockerInfo summarises the container engine on a device.

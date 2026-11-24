@@ -27,13 +27,15 @@ What has to exist outside Orchestrator:
 Addressing:
 
 - **DHCP**: the agent asks on the VLAN under the worker's own MAC. The subnet and gateway come from the DHCP answer, not from the VLAN ID. Reserve the MAC in the router to keep the address fixed.
-- **Static**: enter the address, the **VLAN subnet** (for example `192.168.5.0/24`) and the **VLAN gateway** (for example `192.168.5.1`). The subnet is never guessed from the VLAN ID. The address must be inside the subnet, not the network, broadcast or gateway address, and not used by another worker or device. **Check on the network** also probes the VLAN for an answer from that address.
+- **Static**: enter the address, the **subnet mask** (a length like `24`, a mask like `255.255.255.0`, or the full network like `192.168.5.0/24`) and the **VLAN gateway** (for example `192.168.5.1`). The network is worked out from the address and the mask; it is never guessed from the VLAN ID. The address must be inside the subnet, not the network, broadcast or gateway address, and not used by another worker or device. **Check on the network** also probes the VLAN for an answer from that address.
+
+**"Looks free" is not proof the VLAN works.** Nothing answering for an address is also what a VLAN that carries no traffic looks like, so the check also asks for the gateway you entered (or, if empty, the subnet's first address, where routers usually are). If it answers, the result says the VLAN is working. If nothing answers, a gateway you entered makes the check fail, and a guessed one only warns. A DHCP offer on the VLAN proves it works as well. This needs `arping` on the device; without it the check says it can't tell.
 
 Details:
 
 - The sub-interface is created when you check or deploy, brought up, and recreated when the agent starts. Docker also recreates it for its macvlan network (`orch-lan-eth0.1005`) when the Docker daemon starts, so restart-policy containers come back after a reboot.
-- The device itself is not on the VLAN. As above, set **Address for the device itself** (a spare address on the VLAN's subnet) if Caddy or the Cloudflare Tunnel on this device must reach the worker. Each VLAN gets its own access interface (`orch-shimv1005`).
-- **Port conflicts**: none, as for any worker with its own address, so the worker can take 80 and 443 on the VLAN. Domains and the tunnel work only through the device access address.
+- The device itself is not on the VLAN. As above, set **Address for this device to reach the worker** (a spare address on the VLAN's subnet) if Caddy or the Cloudflare Tunnel on this device must reach the worker. Each VLAN gets its own access interface (`orch-shimv1005`).
+- **Port conflicts**: none, as for any worker with its own address, so the worker can take 80 and 443 on the VLAN. Domains and the tunnel work only through the address for this device to reach the worker.
 - Agents older than this feature refuse a VLAN (an older agent would silently attach the worker to the untagged network). Update the agent first.
 - **Moving the worker** to another device: that device's switch port must carry the VLAN too, which can't be checked from here. A static address keeps working because the subnet belongs to the VLAN, not the device.
 - **Removing it**: when no worker uses a VLAN any more (the worker moved to another VLAN, the feature was turned off and redeployed, or the worker was deleted), the agent deletes the macvlan network and the sub-interface, and with it the access interface on that VLAN. A sub-interface that already carries an IPv4 address (one you set up yourself) is left alone.
@@ -52,7 +54,7 @@ Turn the switch off and redeploy. The worker goes back to the default bridge net
 | Area | Behaviour |
 | --- | --- |
 | Port conflicts | Not checked against the device's ports. The worker listens on its own address. |
-| Domains, Cloudflare Tunnel, production URL | Routed to the worker's own address and container port (the web port setting picks which), **if the worker has an "address for the device itself"**. Caddy and cloudflared run on the device, and Linux blocks the device from reaching its own macvlan workers, so the shim is what makes the route work. Without it the settings say why nothing is routed. With DHCP, reserve the MAC in the router: a changed lease needs a redeploy and a route resync. |
+| Domains, Cloudflare Tunnel, production URL | Routed to the worker's own address and container port (the web port setting picks which), **if the worker has an "address for this device to reach the worker"**. Caddy and cloudflared run on the device, and Linux blocks the device from reaching its own macvlan workers, so the shim is what makes the route work. Without it the settings say why nothing is routed. With DHCP, reserve the MAC in the router: a changed lease needs a redeploy and a route resync. |
 | Previews | Previews use normal device ports. They never take the worker's address. |
 | Replicas | Replicas run on their own devices' normal ports. |
 | Migration | The old copy is stopped first (an address can't be held twice) and started again if the move fails. A static address must fit the new device's subnet; DHCP works anywhere. |
@@ -62,14 +64,14 @@ Turn the switch off and redeploy. The worker goes back to the default bridge net
 
 ## The device can't reach its own macvlan workers
 
-This is a Linux macvlan rule: the device and its macvlan containers can't talk to each other directly. Everything else on the network can. If something on the device must reach the worker, set **Address for the device itself** (Advanced). The agent then creates an `orch-shim` macvlan interface on the device with that spare address and a route to the worker, and rebuilds it when the agent restarts. Pick an unused address, outside your DHCP range.
+This is a Linux macvlan rule: the device and its macvlan containers can't talk to each other directly. Everything else on the network can. If something on the device must reach the worker, set **Address for this device to reach the worker** (Advanced). The agent then creates an `orch-shim` macvlan interface on the device with that spare address and a route to the worker, and rebuilds it when the agent restarts. Pick an unused address, outside your DHCP range.
 
 The device holds this address itself, so nothing else may use it, yet your router doesn't know that: its DHCP server could hand the same address to another device. Choose an address **outside the router's DHCP pool**, or reserve it in the router. Orchestrator helps in two ways. **Suggest** (or the check) proposes an address near the top of the subnet or VLAN that nothing answers for and that isn't the gateway, the device, another worker or another known device; **Use suggestion** copies it into the form, and it is never saved without you saving the settings. A typed address gets the same check when you leave the field and again before saving: inside the subnet, not the gateway, network or broadcast address, not another worker's or device's address, and nothing answering for it on the network (the device's own existing access interface is allowed to answer). The check can't see your router's DHCP pool, so keeping the address outside it is up to you. Without it the deploy skips its reachability check (it can't test from the device).
 
 ## Requirements
 
-Linux device with the agent running on the host (not as a container), a wired interface, and `ip` (iproute2) for the optional device access address. `arping` or `ping` makes the static-address check reliable.
+Linux device with the agent running on the host (not as a container), a wired interface, and `ip` (iproute2) for the optional address for this device to reach the worker. `arping` or `ping` makes the static-address check reliable.
 
 ## Not tested live
 
-Everything here is covered by unit tests (address and subnet checks, DHCP client against a fake server, settings validation, routing and migration rules), but none of it has run against a real router, Docker macvlan network or Pi yet. The VLAN option adds to that: creating the sub-interface, DHCP and static addressing on a tagged VLAN, the access interface per VLAN, restoring it after a reboot and cleanup are all untested against a real trunk port. First things to try: a DHCP worker on VLAN 1005 (192.168.5.0/24), then a DHCP worker on an ethernet Pi with a router reservation, a static worker, the device access address, and moving a dedicated worker between devices.
+Everything here is covered by unit tests (address and subnet checks, DHCP client against a fake server, settings validation, routing and migration rules), but none of it has run against a real router, Docker macvlan network or Pi yet. The VLAN option adds to that: creating the sub-interface, DHCP and static addressing on a tagged VLAN, the access interface per VLAN, restoring it after a reboot and cleanup are all untested against a real trunk port. First things to try: a DHCP worker on VLAN 1005 (192.168.5.0/24), then a DHCP worker on an ethernet Pi with a router reservation, a static worker, the address for this device to reach the worker, and moving a dedicated worker between devices.

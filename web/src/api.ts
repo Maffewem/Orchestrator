@@ -55,6 +55,8 @@ export interface DedicatedIP {
 export interface DedicatedCheck {
   problems?: string[];
   notes?: string[];
+  /** "yes" when the VLAN's gateway or DHCP server answered, "no" when nothing did. */
+  vlan_reachable?: "yes" | "no";
   offer?: string;
   /** A free address near the top of the network for the device's own access; never saved automatically. */
   suggest_host_ip?: string;

@@ -240,7 +240,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 				probe.Ports = append(probe.Ports, "1:"+c)
 			}
 		} else if len(spec.Ports) > 0 {
-			st.logf("Skipping the port check: this device can't reach a worker's own address without a device access address")
+			st.logf("Skipping the port check: this device can't reach a worker's own address without an address for this device to reach the worker")
 		}
 	}
 	if rerr := a.waitReachable(ctx, st, id, probe, 40*time.Second); rerr != nil {

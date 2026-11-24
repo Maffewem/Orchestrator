@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -144,7 +145,7 @@ func TestDedicatedWorkerUpstream(t *testing.T) {
 	dev := &store.Device{ID: "d1", Name: "pi", Containers: []api.Container{{Name: "web", State: "running",
 		Networks: []api.ContainerNet{{Name: "orch-lan-eth0", IP: "192.168.0.77", MAC: "02:00:00:00:00:01"}}}}}
 	if got := upstreamAddr(p, dev); got != "" {
-		t.Fatalf("without the device access address nothing on the device can reach it: %q", got)
+		t.Fatalf("without the address for this device to reach the worker nothing on the device can reach it: %q", got)
 	}
 	p.Runtime.Dedicated.HostIP = "192.168.0.250"
 	if got := upstreamAddr(p, dev); got != "192.168.0.77:443" {
@@ -166,7 +167,7 @@ func TestDedicatedWorkerUpstream(t *testing.T) {
 		t.Fatalf("tunnel service %q %v", svc, err)
 	}
 	p.Runtime.Dedicated.HostIP = ""
-	if _, err := s.resolveRoute([]*store.Project{p}, dev, false, "", tunnelRoute{Hostname: "w.example.com", Service: "project:web"}); err == nil || !strings.Contains(err.Error(), "address for the device itself") {
+	if _, err := s.resolveRoute([]*store.Project{p}, dev, false, "", tunnelRoute{Hostname: "w.example.com", Service: "project:web"}); err == nil || !strings.Contains(err.Error(), "address for this device to reach the worker") {
 		t.Fatalf("a worker the device can't reach must say why: %v", err)
 	}
 }
@@ -217,5 +218,34 @@ func TestDedicatedVLANSettings(t *testing.T) {
 	// The address is still unique across workers, whatever the VLAN.
 	if code, _ := create("dup", map[string]any{"mode": "static", "ip": "192.168.5.20", "vlan": 1005, "subnet": "192.168.5.0/24"}); code != http.StatusBadRequest {
 		t.Fatalf("duplicate: %d", code)
+	}
+}
+
+func TestSubnetFrom(t *testing.T) {
+	ip := net.ParseIP("192.168.5.20")
+	ok := map[string]string{
+		"24": "192.168.5.0/24", "/24": "192.168.5.0/24", " 24 ": "192.168.5.0/24", "255.255.255.0": "192.168.5.0/24",
+		"255.255.254.0": "192.168.4.0/23", "192.168.5.0/24": "192.168.5.0/24", "192.168.5.7/24": "192.168.5.0/24",
+		"192.168.5.0/255.255.255.0": "192.168.5.0/24", "16": "192.168.0.0/16",
+	}
+	for in, want := range ok {
+		sn, err := subnetFrom(in, ip)
+		if err != nil || sn.String() != want {
+			t.Errorf("%q: got %v %v, want %s", in, sn, err, want)
+		}
+	}
+	for _, in := range []string{"", "nope", "33", "7", "255.0.255.0", "0.0.0.0", "192.168.5.0/33", "30.5"} {
+		_, err := subnetFrom(in, ip)
+		if err == nil {
+			t.Errorf("%q should be rejected", in)
+		} else if strings.Contains(err.Error(), `""`) || strings.Contains(err.Error(), "(got") {
+			t.Errorf("%q: unfriendly message %q", in, err)
+		}
+	}
+	if _, err := subnetFrom("24", nil); err == nil {
+		t.Error("a mask alone needs the address")
+	}
+	if _, err := subnetFrom("", ip); err == nil || !strings.Contains(err.Error(), "Enter the subnet mask") {
+		t.Errorf("empty: %v", err)
 	}
 }

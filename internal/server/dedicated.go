@@ -294,6 +294,13 @@ func (s *Server) handleCheckDedicated(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "the agent sent an unreadable answer")
 		return
 	}
+	if d.VLAN > 0 && !hasCap(dev, api.CapDedicatedDHCPRaw) {
+		// An agent from before the DHCP fix (#107) gives a shorter error and can miss replies on a VLAN.
+		view.Notes = append(view.Notes, fmt.Sprintf("The agent on %s (version %s) is older than the VLAN DHCP fix: it can miss DHCP replies on a VLAN and gives a shorter error. Update it to the latest Beta from the Updates page, then check again.", dev.Name, dev.Host.AgentVersion))
+		if len(view.Problems) > 0 {
+			view.Problems = append(view.Problems, "This result comes from an outdated agent. Update the agent first.")
+		}
+	}
 	writeJSON(w, http.StatusOK, view)
 }
 

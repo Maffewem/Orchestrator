@@ -125,6 +125,7 @@ const (
 	CapTunnelUpdate  = "tunnel-update"  // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
 	CapDiscover      = "discover"       // finds the server again by itself when its address changes
 	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
+	CapDedicatedDHCPRaw = "dedicated-dhcp-raw" // DHCP replies read on a packet socket, with a detailed "no answer" error
 	CapDedicatedVLAN = "dedicated-vlan" // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
 	CapDedicatedIP   = "dedicated-ip"   // deploy with DeploySpec.Dedicated, and network.check
 	CapStats         = "stats"          // sends per-container StatsReport with heartbeats, and proxy metrics

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -339,6 +340,7 @@ type clusterWorker struct {
 	Policy    ClusterPolicy   `json:"policy"`
 	Failover  *failoverRecord `json:"last_failover,omitempty"`
 	Replicas  []replicaState  `json:"replicas,omitempty"`
+	URL       string          `json:"url,omitempty"`
 }
 
 type replicaState struct {
@@ -353,6 +355,8 @@ type replicaState struct {
 	DeploymentID     string `json:"deployment_id,omitempty"`
 	DeploymentStatus string `json:"deployment_status,omitempty"`
 	DeploymentError  string `json:"deployment_error,omitempty"`
+	// URL is where this copy answers directly (device address and published port); empty when it has none.
+	URL string `json:"url,omitempty"`
 	// Conflicts are host ports the worker publishes that another container on this device already holds.
 	Conflicts []string `json:"conflicts,omitempty"`
 }
@@ -365,6 +369,7 @@ func (s *Server) replicaStates(ctx context.Context, p *store.Project, pol Cluste
 		st := replicaState{DeviceID: id}
 		if d, err := s.store.GetDevice(ctx, id); err == nil {
 			st.Device, st.Online, st.Maintenance = d.Name, !d.Offline, d.Maintenance
+			st.URL = copyURL(p, d, false)
 			if c := findByName(d, serviceOf(p)); c != nil {
 				st.ContainerID, st.State, st.Running = c.ID, c.State, c.State == "running"
 			}
@@ -407,6 +412,9 @@ func (s *Server) handleGetCluster(w http.ResponseWriter, r *http.Request) {
 		pol := s.clusterPolicy(ctx, p.ID)
 		cw := clusterWorker{ProjectID: p.ID, Name: p.Name, DeviceID: p.DeviceID, Device: names[p.DeviceID], Policy: pol, Failover: s.failoverRecord(ctx, p.ID)}
 		cw.Replicas = s.replicaStates(ctx, p, pol)
+		if d := byID[p.DeviceID]; d != nil {
+			cw.URL = copyURL(p, d, true)
+		}
 		v.Workers = append(v.Workers, cw)
 	}
 	sort.Slice(v.Workers, func(i, j int) bool { return v.Workers[i].Name < v.Workers[j].Name })
@@ -718,4 +726,23 @@ func (s *Server) retireReplica(ctx context.Context, p *store.Project, d *store.D
 		s.store.CreateCommand(ctx, d.ID, api.ActionRemove, c.Name, args)
 		s.event(ctx, d.ID, "warning", "cluster.replica", fmt.Sprintf("The replica of %s on %s is being removed%s", p.Name, d.Name, map[bool]string{true: " together with its volumes", false: " (its volumes are kept)"}[volumes]))
 	}
+}
+
+// copyURL is where a copy of the worker on device d answers directly: the device's address and the
+// worker's web port. A replica never gets the main copy's dedicated address, so it uses the device's
+// own port. Domains, the proxy and tunnels route to the main copy only; replicas have no public route.
+func copyURL(p *store.Project, d *store.Device, main bool) string {
+	cp := *p
+	if !main {
+		cp.Runtime.Dedicated = nil
+	}
+	port := upstreamPort(&cp)
+	ips := ipv4s(d)
+	if port == "" || len(ips) == 0 {
+		if main && p.Runtime.Dedicated != nil && p.Runtime.Dedicated.IP != "" {
+			return "http://" + p.Runtime.Dedicated.IP
+		}
+		return ""
+	}
+	return "http://" + net.JoinHostPort(ips[0], port)
 }

@@ -35,6 +35,8 @@ type ProjectView struct {
 	HostAccess []string `json:"host_access,omitempty"`
 	// Replicas are the extra copies of the worker on other devices (see cluster.go).
 	Replicas []replicaState `json:"replicas,omitempty"`
+	// MainURL is where the main copy answers directly (device address and port, or its dedicated address).
+	MainURL string `json:"main_url,omitempty"`
 }
 
 func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView, error) {
@@ -44,6 +46,7 @@ func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView
 		v.Cloudflare = s.cfStatusOf(ctx, p.ID)
 	} else if d, err := s.store.GetDevice(ctx, p.DeviceID); err == nil {
 		v.DeviceName = d.Name
+		v.MainURL = copyURL(p, d, true)
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return v, err
 	}

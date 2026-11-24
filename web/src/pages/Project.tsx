@@ -209,20 +209,23 @@ export default function ProjectPage() {
           {(r.conflicts?.length ?? 0) > 0 && <p className="mt-1 text-xs text-neutral-700">{r.conflicts?.join("; ")}</p>}
         </div>
       ))}
-      {instances.length > 1 && (
+      {!isCF && instances.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Copy of this worker">
-          <span className="text-neutral-600">{p.name} runs on {instances.length} devices. Showing:</span>
-          {instances.map((i) => (
-            <button
-              key={i.id}
-              type="button"
-              onClick={() => setPicked(i.id)}
-              aria-pressed={i.id === viewId}
-              className={"rounded-lg border px-3 py-1.5 " + (i.id === viewId ? "border-primary bg-primary/5 font-medium" : "border-neutral-300 bg-white hover:bg-neutral-50")}
-            >
-              {i.name}{i.main ? " (main)" : " (replica)"}
-            </button>
-          ))}
+          <span className="text-neutral-600">
+            Viewing: <span className="font-medium text-neutral-900">{p.name} · {viewName} ({viewId === p.device_id ? "main" : "replica"})</span>
+          </span>
+          {instances.length > 1 &&
+            instances.map((i) => (
+              <button
+                key={i.id}
+                type="button"
+                onClick={() => setPicked(i.id)}
+                aria-pressed={i.id === viewId}
+                className={"rounded-lg border px-3 py-1.5 " + (i.id === viewId ? "border-primary bg-primary/10 font-medium text-primary" : "border-neutral-300 bg-white hover:bg-neutral-50")}
+              >
+                {i.name} ({i.main ? "main" : "replica"})
+              </button>
+            ))}
         </div>
       )}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -353,7 +356,7 @@ export default function ProjectPage() {
         <Route
           path="metrics"
           element={
-            <ProjectMetricsTab p={p} />
+            <ProjectMetricsTab p={p} deviceId={viewId} />
           }
         />
         {canOperate && (
@@ -411,6 +414,24 @@ function ProjectOverview({
       ];
   return (
     <div className="space-y-6">
+      {(p.replicas?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader title="Copies" subtitle="Each copy answers on its own device. Domains, the proxy and tunnels point at the main copy only; replicas have no public route." />
+          <div className="divide-y divide-neutral-100 text-sm">
+            {[{ device_id: p.device_id, device: p.device_name, url: p.main_url, running: undefined as boolean | undefined, main: true }, ...(p.replicas ?? []).map((r) => ({ device_id: r.device_id, device: r.device, url: r.url, running: r.running, main: false }))].map((c) => (
+              <div key={c.device_id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+                <span>
+                  <span className="font-medium">{p.name} · {c.device}</span> <span className="text-neutral-500">({c.main ? "main" : "replica"})</span>
+                </span>
+                <span className="flex items-center gap-3">
+                  {c.running === false && <span className="text-xs text-neutral-500">not running</span>}
+                  {c.url ? <a href={c.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{c.url.replace("http://", "")}</a> : <span className="text-neutral-500">no direct address</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">{p.name}</h1>
         <p className="mt-1 text-sm text-neutral-500">
@@ -599,7 +620,7 @@ function ProjectDeployments({ p }: { p: Project }) {
         ) : (
           <div className="divide-y divide-neutral-100">
             {deps.data.map((d) => (
-              <DeploymentRow key={d.id} d={d} device={(p.replicas?.length ?? 0) > 0 ? (d.device_id === p.device_id ? p.device_name : p.replicas?.find((r) => r.device_id === d.device_id)?.device) : undefined} />
+              <DeploymentRow key={d.id} d={d} device={(p.replicas?.length ?? 0) > 0 ? (d.device_id === p.device_id ? p.device_name + " (main)" : (p.replicas?.find((r) => r.device_id === d.device_id)?.device ?? "another device") + " (replica)") : undefined} />
             ))}
           </div>
         )}
@@ -618,7 +639,7 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
       {p.source.type === "cloudflare" && <CloudflareSettings p={p} />}
       {(p.replicas?.length ?? 0) > 0 && (
         <p className="rounded-lg bg-blue-50 px-4 py-2 text-sm">
-          These settings are shared by every copy of {p.name} (on {[p.device_name, ...(p.replicas ?? []).map((r) => r.device)].join(", ")}). The next deployment applies them to all of them.
+          These settings apply to every copy of {p.name} (on {[p.device_name + " (main)", ...(p.replicas ?? []).map((r) => r.device + " (replica)")].join(", ")}), not only the one you are viewing. The next deployment applies them to all of them, one at a time. Domains and the proxy point at the main copy ({p.device_name}) only.
         </p>
       )}
       <Card className="p-6">

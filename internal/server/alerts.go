@@ -56,7 +56,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		// A replica's outcome is reported separately below, so it can't hide the main copy's.
 		for _, rs := range s.replicaStates(ctx, p, s.clusterPolicy(ctx, p.ID)) {
 			if rs.DeploymentStatus == string(store.DeploymentFailed) && !rs.Running {
-				out = append(out, Alert{ID: "replica:" + rs.DeploymentID, Severity: "warning", Title: "Replica failed: " + p.Name + " on " + rs.Device, Detail: rs.DeploymentError, Link: "/cluster", At: time.Now()})
+				out = append(out, Alert{ID: "replica:" + rs.DeploymentID, Severity: "warning", Title: "Replica failed: " + p.Name + " · " + rs.Device + " (replica)", Detail: rs.DeploymentError, Link: "/cluster", At: time.Now()})
 			}
 		}
 		ds, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: p.DeviceID, Limit: 1})
@@ -68,7 +68,11 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		if d.Commit != nil && d.Commit.SHA != "" {
 			detail = strings.TrimSpace("Commit " + shortSHA(d.Commit.SHA) + ". " + detail)
 		}
-		out = append(out, Alert{ID: "deploy:" + d.ID, Severity: "critical", Title: "Deployment failed: " + p.Name, Detail: detail, Link: "/deployments/" + d.ID, At: d.CreatedAt})
+		title := "Deployment failed: " + p.Name
+		if len(s.clusterPolicy(ctx, p.ID).Replicas) > 0 {
+			title += " · " + names[p.DeviceID] + " (main)"
+		}
+		out = append(out, Alert{ID: "deploy:" + d.ID, Severity: "critical", Title: title, Detail: detail, Link: "/deployments/" + d.ID, At: d.CreatedAt})
 	}
 
 	// Containers whose most recent backup failed.

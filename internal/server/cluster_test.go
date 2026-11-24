@@ -319,3 +319,21 @@ func TestReplicaOnDeviceInMaintenanceWaits(t *testing.T) {
 		t.Fatalf("replica state: %+v", v.Replicas)
 	}
 }
+
+func TestEachCopyHasItsOwnAddress(t *testing.T) {
+	h := newHarness(t)
+	h.srv.cluster.grace = time.Hour
+	a, b := h.register("pi-a"), h.register("pi-b")
+	h.do("POST", "/api/agent/heartbeat", a.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Addresses: []string{"192.168.0.10"}, Capabilities: []string{api.CapBackup, api.CapPreview}}}, nil)
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: api.HostInfo{Addresses: []string{"192.168.0.20"}, Capabilities: []string{api.CapBackup, api.CapPreview}}}, nil)
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": a.DeviceID,
+		"source":  map[string]any{"type": "image", "image": "nginx"},
+		"runtime": map[string]any{"ports": []string{"8080:80"}}}, &p)
+	h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Replicas: []string{b.DeviceID}}, nil)
+	var v ProjectView
+	h.do("GET", "/api/projects/"+p.ID, adminToken, nil, &v)
+	if v.MainURL != "http://192.168.0.10:8080" || len(v.Replicas) != 1 || v.Replicas[0].URL != "http://192.168.0.20:8080" {
+		t.Fatalf("addresses: main %q replicas %+v", v.MainURL, v.Replicas)
+	}
+}

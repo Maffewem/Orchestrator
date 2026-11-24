@@ -112,6 +112,33 @@ function MoveBanner() {
   );
 }
 
+/** Tells an open tab that the dashboard was updated: the server serves a new bundle name after every build. */
+function NewVersionBanner() {
+  const [fresh, setFresh] = useState(false);
+  useEffect(() => {
+    const loaded = document.querySelector<HTMLScriptElement>('script[src*="/assets/index-"]')?.src.match(/assets\/index-[^/]+\.js/)?.[0];
+    if (!loaded) return;
+    const check = async () => {
+      try {
+        const html = await (await fetch("/", { cache: "no-store" })).text();
+        const now = html.match(/assets\/index-[^"'/]+\.js/)?.[0];
+        if (now && now !== loaded) setFresh(true);
+      } catch {
+        /* offline or the server is restarting: try again later */
+      }
+    };
+    const t = setInterval(check, 60000);
+    return () => clearInterval(t);
+  }, []);
+  if (!fresh) return null;
+  return (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm">
+      <span>Orchestrator was updated. This page is still running the old dashboard, so some screens may look out of date.</span>
+      <button type="button" onClick={() => location.reload()} className="rounded-md bg-primary px-3 py-1 text-white">Reload</button>
+    </div>
+  );
+}
+
 export default function Layout({ onLogout }: { onLogout: () => void }) {
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [open, setOpen] = useState(false);
@@ -240,6 +267,7 @@ export default function Layout({ onLogout }: { onLogout: () => void }) {
             {me && <UserMenu me={me} onLogout={onLogout} />}
           </header>
           <main className="mx-auto w-full min-w-0 max-w-7xl flex-1 px-4 py-6 pb-24 sm:px-8 sm:py-8 lg:pb-8">
+            <NewVersionBanner />
             <StaleBanner />
             {me?.role === "admin" && <MoveBanner />}
             <Outlet />

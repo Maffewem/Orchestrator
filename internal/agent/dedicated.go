@@ -94,7 +94,7 @@ func findLAN(ctx context.Context, d api.DedicatedIP) (*lan, error) {
 		if d.Subnet != "" {
 			_, sn, err := net.ParseCIDR(d.Subnet)
 			if err != nil || sn.IP.To4() == nil {
-				return nil, fmt.Errorf("%q is not an IPv4 subnet like 192.168.5.0/24", d.Subnet)
+				return nil, errors.New("the VLAN's subnet isn't valid; enter the mask, for example 24 or 255.255.255.0")
 			}
 			l.Subnet = sn
 			if g := net.ParseIP(d.Gateway); g != nil && sn.Contains(g) {
@@ -123,7 +123,7 @@ func findLAN(ctx context.Context, d api.DedicatedIP) (*lan, error) {
 func parseMAC(s string) (net.HardwareAddr, error) {
 	mac, err := net.ParseMAC(s)
 	if err != nil || len(mac) != 6 {
-		return nil, fmt.Errorf("%q is not a MAC address like 02:ab:cd:12:34:56", s)
+		return nil, errors.New("the MAC address isn't valid; use one like 02:ab:cd:12:34:56")
 	}
 	if mac[0]&1 != 0 {
 		return nil, fmt.Errorf("%s is a multicast address; the first byte must be even", s)
@@ -229,7 +229,7 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		return out
 	}
 	if d.VLAN > 0 {
-		out.Notes = append(out.Notes, fmt.Sprintf("VLAN %d is carried on %s as %s. The switch port must carry VLAN %d tagged, and the router must serve it (DHCP and routing).", d.VLAN, l.physical(), l.Parent, d.VLAN))
+		out.Notes = append(out.Notes, fmt.Sprintf("VLAN %d is carried on %s as %s.", d.VLAN, l.physical(), l.Parent))
 	}
 	mac, err := parseMAC(d.MAC)
 	if err != nil {
@@ -240,7 +240,7 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 	case api.DedicatedStatic:
 		ip := net.ParseIP(d.IP)
 		if ip == nil {
-			bad("%q is not an IP address", d.IP)
+			bad("the worker's IP address isn't valid; enter it like 192.168.5.20")
 			break
 		}
 		if ps := staticProblems(ip, l); len(ps) > 0 {
@@ -255,6 +255,9 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 				out.Notes = append(out.Notes, "Couldn't check whether the address is free: install arping or ping on the device. Make sure nothing else uses it.")
 			}
 		}
+		if d.VLAN > 0 && len(out.Problems) == 0 {
+			a.probeVLAN(ctx, d, l, &out)
+		}
 	case api.DedicatedDHCP:
 		cctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 		offer, err := newDHCPClient(l.Parent, mac).Offer(cctx)
@@ -268,6 +271,9 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 			break
 		}
 		out.Offer = offer.IP.String()
+		if d.VLAN > 0 {
+			out.VLANReachable = "yes" // the VLAN's DHCP server answered
+		}
 		if l.Subnet == nil {
 			l.adopt(offer)
 			out.Subnet = l.Subnet.String()
@@ -286,7 +292,7 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		hip := net.ParseIP(d.HostIP)
 		switch {
 		case hip == nil:
-			bad("Address for this device to reach the worker: %q is not an IP address", d.HostIP)
+			bad("Address for this device to reach the worker: that isn't a valid IP address")
 		case l.Subnet == nil:
 			// a DHCP VLAN whose subnet isn't known yet (no offer)
 		default:
@@ -567,4 +573,41 @@ func suggestHost(ctx context.Context, l *lan, avoid map[string]bool, skip ...net
 		}
 	}
 	return "", false
+}
+
+// probeVLAN tells whether the VLAN is actually reaching this device: "nothing answers for the
+// address" is also what a VLAN that carries no traffic looks like, so it asks for the gateway too
+// (the one entered, otherwise the subnet's first address, where routers usually are).
+func (a *Agent) probeVLAN(ctx context.Context, d api.DedicatedIP, l *lan, out *api.NetworkCheck) {
+	gw, guessed := l.Gateway, false
+	if gw == nil && l.Subnet != nil {
+		gw, guessed = firstHostIP(l.Subnet), true
+	}
+	if gw == nil {
+		return
+	}
+	switch inUse, checked := probeIP(ctx, l.Parent, gw); {
+	case !checked:
+		out.Notes = append(out.Notes, fmt.Sprintf("Couldn't tell whether VLAN %d reaches this device (install arping on the device). The switch port must carry VLAN %d tagged and the router must serve it.", d.VLAN, d.VLAN))
+	case inUse:
+		out.VLANReachable = "yes"
+		out.Notes = append(out.Notes, fmt.Sprintf("The VLAN is working: %s answered on VLAN %d.", gw, d.VLAN))
+	case guessed:
+		out.VLANReachable = "no"
+		out.Notes = append(out.Notes, fmt.Sprintf("Nothing answered on VLAN %d, not even %s (the router's likely address). Either that isn't the router's address, or the VLAN isn't reaching this device: the switch port must carry VLAN %d tagged. Enter the gateway to check it properly.", d.VLAN, gw, d.VLAN))
+	default:
+		out.VLANReachable = "no"
+		out.Problems = append(out.Problems, fmt.Sprintf("Nothing answered on VLAN %d, not even the gateway %s. The VLAN may not be reaching this device: check that the switch port carries VLAN %d tagged, that the router serves it, and that the gateway address is right.", d.VLAN, gw, d.VLAN))
+	}
+}
+
+// firstHostIP is the first usable address of a subnet.
+func firstHostIP(sn *net.IPNet) net.IP {
+	b := sn.IP.To4()
+	if b == nil {
+		return nil
+	}
+	ip := append(net.IP(nil), b...)
+	ip[3]++
+	return ip
 }

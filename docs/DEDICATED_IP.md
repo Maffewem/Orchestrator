@@ -27,7 +27,9 @@ What has to exist outside Orchestrator:
 Addressing:
 
 - **DHCP**: the agent asks on the VLAN under the worker's own MAC. The subnet and gateway come from the DHCP answer, not from the VLAN ID. Reserve the MAC in the router to keep the address fixed.
-- **Static**: enter the address, the **VLAN subnet** (for example `192.168.5.0/24`) and the **VLAN gateway** (for example `192.168.5.1`). The subnet is never guessed from the VLAN ID. The address must be inside the subnet, not the network, broadcast or gateway address, and not used by another worker or device. **Check on the network** also probes the VLAN for an answer from that address.
+- **Static**: enter the address, the **subnet mask** (a length like `24`, a mask like `255.255.255.0`, or the full network like `192.168.5.0/24`) and the **VLAN gateway** (for example `192.168.5.1`). The network is worked out from the address and the mask; it is never guessed from the VLAN ID. The address must be inside the subnet, not the network, broadcast or gateway address, and not used by another worker or device. **Check on the network** also probes the VLAN for an answer from that address.
+
+**"Looks free" is not proof the VLAN works.** Nothing answering for an address is also what a VLAN that carries no traffic looks like, so the check also asks for the gateway you entered (or, if empty, the subnet's first address, where routers usually are). If it answers, the result says the VLAN is working. If nothing answers, a gateway you entered makes the check fail, and a guessed one only warns. A DHCP offer on the VLAN proves it works as well. This needs `arping` on the device; without it the check says it can't tell.
 
 Details:
 

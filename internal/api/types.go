@@ -100,6 +100,10 @@ type NetworkCheck struct {
 	// SuggestHostIP is a free address the device itself could use to reach the worker (the
 	// "address for this device to reach the worker"), offered when none is set. It is only a suggestion.
 	SuggestHostIP string `json:"suggest_host_ip,omitempty"`
+	// VLANReachable says whether anything on the VLAN answered: "yes" (the gateway or the DHCP
+	// server did), "no" (nothing did, so the VLAN may not be reaching the device) or "" when it
+	// couldn't be told. Only set for a worker on a VLAN.
+	VLANReachable string `json:"vlan_reachable,omitempty"`
 	// Offer is the address DHCP would hand out right now (dhcp mode only).
 	Offer string `json:"offer,omitempty"`
 	// Notes are things worth knowing that don't block the worker.

@@ -95,3 +95,10 @@ func TestHostCandidates(t *testing.T) {
 		t.Fatal("no subnet, no suggestion")
 	}
 }
+
+func TestFirstHostIP(t *testing.T) {
+	_, sn, _ := net.ParseCIDR("192.168.5.0/24")
+	if got := firstHostIP(sn); got.String() != "192.168.5.1" {
+		t.Fatalf("got %v", got)
+	}
+}

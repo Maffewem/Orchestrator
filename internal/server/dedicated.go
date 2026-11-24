@@ -70,7 +70,7 @@ func cleanDedicated(d *api.DedicatedIP) error {
 		d.MAC = newMAC()
 	}
 	if mac, err := net.ParseMAC(d.MAC); err != nil || len(mac) != 6 || mac[0]&1 != 0 {
-		return fmt.Errorf("%q is not a usable MAC address (like 02:ab:cd:12:34:56)", d.MAC)
+		return errors.New("The MAC address isn't valid. Use one like 02:ab:cd:12:34:56 (the first byte must be even), or leave it empty to create one")
 	}
 	if d.VLAN < 0 || d.VLAN > 4094 {
 		return errors.New("the VLAN ID must be between 1 and 4094 (leave it empty for no VLAN)")
@@ -79,36 +79,39 @@ func cleanDedicated(d *api.DedicatedIP) error {
 		// Without a VLAN the subnet is the device's own; with DHCP it is learned from the lease.
 		d.Subnet, d.Gateway = "", ""
 	}
-	if d.VLAN > 0 && d.Mode == api.DedicatedStatic {
-		_, sn, err := net.ParseCIDR(d.Subnet)
-		if err != nil || sn.IP.To4() == nil {
-			return fmt.Errorf("a static address on a VLAN needs the VLAN's subnet, like 192.168.5.0/24 (got %q)", d.Subnet)
-		}
-		d.Subnet = sn.String()
-		if d.Gateway != "" {
-			gw := net.ParseIP(d.Gateway)
-			if gw == nil || !sn.Contains(gw) {
-				return fmt.Errorf("the gateway %q is not an address inside %s", d.Gateway, sn)
-			}
-			d.Gateway = gw.String()
-		}
-	}
 	switch d.Mode {
 	case api.DedicatedDHCP:
 		d.IP = ""
 	case api.DedicatedStatic:
 		ip := net.ParseIP(d.IP)
-		if ip == nil || ip.To4() == nil {
-			return fmt.Errorf("%q is not an IPv4 address", d.IP)
+		switch {
+		case d.IP == "":
+			return errors.New("Enter the IP address for the worker, for example 192.168.5.20")
+		case ip == nil || ip.To4() == nil:
+			return fmt.Errorf("%q isn't a valid IPv4 address. Enter it like 192.168.5.20", d.IP)
 		}
 		d.IP = ip.String()
 	default:
-		return errors.New("choose DHCP or a static address")
+		return errors.New("Choose DHCP or a static address")
+	}
+	if d.VLAN > 0 && d.Mode == api.DedicatedStatic {
+		sn, err := subnetFrom(d.Subnet, net.ParseIP(d.IP))
+		if err != nil {
+			return err
+		}
+		d.Subnet = sn.String()
+		if d.Gateway != "" {
+			gw := net.ParseIP(d.Gateway)
+			if gw == nil || !sn.Contains(gw) {
+				return fmt.Errorf("The VLAN gateway must be an address inside %s, for example %s", sn, firstHost(sn))
+			}
+			d.Gateway = gw.String()
+		}
 	}
 	if d.HostIP != "" {
 		ip := net.ParseIP(d.HostIP)
 		if ip == nil || ip.To4() == nil {
-			return fmt.Errorf("the address for this device to reach the worker, %q, is not an IPv4 address", d.HostIP)
+			return fmt.Errorf("%q isn't a valid IPv4 address for \"Address for this device to reach the worker\". Enter one like 192.168.5.250, or leave it empty", d.HostIP)
 		}
 		d.HostIP = ip.String()
 		if d.HostIP == d.IP {
@@ -348,4 +351,58 @@ func dedicatedMoveProblem(p *store.Project, dst *store.Device) error {
 		}
 	}
 	return nil
+}
+
+// subnetFrom reads the VLAN's subnet from what a person typed next to the worker's address ip: a
+// mask length ("24" or "/24"), a dotted mask ("255.255.255.0") or the full network ("192.168.5.0/24"),
+// and returns the network the address belongs to.
+func subnetFrom(in string, ip net.IP) (*net.IPNet, error) {
+	in = strings.TrimSpace(in)
+	if in == "" {
+		return nil, errors.New("Enter the subnet mask for the VLAN, for example 24 or 255.255.255.0")
+	}
+	hint := errors.New("The subnet mask isn't valid. Enter it as a length like 24, a mask like 255.255.255.0, or the full network like 192.168.5.0/24")
+	if strings.Contains(in, "/") && !strings.HasPrefix(in, "/") {
+		base, bits, _ := strings.Cut(in, "/")
+		if strings.Contains(bits, ".") { // 192.168.5.0/255.255.255.0
+			in = bits
+			if b := net.ParseIP(base); b != nil {
+				ip = b
+			}
+		} else {
+			_, sn, err := net.ParseCIDR(in)
+			if err != nil || sn.IP.To4() == nil {
+				return nil, hint
+			}
+			if ones, _ := sn.Mask.Size(); ones < 8 || ones > 30 {
+				return nil, fmt.Errorf("A /%d subnet isn't usable here. Use a mask length between 8 and 30, such as 24", ones)
+			}
+			return sn, nil
+		}
+	}
+	if ip == nil || ip.To4() == nil {
+		return nil, errors.New("Enter the worker's IP address first; the subnet is worked out from it and the mask")
+	}
+	var mask net.IPMask
+	if n, err := strconv.Atoi(strings.TrimPrefix(in, "/")); err == nil {
+		if n < 8 || n > 30 {
+			return nil, fmt.Errorf("A mask length of %d isn't usable here. Use a number between 8 and 30, such as 24", n)
+		}
+		mask = net.CIDRMask(n, 32)
+	} else if m := net.ParseIP(in).To4(); m != nil {
+		mask = net.IPMask(m)
+		if ones, bits := mask.Size(); bits == 0 || ones < 8 || ones > 30 {
+			return nil, errors.New("That subnet mask isn't valid. A mask looks like 255.255.255.0")
+		}
+	} else {
+		return nil, hint
+	}
+	return &net.IPNet{IP: ip.To4().Mask(mask), Mask: mask}, nil
+}
+
+// firstHost is the first usable address of a subnet, used in examples.
+func firstHost(sn *net.IPNet) string {
+	ip := append(net.IP(nil), sn.IP.To4()...)
+	ip[3]++
+	return ip.String()
 }

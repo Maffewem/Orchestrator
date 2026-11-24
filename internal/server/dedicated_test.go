@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -217,5 +218,34 @@ func TestDedicatedVLANSettings(t *testing.T) {
 	// The address is still unique across workers, whatever the VLAN.
 	if code, _ := create("dup", map[string]any{"mode": "static", "ip": "192.168.5.20", "vlan": 1005, "subnet": "192.168.5.0/24"}); code != http.StatusBadRequest {
 		t.Fatalf("duplicate: %d", code)
+	}
+}
+
+func TestSubnetFrom(t *testing.T) {
+	ip := net.ParseIP("192.168.5.20")
+	ok := map[string]string{
+		"24": "192.168.5.0/24", "/24": "192.168.5.0/24", " 24 ": "192.168.5.0/24", "255.255.255.0": "192.168.5.0/24",
+		"255.255.254.0": "192.168.4.0/23", "192.168.5.0/24": "192.168.5.0/24", "192.168.5.7/24": "192.168.5.0/24",
+		"192.168.5.0/255.255.255.0": "192.168.5.0/24", "16": "192.168.0.0/16",
+	}
+	for in, want := range ok {
+		sn, err := subnetFrom(in, ip)
+		if err != nil || sn.String() != want {
+			t.Errorf("%q: got %v %v, want %s", in, sn, err, want)
+		}
+	}
+	for _, in := range []string{"", "nope", "33", "7", "255.0.255.0", "0.0.0.0", "192.168.5.0/33", "30.5"} {
+		_, err := subnetFrom(in, ip)
+		if err == nil {
+			t.Errorf("%q should be rejected", in)
+		} else if strings.Contains(err.Error(), `""`) || strings.Contains(err.Error(), "(got") {
+			t.Errorf("%q: unfriendly message %q", in, err)
+		}
+	}
+	if _, err := subnetFrom("24", nil); err == nil {
+		t.Error("a mask alone needs the address")
+	}
+	if _, err := subnetFrom("", ip); err == nil || !strings.Contains(err.Error(), "Enter the subnet mask") {
+		t.Errorf("empty: %v", err)
 	}
 }

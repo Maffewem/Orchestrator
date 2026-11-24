@@ -39,6 +39,11 @@ export default function DedicatedAddress({
 
   async function run() {
     if (!device || !value) return;
+    if (subnetMissing) {
+      setCheck(null);
+      setErr("Enter the subnet mask for the VLAN first, for example 24 or 255.255.255.0.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -56,6 +61,9 @@ export default function DedicatedAddress({
     setCheck(null);
     if (value) onChange({ ...value, ...patch });
   };
+
+  // A static address on a VLAN can't be checked or saved without the VLAN's subnet mask.
+  const subnetMissing = !!value && !!value.vlan && value.mode === "static" && !(value.subnet ?? "").trim();
 
   // Result of checking the typed address, shown right under the field.
   const hostPrefix = "Address for this device to reach the worker:";
@@ -119,7 +127,7 @@ export default function DedicatedAddress({
             <Network className="size-4" /> Own address on the network <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Beta</span>
           </h4>
           <p className="mt-0.5 text-xs text-neutral-500">
-            Gives this worker its own IP and MAC address on the device's network, so it can listen on ports like 80 and 443 even when the device uses them. Other devices reach it at that address; it doesn't use the device's ports.
+            Gives this worker its own IP and MAC address, so it can use ports like 80 and 443 even when the device already does.
           </p>
         </div>
         <Toggle
@@ -153,11 +161,11 @@ export default function DedicatedAddress({
               </select>
             </Field>
             {value.mode === "static" ? (
-              <Field label="IP address" hint="Must be inside the device's network and not used by anything else.">
+              <Field label="IP address" hint="A free address on this network.">
                 <input className={inputClass} disabled={!canEdit} placeholder="192.168.0.201" value={value.ip ?? ""} onChange={(e) => set({ ip: e.target.value })} />
               </Field>
             ) : (
-              <Field label="MAC address" hint="Reserve an address for this MAC in your router's DHCP settings to keep the IP fixed. It is generated once and kept.">
+              <Field label="MAC address" hint="Reserve this MAC in your router to keep the IP fixed.">
                 <div className="flex items-center gap-2">
                   <input className={`${inputClass} font-mono`} readOnly value={value.mac || "created when saved"} />
                   {value.mac && <CopyButton text={value.mac} />}
@@ -168,7 +176,7 @@ export default function DedicatedAddress({
           <details className="text-sm" open={!!value.vlan || !!value.host_ip || undefined}>
             <summary className="cursor-pointer text-neutral-600">Advanced{value.vlan ? ` · VLAN ${value.vlan}` : ""}</summary>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
-              <Field label="Network interface" hint="Empty: the one with the default route.">
+              <Field label="Network interface" hint="Leave on Automatic unless the device has several networks.">
                 <select className={inputClass} disabled={!canEdit} value={value.parent ?? ""} onChange={(e) => set({ parent: e.target.value })}>
                   <option value="">Automatic</option>
                   {nets.map((n) => (
@@ -179,7 +187,7 @@ export default function DedicatedAddress({
                   ))}
                 </select>
               </Field>
-              <Field label="Address for this device to reach the worker" hint="Optional spare address that lets this device itself, and its Caddy and Cloudflare Tunnel, reach the worker. Linux blocks a device from reaching its own macvlan workers, so the agent adds a small interface on the device with this address. Checked on the network when you leave the field.">
+              <Field label="Address for this device to reach the worker" hint="Optional. Lets this device itself reach the worker, as Linux blocks that by default.">
                 <div className="flex items-center gap-2">
                   <input
                     className={inputClass}
@@ -199,13 +207,13 @@ export default function DedicatedAddress({
                 </div>
                 {hostStatus}
                 <p className="mt-1.5 text-xs text-amber-700">
-                  The device holds this address itself, so nothing else may use it. Choose one <strong>outside your router's DHCP range</strong>, or reserve it there, or the router may hand it to another device.
+                  Pick an address outside your router's DHCP range.
                 </p>
               </Field>
             </div>
             <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="VLAN ID" hint="Optional, a number from 1 to 4094. Leave empty for the device's normal network: nothing VLAN-related is created.">
+                <Field label="VLAN ID" hint="Optional. Leave empty for the device's normal network.">
                   <input
                     className={inputClass}
                     disabled={!canEdit}
@@ -219,26 +227,28 @@ export default function DedicatedAddress({
                   />
                 </Field>
                 {!!value.vlan && value.mode === "static" && (
-                  <Field label="VLAN subnet" hint="The VLAN's network, like 192.168.5.0/24. It isn't taken from the VLAN ID.">
-                    <input className={inputClass} disabled={!canEdit} placeholder="Like 192.168.5.0/24" value={value.subnet ?? ""} onChange={(e) => set({ subnet: e.target.value })} />
+                  <Field label="Subnet mask (required)" hint="A length like 24, or a mask like 255.255.255.0.">
+                    <input
+                      className={`${inputClass} ${subnetMissing ? "border-bad" : ""}`}
+                      disabled={!canEdit}
+                      placeholder="24 or 255.255.255.0"
+                      aria-invalid={subnetMissing || undefined}
+                      value={value.subnet ?? ""}
+                      onChange={(e) => set({ subnet: e.target.value })}
+                    />
+                    {subnetMissing && <span className="mt-1 block text-xs text-bad">Enter the subnet mask or prefix, for example 24 or 255.255.255.0.</span>}
                   </Field>
                 )}
                 {!!value.vlan && value.mode === "static" && (
-                  <Field label="VLAN gateway" hint="The router's address on the VLAN. Needed for the worker to reach other networks.">
+                  <Field label="VLAN gateway" hint="The router's address on this VLAN.">
                     <input className={inputClass} disabled={!canEdit} placeholder="The router's address on the VLAN" value={value.gateway ?? ""} onChange={(e) => set({ gateway: e.target.value })} />
                   </Field>
                 )}
               </div>
               {!!value.vlan && (
-                <div className="mt-3 space-y-1.5 text-xs text-neutral-600">
-                  <p>
-                    The agent adds a tagged interface <span className="font-mono">{(value.parent || "eth0")}.{value.vlan}</span> on the device's network port and attaches the worker to it, so one cable can serve several VLANs. For example, VLAN ID 1005 for the 192.168.5.0/24 network gives <span className="font-mono">eth0.1005</span>.
-                  </p>
-                  <p>
-                    Before this works: the <strong>switch port must carry VLAN {value.vlan} tagged</strong> (a trunk, alongside the untagged network), and the <strong>router must serve it</strong>: {value.mode === "dhcp" ? "DHCP for the VLAN (the subnet is learned from it)" : "a gateway address on the VLAN"} and routing to the networks that should reach the worker.
-                  </p>
-                  <p>The device itself still can't reach the worker at that address unless you set an address for this device to reach the worker, which must be a spare address on the VLAN's subnet.</p>
-                </div>
+                <p className="mt-3 text-xs text-neutral-600">
+                  The switch port must carry VLAN {value.vlan} tagged and the router must serve it. See the Dedicated address docs.
+                </p>
               )}
             </div>
             {value.mode === "static" && value.mac && (
@@ -263,10 +273,11 @@ export default function DedicatedAddress({
                 </p>
               ))}
               {!check.problems?.length && (
-                <p className="flex items-start gap-2 text-ok">
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                <p className={`flex items-start gap-2 ${check.vlan_reachable === "no" ? "text-amber-700" : "text-ok"}`}>
+                  {check.vlan_reachable === "no" ? <AlertTriangle className="mt-0.5 size-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 size-4 shrink-0" />}
                   {value.host_ip ? `The address for this device to reach the worker (${value.host_ip}) looks free. ` : ""}
                   {value.mode === "static" ? `${value.ip} looks free on ${check.subnet ?? "the network"}.` : `DHCP would offer ${check.offer ?? "an address"} on ${check.subnet ?? "the network"}.`}
+                  {check.vlan_reachable === "yes" ? " The VLAN is working." : check.vlan_reachable === "no" ? " But nothing on the VLAN answered, so it may not be reaching this device." : ""}
                 </p>
               )}
               {check.suggest_host_ip && !value.host_ip && (
@@ -283,9 +294,7 @@ export default function DedicatedAddress({
               ))}
             </div>
           )}
-          <p className="text-xs text-neutral-500">
-            Ports are served on the worker's own address (list them as 80:80 or just 80; the left number is ignored). Domains and the Cloudflare Tunnel reach the worker's address only if you set the address for this device to reach the worker above. Previews don't apply, and replicas keep using their devices' normal ports. Moving the worker stops the old copy first.
-          </p>
+          <p className="text-xs text-neutral-500">List ports as 80:80 or just 80. The left number is ignored.</p>
         </div>
       )}
     </div>

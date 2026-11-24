@@ -136,6 +136,16 @@ export default function ProjectForm({
       if (!ok) return;
       if (!cfTarget.name) src = { ...source, cloudflare: { ...cfTarget, name: keep } };
     }
+    if (dedicated && dedicated.vlan && dedicated.mode === "static") {
+      if (!dedicated.ip?.trim()) {
+        setError("Enter the worker's IP address for its own address on the network, for example 192.168.5.20.");
+        return;
+      }
+      if (!dedicated.subnet?.trim()) {
+        setError("Enter the subnet mask for the VLAN (under Own address on the network, Advanced), for example 24 or 255.255.255.0.");
+        return;
+      }
+    }
     setBusy(true);
     try {
       // A typed address for this device to reach the worker is checked on the network again before it is saved.

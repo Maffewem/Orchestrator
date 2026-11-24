@@ -57,6 +57,27 @@ export default function DedicatedAddress({
     if (value) onChange({ ...value, ...patch });
   };
 
+  // A replica never takes the worker's own address, so nothing about this section applies to the
+  // copy being viewed. The settings (and the interface list and checks, which describe the main
+  // device) are the main copy's: show only a summary, not controls that look like the replica's.
+  if (replicaView) {
+    return (
+      <div className="rounded-xl border border-neutral-200 bg-white p-5">
+        <h4 className="flex items-center gap-2 text-sm font-semibold">
+          <Network className="size-4" /> Own address on the network
+        </h4>
+        <p className="mt-2 text-sm text-neutral-600">
+          You are viewing the copy on {replicaView}, a replica. Replicas run on their device's normal ports and ignore the worker's own address and VLAN, so there is nothing to set or check for this copy.
+        </p>
+        <p className="mt-2 text-sm text-neutral-600">
+          {value
+            ? `The main copy${device ? ` on ${device.name}` : ""} uses its own address (${value.mode === "static" ? value.ip || "static" : "from DHCP"}${value.vlan ? `, VLAN ${value.vlan}` : ""}). Switch to the main copy to change it.`
+            : `The main copy${device ? ` on ${device.name}` : ""} has no own address. Switch to the main copy to set one.`}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-neutral-200 bg-white p-5">
       <div className="flex items-start justify-between gap-4">
@@ -87,11 +108,6 @@ export default function DedicatedAddress({
       {wifiOnly && (
         <p className="mt-3 flex items-start gap-2 text-sm text-amber-700">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" /> This device is on Wi-Fi. Access points allow one MAC address per client, so this normally doesn't work. Use a wired device.
-        </p>
-      )}
-      {value && replicaView && (
-        <p className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm">
-          You are viewing the copy on {replicaView}, a replica. Replicas run on their device's normal ports and ignore this worker's own address and VLAN: they never take it. It belongs to the main copy{device ? ` on ${device.name}` : ""}, and network checks are not run for replicas.
         </p>
       )}
       {value && (
@@ -139,10 +155,10 @@ export default function DedicatedAddress({
                     value={value.host_ip ?? ""}
                     onChange={(e) => set({ host_ip: e.target.value })}
                     onBlur={() => {
-                      if (value.host_ip && canEdit && supported && !replicaView && device?.status !== "offline") void run();
+                      if (value.host_ip && canEdit && supported && device?.status !== "offline") void run();
                     }}
                   />
-                  {canEdit && !value.host_ip && !replicaView && (
+                  {canEdit && !value.host_ip && (
                     <Button type="button" onClick={run} loading={busy} disabled={!device || !supported || device.status === "offline"}>
                       Suggest
                     </Button>
@@ -197,16 +213,14 @@ export default function DedicatedAddress({
               </p>
             )}
           </details>
-          {!replicaView && (
           <div className="flex flex-wrap items-center gap-3">
             <Button type="button" onClick={run} loading={busy} disabled={!device || !supported || device.status === "offline"}>
               Check on the network
             </Button>
             {device?.status === "offline" && <span className="text-xs text-neutral-500">The device is offline.</span>}
           </div>
-          )}
-          {!replicaView && err && <p className="text-sm text-bad">{err}</p>}
-          {!replicaView && check && (
+          {err && <p className="text-sm text-bad">{err}</p>}
+          {check && (
             <div className="space-y-1.5 text-sm">
               <p className="text-xs text-neutral-500">Checked on {device?.name ?? "this device"}.</p>
               {check.problems?.map((p) => (

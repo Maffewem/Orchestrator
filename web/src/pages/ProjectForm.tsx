@@ -503,7 +503,7 @@ export default function ProjectForm({
               </p>
             )}
           </Field>
-          {!isCF && (<Field label="Device">
+          {!isCF && (<Field label={replicaView ? "Device (main copy)" : "Device"} hint={replicaView ? "You are viewing a replica. This is the main copy's device, and settings apply to every copy." : undefined}>
             <select className={inputClass} value={device} onChange={(e) => setDeviceId(e.target.value)}>
               {devices.data?.length === 0 && <option value="">No devices registered yet</option>}
               {devices.data?.map((d) => (

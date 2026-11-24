@@ -35,6 +35,10 @@ export function ServerBackupsPanel() {
     if (ok) await run("upload", () => api.restoreServerUpload(f, f.name.endsWith(".enc")), "Restoring. The server is restarting; reload in a moment.");
   };
 
+  const storage = usePoll(() => api.backupStorage().catch(() => null), 60000);
+  const l = storage.data?.location;
+  const place = l?.host_path ? `, which is ${l.host_path} on ${l.device ?? "the server's host"}${l.volume ? ` (Docker volume ${l.volume})` : ""}` : l?.device ? `, on ${l.device}` : "";
+
   return (
     <div className="space-y-5 p-5">
       <p className="text-sm text-neutral-500">
@@ -52,7 +56,7 @@ export function ServerBackupsPanel() {
       </div>
       {msg && (msg.ok ? <p role="status" className="text-sm text-ok">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
 
-      <Schedule saved={v.policy} nextRun={v.next_run} dir={v.dir} onSaved={() => list.reload()} />
+      <Schedule saved={v.policy} nextRun={v.next_run} dir={v.dir} place={place} onSaved={() => list.reload()} />
 
       <Destinations dests={v.destinations ?? []} onChanged={() => list.reload()} />
 
@@ -94,7 +98,7 @@ export function ServerBackupsPanel() {
   );
 }
 
-function Schedule({ saved, nextRun, dir, onSaved }: { saved: ServerBackupPolicy; nextRun?: string; dir: string; onSaved: () => void }) {
+function Schedule({ saved, nextRun, dir, place, onSaved }: { saved: ServerBackupPolicy; nextRun?: string; dir: string; place: string; onSaved: () => void }) {
   const [draft, setDraft] = useState<ServerBackupPolicy | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -153,7 +157,7 @@ function Schedule({ saved, nextRun, dir, onSaved }: { saved: ServerBackupPolicy;
         {dirty && <span className="text-sm text-amber-700">Unsaved changes</span>}
         {msg && (msg.ok ? <span role="status" className="text-sm text-ok">{msg.text}</span> : <ErrorNote>{msg.text}</ErrorNote>)}
       </div>
-      {nextRun && saved.mode !== "off" && !dirty && <p className="text-sm text-neutral-500">Next backup {new Date(nextRun).toLocaleString()}. Stored in <code>{dir}</code>.</p>}
+      {nextRun && saved.mode !== "off" && !dirty && <p className="text-sm text-neutral-500">Next backup {new Date(nextRun).toLocaleString()}. Stored in <code>{dir}</code>{place}.</p>}
     </section>
   );
 }
@@ -264,6 +268,12 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
               <Button size="sm" variant="ghost" aria-label={`Remove ${d.name}`} icon={<Trash2 className="size-3.5" />} onClick={() => setDraft(list.filter((_, j) => j !== i))} />
             </div>
           </div>
+          {d.id && d.location && !draft && (
+            <p className="text-sm text-neutral-600">
+              <strong>Stored at:</strong> {d.location}.{" "}
+              {d.used_bytes !== undefined ? `${bytes(d.used_bytes)} used there.` : d.last_size ? `Last copy ${bytes(d.last_size)}; the total used there is not measured for this kind.` : ""}
+            </p>
+          )}
           {d.last_error && <ErrorNote>{d.last_error}</ErrorNote>}
           {d.kind === "s3" && (
             <div className="grid gap-3 sm:grid-cols-2">

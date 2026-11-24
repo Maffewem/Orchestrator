@@ -93,9 +93,9 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 
 	// Backups taking most of the disk they are stored on.
 	if id := identityFrom(r); id != nil && id.Role == store.RoleAdmin {
-		if u := s.backupUsage(); u.Level != "ok" {
+		if u := s.backupUsageWithLocation(ctx); u.Level != "ok" {
 			out = append(out, Alert{ID: "backup-storage", Severity: map[string]string{"critical": "critical", "warning": "warning"}[u.Level], Title: "Backups are using most of the disk",
-				Detail: humanSize(u.BackupBytes) + " of backups in " + u.Dir + ", " + humanSize(u.FreeBytes) + " free. Delete old backups, lower how many are kept, or move them to a larger disk.", Link: "/backups"})
+				Detail: humanSize(u.BackupBytes) + " of backups in " + u.where() + ", " + humanSize(u.FreeBytes) + " free (" + humanSize(u.ContainerBytes) + " worker backups, " + humanSize(u.ServerBytes) + " server backups). Delete old backups, lower how many are kept, or move them to a larger disk.", Link: "/backups"})
 		}
 	}
 

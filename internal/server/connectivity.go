@@ -202,21 +202,7 @@ func (s *Server) connectivity(ctx context.Context) (ConnView, error) {
 	if err != nil {
 		return v, err
 	}
-	// The device this server runs on: its agent talks to loopback, or other agents talk to
-	// one of its addresses.
-	var host *store.Device
-	for _, d := range devs {
-		if h, _ := urlHost(d.Host.Server); isLoopback(h) {
-			host = d
-		}
-	}
-	for _, d := range devs {
-		for _, o := range devs {
-			if h, _ := urlHost(o.Host.Server); host == nil && h != "" && slices.Contains(d.Host.Addresses, h) {
-				host = d
-			}
-		}
-	}
+	host := serverHostDevice(devs)
 	assigned := map[string]string{}
 	if host != nil {
 		v.Host = host.Name
@@ -334,4 +320,23 @@ func (s *Server) handleConnectivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// serverHostDevice finds the device this server runs on: the one whose agent talks to
+// loopback, or whose address other agents use to reach the server. Nil when none matches.
+func serverHostDevice(devs []*store.Device) *store.Device {
+	var host *store.Device
+	for _, d := range devs {
+		if h, _ := urlHost(d.Host.Server); isLoopback(h) {
+			host = d
+		}
+	}
+	for _, d := range devs {
+		for _, o := range devs {
+			if h, _ := urlHost(o.Host.Server); host == nil && h != "" && slices.Contains(d.Host.Addresses, h) {
+				host = d
+			}
+		}
+	}
+	return host
 }

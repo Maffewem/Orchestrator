@@ -844,6 +844,10 @@ export interface BackupStorage {
   free_bytes: number;
   total_bytes: number;
   level: "ok" | "warning" | "critical";
+  container_bytes: number;
+  server_bytes: number;
+  other_bytes: number;
+  location: { device?: string; device_id?: string; container?: string; host_path?: string; volume?: string; note?: string };
 }
 export interface BackupOAuthProvider {
   id: "google" | "dropbox" | "onedrive";
@@ -903,7 +907,12 @@ export interface BackupDest {
   rclone_conf?: string;
   remote?: string;
   last_at?: string;
+  last_size?: number;
   last_error?: string;
+  /** Where copies land, in words (device and folder, bucket and prefix, remote and folder). */
+  location?: string;
+  /** Space the copies take; known for folders on the server only. */
+  used_bytes?: number;
 }
 export interface ServerBackups {
   destinations: BackupDest[];

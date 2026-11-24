@@ -109,7 +109,13 @@ func (a *Agent) backup(ctx context.Context, containerID, backupID, exclude strin
 
 	skip := a.backupExcludes(ctx, containerID, mounts, exclude)
 	pr, pw := io.Pipe()
-	go func() { pw.CloseWithError(a.writeArchive(ctx, pw, containerID, name, inspect, mounts, skip)) }()
+	var archiveErr error
+	archived := make(chan struct{})
+	go func() {
+		archiveErr = a.writeArchive(ctx, pw, containerID, name, inspect, mounts, skip)
+		pw.CloseWithError(archiveErr)
+		close(archived)
+	}()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.server()+"/api/agent/backups/"+url.PathEscape(backupID), pr)
 	if err != nil {
@@ -122,12 +128,20 @@ func (a *Agent) backup(ctx context.Context, containerID, backupID, exclude strin
 	resp, err := (&http.Client{}).Do(req) // no overall timeout: large volumes on slow links
 	if err != nil {
 		pr.CloseWithError(err)
+		<-archived
+		if archiveErr != nil {
+			return fmt.Errorf("could not read the container's data: %w", archiveErr)
+		}
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		pr.CloseWithError(errors.New("upload rejected"))
+		<-archived
+		if archiveErr != nil && !strings.Contains(archiveErr.Error(), "upload rejected") {
+			return fmt.Errorf("could not read the container's data (%w); the server then answered HTTP %d: %s", archiveErr, resp.StatusCode, strings.TrimSpace(string(msg)))
+		}
 		return fmt.Errorf("control plane rejected the backup (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
 	return nil

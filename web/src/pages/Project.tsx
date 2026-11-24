@@ -86,7 +86,7 @@ function StackControls({
       const res = await confirmWithOption({
         title: `Remove stack ${p.name}?`,
         message:
-          "Its containers and networks are removed. The project stays, and New deployment brings the stack back.",
+          "Its containers and networks are removed. The project stays, and Deploy brings the stack back.",
         confirmLabel: "Remove stack",
         danger: true,
         option: {
@@ -296,7 +296,7 @@ export default function ProjectPage() {
               onClick={deploy}
               loading={deploying}
             >
-              New deployment
+              {worker ? "Redeploy" : "Deploy"}
             </Button>
           )}
           {url && (
@@ -435,14 +435,25 @@ function ProjectOverview({
         <Card>
           <CardHeader title="Copies" subtitle="Each copy answers on its own device. Domains, the proxy and tunnels point at the main copy only; replicas have no public route." />
           <div className="divide-y divide-neutral-100 text-sm">
-            {[{ device_id: p.device_id, device: p.device_name, url: p.main_url, running: undefined as boolean | undefined, main: true }, ...(p.replicas ?? []).map((r) => ({ device_id: r.device_id, device: r.device, url: r.url, running: r.running, main: false }))].map((c) => (
+            {[{ device_id: p.device_id, device: p.device_name, url: p.main_url, running_url: p.main_running_url, pending: p.main_pending, running: undefined as boolean | undefined, main: true }, ...(p.replicas ?? []).map((r) => ({ device_id: r.device_id, device: r.device, url: r.url, running_url: r.running_url, pending: r.pending, running: r.running, main: false }))].map((c) => (
               <div key={c.device_id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
                 <span>
                   <span className="font-medium">{p.name} · {c.device}</span> <span className="text-neutral-500">({c.main ? "main" : "replica"})</span>
                 </span>
-                <span className="flex items-center gap-3">
+                <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
                   {c.running === false && <span className="text-xs text-neutral-500">not running</span>}
-                  {c.url ? <a href={c.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{c.url.replace("http://", "")}</a> : <span className="text-neutral-500">no direct address</span>}
+                  {c.pending ? (
+                    <>
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">Pending redeploy</span>
+                      <span className="text-xs text-neutral-500">running at {c.running_url ? c.running_url.replace("http://", "") : "—"}</span>
+                      <span className="text-xs text-neutral-500">configured:</span>
+                      {c.url ? <span className="text-neutral-700">{c.url.replace("http://", "")}</span> : <span className="text-neutral-500">from DHCP</span>}
+                    </>
+                  ) : c.url ? (
+                    <a href={c.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{c.url.replace("http://", "")}</a>
+                  ) : (
+                    <span className="text-neutral-500">no direct address</span>
+                  )}
                 </span>
               </div>
             ))}
@@ -503,7 +514,7 @@ function ProjectOverview({
               icon={<Rocket className="size-8" />}
               title="Not deployed yet"
             >
-              Use New deployment to roll this project out.
+              Use Deploy to roll this project out.
             </Empty>
           )}
         </Card>
@@ -545,6 +556,22 @@ function ProjectOverview({
                 {p.runtime.ports.join(", ") || "—"}
               </dd>
             </div>
+            {p.main_url && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-neutral-500">Address</dt>
+                <dd className="flex min-w-0 flex-col items-end text-xs">
+                  {p.main_pending ? (
+                    <>
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">Pending redeploy</span>
+                      <span className="text-neutral-500">running: {p.main_running_url?.replace("http://", "") ?? "—"}</span>
+                      <span className="text-neutral-500">configured: {p.main_url.replace("http://", "")}</span>
+                    </>
+                  ) : (
+                    <span className="font-mono">{p.main_url.replace("http://", "")}</span>
+                  )}
+                </dd>
+              </div>
+            )}
             {publicUrls.length > 0 && (
               <div className="flex justify-between gap-3">
                 <dt className="text-neutral-500">Public URL</dt>
@@ -651,8 +678,32 @@ function ProjectSettings({ p, onSaved, viewId, viewName, formKey, dirty }: { p: 
   const nav = useNavigate();
   const isAdmin = useCan("admin");
   const [saved, setSaved] = useState(false);
+  // Saving changes the stored settings only; the running container keeps what it was deployed with.
+  const [needsDeploy, setNeedsDeploy] = useState(false);
+  const [deployErr, setDeployErr] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  async function deployNow() {
+    setStarting(true);
+    setDeployErr(null);
+    try {
+      await api.deployProject(p.id);
+      nav(`/projects/${p.id}/deployments`);
+    } catch (e) {
+      setDeployErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStarting(false);
+    }
+  }
   return (
     <div className="space-y-6">
+      {needsDeploy && p.source.type !== "cloudflare" && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm">
+          <span>Saved. The running worker keeps its old settings until you deploy it again.{deployErr ? ` ${deployErr}` : ""}</span>
+          <Button onClick={deployNow} loading={starting}>
+            Deploy now
+          </Button>
+        </div>
+      )}
       {p.source.type === "cloudflare" && <CloudflareSettings p={p} />}
       {(p.replicas?.length ?? 0) > 0 && (
         <p className="rounded-lg bg-blue-50 px-4 py-2 text-sm">
@@ -665,13 +716,36 @@ function ProjectSettings({ p, onSaved, viewId, viewName, formKey, dirty }: { p: 
           onDirty={(d) => (dirty.current = d)}
           initial={p}
           replicaView={viewId && viewId !== p.device_id ? viewName : undefined}
+          viewDeviceId={viewId}
           submitLabel={saved ? "Saved" : "Save changes"}
           onSubmit={async (input, previews) => {
             await api.updateProject(p.id, input);
             if (previews) await api.setPreviewSettings(p.id, previews);
+            const diff = (a: unknown, b: unknown) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+            const was = p.runtime as unknown as Record<string, unknown>;
+            const now = input.runtime as unknown as Record<string, unknown>;
+            const what: string[] = [];
+            if (diff(was.dedicated, now.dedicated) || diff(was.copy_addresses, now.copy_addresses)) what.push("own address");
+            if (diff(was.ports, now.ports)) what.push("ports");
+            if (diff(was.env, now.env)) what.push("environment");
+            if (diff(input.source, p.source)) what.push("source");
+            const changed = diff(input.runtime, p.runtime) || diff(input.source, p.source);
+            if (changed) setNeedsDeploy(true);
             setSaved(true);
             setTimeout(() => setSaved(false), 1500);
             onSaved();
+            if (changed && p.source.type !== "cloudflare") {
+              const copies = [p.device_name + " (main)", ...(p.replicas ?? []).map((r) => r.device + " (replica)")];
+              const list = what.length ? what.join(", ") : "settings";
+              void confirmDialog({
+                title: "Redeploy now to apply these changes?",
+                message: `Saved changes to ${list}. The running worker keeps its old settings until it is redeployed. Redeploying updates ${copies.length > 1 ? `${copies.join(", ")}: the main copy first, then each replica one at a time, stopping if one fails` : copies[0]}.`,
+                confirmLabel: "Redeploy",
+                cancelLabel: "Later",
+              }).then((ok) => {
+                if (ok) void deployNow();
+              });
+            }
           }}
         />
       </Card>

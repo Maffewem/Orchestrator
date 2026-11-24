@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -247,5 +248,153 @@ func TestSubnetFrom(t *testing.T) {
 	}
 	if _, err := subnetFrom("", ip); err == nil || !strings.Contains(err.Error(), "Enter the subnet mask") {
 		t.Errorf("empty: %v", err)
+	}
+}
+
+func TestDedicatedCopyAddresses(t *testing.T) {
+	h := newHarness(t)
+	one, two := h.register("pi"), h.register("pi2")
+	for _, r := range []struct {
+		reg  api.RegisterResponse
+		addr string
+	}{{one, "192.168.0.184"}, {two, "192.168.0.185"}} {
+		host := dedicatedHost(api.CapDedicatedIP, api.CapDedicatedVLAN)
+		host.Network[0].Address = r.addr
+		h.do("POST", "/api/agent/heartbeat", r.reg.AgentToken, api.HeartbeatRequest{Host: host}, &api.HeartbeatResponse{})
+	}
+	body := func(main map[string]any, copies map[string]any) map[string]any {
+		rt := map[string]any{"ports": []string{"80:80"}, "dedicated": main}
+		if copies != nil {
+			rt["copy_addresses"] = copies
+		}
+		return map[string]any{"name": "web", "device_id": one.DeviceID, "source": map[string]any{"type": "image", "image": "caddy"}, "runtime": rt}
+	}
+	var p store.Project
+	if code := h.do("POST", "/api/projects", adminToken, body(map[string]any{"mode": "static", "ip": "192.168.0.201"}, map[string]any{two.DeviceID: map[string]any{"mode": "dhcp"}}), &p); code != http.StatusCreated {
+		t.Fatalf("create with a copy address: %d", code)
+	}
+	cp := p.Runtime.CopyAddresses[two.DeviceID]
+	if cp == nil || cp.MAC == "" || cp.MAC == p.Runtime.Dedicated.MAC {
+		t.Fatalf("each copy needs its own MAC: main %+v copy %+v", p.Runtime.Dedicated, cp)
+	}
+	patch := func(main map[string]any, copies map[string]any) int {
+		return h.do("PATCH", "/api/projects/"+p.ID, adminToken, body(main, copies), &store.Project{})
+	}
+	for name, c := range map[string]struct{ main, copy map[string]any }{
+		"same MAC":                 {map[string]any{"mode": "dhcp", "mac": cp.MAC}, map[string]any{"mode": "dhcp", "mac": cp.MAC}},
+		"same address":             {map[string]any{"mode": "static", "ip": "192.168.0.201"}, map[string]any{"mode": "static", "ip": "192.168.0.201"}},
+		"same device-side address": {map[string]any{"mode": "dhcp", "host_ip": "192.168.0.250"}, map[string]any{"mode": "dhcp", "host_ip": "192.168.0.250"}},
+		"no interface":             {map[string]any{"mode": "dhcp"}, map[string]any{"mode": "dhcp", "parent": "eth9"}},
+	} {
+		if code := patch(c.main, map[string]any{two.DeviceID: c.copy}); code != http.StatusBadRequest {
+			t.Errorf("%s: %d", name, code)
+		}
+	}
+	if code := patch(map[string]any{"mode": "static", "ip": "192.168.0.201"}, map[string]any{two.DeviceID: map[string]any{"mode": "static", "ip": "192.168.0.202", "mac": cp.MAC}}); code != http.StatusOK {
+		t.Fatalf("a different address on the other copy: %d", code)
+	}
+	// Another project can't take a copy's address either.
+	var other store.Project
+	if code := h.do("POST", "/api/projects", adminToken, map[string]any{"name": "other", "device_id": two.DeviceID, "source": map[string]any{"type": "image", "image": "caddy"},
+		"runtime": map[string]any{"ports": []string{"80:80"}, "dedicated": map[string]any{"mode": "static", "ip": "192.168.0.202"}}}, &other); code != http.StatusBadRequest {
+		t.Fatalf("another project on a copy's address: %d", code)
+	}
+}
+
+func TestAdoptCopyAddress(t *testing.T) {
+	main := &api.DedicatedIP{Mode: api.DedicatedStatic, IP: "192.168.0.201", MAC: "02:00:00:00:00:01"}
+	copyA := &api.DedicatedIP{Mode: api.DedicatedStatic, IP: "192.168.0.202", MAC: "02:00:00:00:00:02"}
+	p := &store.Project{DeviceID: "a", Runtime: store.Runtime{Dedicated: main, CopyAddresses: map[string]*api.DedicatedIP{"b": copyA}}}
+	undo := adoptCopyAddress(p, "a", "b")
+	if p.Runtime.Dedicated != copyA || p.Runtime.CopyAddresses["a"] != main || len(p.Runtime.CopyAddresses) != 1 {
+		t.Fatalf("after the move: %+v %+v", p.Runtime.Dedicated, p.Runtime.CopyAddresses)
+	}
+	p.DeviceID = "b"
+	if dedicatedFor(p, "b") != copyA || dedicatedFor(p, "a") != main {
+		t.Fatal("each device uses its own setting")
+	}
+	undo()
+	if p.Runtime.Dedicated != main || p.Runtime.CopyAddresses["b"] != copyA {
+		t.Fatal("undo should restore both")
+	}
+	// Without an entry for the destination nothing changes.
+	q := &store.Project{DeviceID: "a", Runtime: store.Runtime{Dedicated: main}}
+	adoptCopyAddress(q, "a", "c")
+	if q.Runtime.Dedicated != main || q.Runtime.CopyAddresses != nil {
+		t.Fatalf("%+v", q.Runtime)
+	}
+}
+
+func TestCopyRunningPending(t *testing.T) {
+	p := &store.Project{Name: "w", Runtime: store.Runtime{Ports: []string{"8000:8080"}, Dedicated: &api.DedicatedIP{Mode: api.DedicatedStatic, IP: "192.168.5.200"}}}
+	d := &store.Device{ID: "d1", Containers: []api.Container{{Name: "w", State: "running"}}}
+	if _, pending := copyRunning(p, d, true); !pending {
+		t.Fatal("a saved address on a container still on the device network must be pending")
+	}
+	d.Containers[0].Networks = []api.ContainerNet{{Name: "orch-lan-eth0", IP: "192.168.5.200"}}
+	if _, pending := copyRunning(p, d, true); pending {
+		t.Fatal("matching address must not be pending")
+	}
+}
+
+// Once a worker's device-reach address is applied it exists on the device as the worker's own
+// access interface. Saving other settings afterwards must not count it as the device's address.
+func TestSaveAfterDeviceAccessAddressApplied(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	beat := func(host api.HostInfo) {
+		h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: host}, &api.HeartbeatResponse{})
+	}
+	beat(dedicatedHost(api.CapDedicatedIP, api.CapDedicatedVLAN))
+	ded := map[string]any{"mode": "static", "ip": "192.168.0.201", "host_ip": "192.168.0.250"}
+	mk := func(ports []string) map[string]any {
+		return map[string]any{"name": "web", "device_id": reg.DeviceID, "source": map[string]any{"type": "image", "image": "caddy"}, "runtime": map[string]any{"ports": ports, "dedicated": ded}}
+	}
+	var p store.Project
+	if code := h.do("POST", "/api/projects", adminToken, mk([]string{"80:80"}), &p); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	// The agent now reports the applied access interface among the device's addresses.
+	host := dedicatedHost(api.CapDedicatedIP, api.CapDedicatedVLAN)
+	host.Network = append(host.Network, api.NetAddr{Interface: "orch-shim", Address: "192.168.0.250", Prefix: 32})
+	beat(host)
+	if code := h.do("PATCH", "/api/projects/"+p.ID, adminToken, mk([]string{"80:80", "443:443"}), &store.Project{}); code != http.StatusOK {
+		t.Fatalf("saving unrelated settings after the address was applied must work: %d", code)
+	}
+	// A real clash with the device's own address is still refused.
+	ded["host_ip"] = "192.168.0.184"
+	if code := h.do("PATCH", "/api/projects/"+p.ID, adminToken, mk([]string{"80:80"}), &store.Project{}); code == http.StatusOK {
+		t.Fatal("the device's own address must still be refused")
+	}
+}
+
+// Addresses on the agent's own interfaces come and go with deployments and must not raise a
+// device network warning; a change on a physical interface still does.
+func TestNetworkChangeIgnoresManagedInterfaces(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	d, err := h.st.GetDevice(context.Background(), reg.DeviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phys := api.NetAddr{Interface: "eth0", Address: "192.168.0.184"}
+	shim := api.NetAddr{Interface: "orch-shimv1005", Address: "192.168.5.250"}
+	d.Host.Addresses = []string{"192.168.0.184", "192.168.5.250"}
+	d.Host.Network = []api.NetAddr{phys, shim}
+	now := api.HostInfo{Addresses: []string{"192.168.0.184"}, Network: []api.NetAddr{phys}}
+	h.srv.noteNetworkChanges(context.Background(), d, now)
+	if _, ok := h.srv.netNote(d.ID); ok {
+		t.Fatal("the access address going away must not warn")
+	}
+	d.Host = api.HostInfo{Addresses: []string{"192.168.0.184"}, Network: []api.NetAddr{phys}}
+	now = api.HostInfo{Addresses: []string{"192.168.0.184", "192.168.5.250"}, Network: []api.NetAddr{phys, shim}}
+	h.srv.noteNetworkChanges(context.Background(), d, now)
+	if _, ok := h.srv.netNote(d.ID); ok {
+		t.Fatal("the access address appearing must not warn")
+	}
+	now = api.HostInfo{Addresses: []string{"192.168.0.99"}, Network: []api.NetAddr{{Interface: "eth0", Address: "192.168.0.99"}}}
+	h.srv.noteNetworkChanges(context.Background(), d, now)
+	if _, ok := h.srv.netNote(d.ID); !ok {
+		t.Fatal("a change on the physical interface must still warn")
 	}
 }

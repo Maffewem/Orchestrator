@@ -358,7 +358,7 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 	// A dedicated address can't be held twice on one network: the old copy stops first and
 	// comes back if the move fails.
 	restartSource := func() {}
-	if src != nil && !src.Offline && p.Runtime.Dedicated != nil && p.Source.Type != store.SourceCompose {
+	if src != nil && !src.Offline && p.Runtime.Dedicated != nil && p.Runtime.CopyAddresses[dst.ID] == nil && p.Source.Type != store.SourceCompose {
 		if c := findByName(src, name); c != nil && c.State == "running" && hasCap(src, api.CapPreview) {
 			m.step(p.ID, "Stopping "+name+" on "+src.Name+" so its dedicated address is free")
 			cmd, err := s.store.CreateCommand(ctx, src.ID, api.ActionStop, c.ID, nil)
@@ -381,12 +381,15 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 	m.step(p.ID, "Deploying to "+dst.Name)
 	oldDevice := p.DeviceID
 	p.DeviceID = dst.ID
+	undoAddress := adoptCopyAddress(p, oldDevice, dst.ID) // the destination's own address setting, if it has one
 	if err := s.store.UpdateProject(ctx, p); err != nil {
+		undoAddress()
 		fail(err)
 		return
 	}
 	revert := func() {
 		restartSource()
+		undoAddress()
 		p.DeviceID = oldDevice
 		s.store.UpdateProject(ctx, p)
 		s.syncProxy(ctx, dst.ID)

@@ -45,6 +45,16 @@ Details:
 
 The error lists what the agent saw: whether the sub-interface exists, its state and carrier, the reverse-path filter (`rp_filter`) setting, how many requests were sent and how many DHCP packets were seen on the interface. Replies are read through a packet socket on the sub-interface, because the kernel's reverse-path filter drops ordinary UDP replies from a router whose network the interface has no address in. "0 DHCP packets seen" means nothing came back on that VLAN: check that the UniFi (or other) network's VLAN ID is exactly the ID you entered, that DHCP is enabled for it and that the switch port carries it tagged. To test by hand on the device, create the interface with `ip link add link eth0 name eth0.<id> type vlan id <id>`, bring it up and watch `tcpdump -n -e -i eth0 vlan <id> and port 67 or port 68`.
 
+## Replicas and per-copy settings (Beta)
+
+Each copy of a worker (the main copy and every replica) has its own address settings: DHCP or static, IP, subnet mask, gateway, VLAN, network interface, device-side address, its own generated MAC, and its own list of ports ("Ports on this address", one per line). Use the copy switcher at the top of the worker page, then open Settings. Settings saved before this feature belong to the main copy.
+
+- Two copies can never share an IP or a MAC address; saving is refused with the copy named.
+- When a worker moves or fails over to another device, it uses that device's own copy settings, and the previous main settings are kept as that device's copy entry.
+- The port-conflict check only compares ports on the same device and address.
+- Saved settings only take effect at the next deploy. Until then the Overview marks the copy "Pending redeploy" and shows the address it is running at next to the configured one.
+- Giving one worker several addresses is not supported.
+
 ## Removing it
 
 Turn the switch off and redeploy. The worker goes back to the default bridge network and published ports, the DHCP lease is no longer renewed (it expires), and the device's route to the worker is removed.

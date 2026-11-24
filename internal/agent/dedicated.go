@@ -82,6 +82,11 @@ func findLAN(ctx context.Context, d api.DedicatedIP) (*lan, error) {
 	}
 	all, _ := net.Interfaces()
 	for _, i := range all {
+		if isShimName(i.Name) {
+			// The access interface made for an earlier deployment of a worker: its address is
+			// the worker's to reuse, not one the device holds for itself.
+			continue
+		}
 		addrs, _ := i.Addrs()
 		for _, a := range addrs {
 			if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() != nil {
@@ -611,3 +616,7 @@ func firstHostIP(sn *net.IPNet) net.IP {
 	ip[3]++
 	return ip
 }
+
+// isShimName reports whether an interface is a device access interface made by this agent
+// (orch-shim, or orch-shimv<id> for a VLAN).
+func isShimName(name string) bool { return strings.HasPrefix(name, shimName) }

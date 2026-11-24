@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +67,15 @@ func cleanDedicated(d *api.DedicatedIP) error {
 	d.IP, d.HostIP = strings.TrimSpace(d.IP), strings.TrimSpace(d.HostIP)
 	d.Subnet, d.Gateway = strings.TrimSpace(d.Subnet), strings.TrimSpace(d.Gateway)
 	d.MAC = strings.ToLower(strings.TrimSpace(d.MAC))
+	d.Ports = cleanLabels(d.Ports)
+	for _, p := range d.Ports {
+		if !portRe.MatchString(p) {
+			return fmt.Errorf("The port %q should look like 8080:80, 80 or 53/udp", p)
+		}
+	}
+	if len(d.Ports) == 0 {
+		d.Ports = nil
+	}
 	if d.MAC == "" {
 		d.MAC = newMAC()
 	}
@@ -123,34 +133,53 @@ func cleanDedicated(d *api.DedicatedIP) error {
 
 // takenAddresses maps every address Orchestrator knows to who holds it (devices' own addresses and
 // other workers' addresses and device-reach addresses), and every other worker's MAC to its name.
-func (s *Server) takenAddresses(ctx context.Context, exceptProject string) (taken, macs map[string]string) {
+func (s *Server) takenAddresses(ctx context.Context, exceptProject string, siblings ...*api.DedicatedIP) (taken, macs map[string]string) {
 	taken, macs = map[string]string{}, map[string]string{}
 	devs, _ := s.store.ListDevices(ctx)
 	for _, od := range devs {
 		for _, n := range od.Host.Network {
+			// A worker's own access interface (orch-shim) carries that worker's device-reach
+			// address; it is claimed by the worker below, not held by the device itself.
+			if strings.HasPrefix(n.Interface, "orch-shim") {
+				continue
+			}
 			taken[n.Address] = "the device " + od.Name
+		}
+	}
+	claim := func(o *api.DedicatedIP, who string) {
+		if o == nil {
+			return
+		}
+		if o.IP != "" {
+			taken[o.IP] = "the worker " + who
+		}
+		if o.HostIP != "" {
+			taken[o.HostIP] = "the address that lets this device reach the worker " + who
+		}
+		if o.MAC != "" {
+			macs[o.MAC] = who
 		}
 	}
 	projects, _ := s.store.ListProjects(ctx)
 	for _, p := range projects {
-		o := p.Runtime.Dedicated
-		if p.ID == exceptProject || o == nil {
+		if p.ID == exceptProject {
 			continue
 		}
-		if o.IP != "" {
-			taken[o.IP] = "the worker " + p.Name
+		claim(p.Runtime.Dedicated, p.Name)
+		for _, o := range p.Runtime.CopyAddresses {
+			claim(o, p.Name)
 		}
-		if o.HostIP != "" {
-			taken[o.HostIP] = "the address that lets this device reach the worker " + p.Name
-		}
-		macs[o.MAC] = p.Name
+	}
+	// The project's own other copies count too (the one being checked is not passed in).
+	for _, o := range siblings {
+		claim(o, "another copy of this worker")
 	}
 	return taken, macs
 }
 
 // dedicatedProblems lists why d can't be used by project id on device dev, from what the server
 // already knows: the device's reported network and every other worker's claim on an address.
-func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.Device, d *api.DedicatedIP) []string {
+func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.Device, d *api.DedicatedIP, siblings ...*api.DedicatedIP) []string {
 	var out []string
 	if !hasCap(dev, api.CapDedicatedIP) {
 		out = append(out, errAgentTooOld(dev, "dedicated addresses").Error())
@@ -177,7 +206,7 @@ func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.De
 			lan = sn
 		}
 	}
-	taken, macs := s.takenAddresses(ctx, id)
+	taken, macs := s.takenAddresses(ctx, id, siblings...)
 	if who, dup := macs[d.MAC]; dup {
 		out = append(out, "that MAC address already belongs to "+who)
 	}
@@ -201,8 +230,15 @@ func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.De
 
 // validateDedicated checks a project's dedicated address while it is saved.
 func (s *Server) validateDedicated(ctx context.Context, id string, in *projectInput) error {
-	d := in.Runtime.Dedicated
-	if d == nil {
+	for dev, d := range in.Runtime.CopyAddresses {
+		if d == nil || dev == in.DeviceID {
+			delete(in.Runtime.CopyAddresses, dev) // the project's own device uses the main setting
+		}
+	}
+	if len(in.Runtime.CopyAddresses) == 0 {
+		in.Runtime.CopyAddresses = nil
+	}
+	if in.Runtime.Dedicated == nil && len(in.Runtime.CopyAddresses) == 0 {
 		return nil
 	}
 	switch {
@@ -213,17 +249,57 @@ func (s *Server) validateDedicated(ctx context.Context, id string, in *projectIn
 	case strings.TrimSpace(in.Runtime.Network) != "":
 		return errors.New("a dedicated address replaces the Docker network setting; clear the network or the address")
 	}
-	if err := cleanDedicated(d); err != nil {
-		return err
+	type entry struct {
+		dev   *store.Device
+		d     *api.DedicatedIP
+		label string // names the copy in an error; empty for the project's own device
 	}
-	dev, err := s.store.GetDevice(ctx, in.DeviceID)
-	if err != nil {
-		return errors.New("choose a device to deploy to")
+	var entries []entry
+	if d := in.Runtime.Dedicated; d != nil {
+		dev, err := s.store.GetDevice(ctx, in.DeviceID)
+		if err != nil {
+			return errors.New("choose a device to deploy to")
+		}
+		entries = append(entries, entry{dev: dev, d: d})
 	}
-	if ps := s.dedicatedProblems(ctx, id, dev, d); len(ps) > 0 {
-		return errors.New(strings.ToUpper(ps[0][:1]) + ps[0][1:])
+	ids := make([]string, 0, len(in.Runtime.CopyAddresses))
+	for id := range in.Runtime.CopyAddresses {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, devID := range ids {
+		dev, err := s.store.GetDevice(ctx, devID)
+		if err != nil {
+			return errors.New("an own address is set for a device that no longer exists; remove it")
+		}
+		entries = append(entries, entry{dev: dev, d: in.Runtime.CopyAddresses[devID], label: "On " + dev.Name + ": "})
+	}
+	for _, e := range entries {
+		if err := cleanDedicated(e.d); err != nil {
+			return errors.New(e.label + err.Error())
+		}
+	}
+	for i, e := range entries {
+		var others []*api.DedicatedIP
+		for j, o := range entries {
+			if j != i {
+				others = append(others, o.d)
+			}
+		}
+		if ps := s.dedicatedProblems(ctx, id, e.dev, e.d, others...); len(ps) > 0 {
+			return errors.New(e.label + strings.ToUpper(ps[0][:1]) + ps[0][1:])
+		}
 	}
 	return nil
+}
+
+// dedicatedFor returns the own-address settings that apply to the copy of p on device deviceID:
+// the project's own setting on its device, or the copy's own entry on another one (nil for none).
+func dedicatedFor(p *store.Project, deviceID string) *api.DedicatedIP {
+	if deviceID == p.DeviceID {
+		return p.Runtime.Dedicated
+	}
+	return p.Runtime.CopyAddresses[deviceID]
 }
 
 // dedicatedCheckRequest asks whether an address would work on a device before it is saved.
@@ -260,7 +336,21 @@ func (s *Server) handleCheckDedicated(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := dedicatedCheckView{MAC: d.MAC}
-	view.Problems = s.dedicatedProblems(r.Context(), req.ProjectID, dev, &d)
+	// The project's other copies hold addresses and MACs of their own, which this one must not take.
+	var siblings []*api.DedicatedIP
+	if req.ProjectID != "" {
+		if p, err := s.store.GetProject(r.Context(), req.ProjectID); err == nil {
+			if dev.ID != p.DeviceID && p.Runtime.Dedicated != nil {
+				siblings = append(siblings, p.Runtime.Dedicated)
+			}
+			for devID, o := range p.Runtime.CopyAddresses {
+				if devID != dev.ID && o != nil {
+					siblings = append(siblings, o)
+				}
+			}
+		}
+	}
+	view.Problems = s.dedicatedProblems(r.Context(), req.ProjectID, dev, &d, siblings...)
 	if len(view.Problems) > 0 {
 		writeJSON(w, http.StatusOK, view)
 		return
@@ -271,7 +361,7 @@ func (s *Server) handleCheckDedicated(w http.ResponseWriter, r *http.Request) {
 			service = serviceOf(p)
 		}
 	}
-	taken, _ := s.takenAddresses(r.Context(), req.ProjectID)
+	taken, _ := s.takenAddresses(r.Context(), req.ProjectID, siblings...)
 	avoid := make([]string, 0, len(taken))
 	for ip := range taken {
 		avoid = append(avoid, ip)
@@ -309,7 +399,11 @@ func (s *Server) handleCheckDedicated(w http.ResponseWriter, r *http.Request) {
 
 // dedicatedAddress is the worker's address as the device last reported it (the leased one in DHCP mode).
 func dedicatedAddress(p *store.Project, d *store.Device) (ip, mac string) {
-	if p.Runtime.Dedicated == nil || d == nil {
+	if d == nil {
+		return "", ""
+	}
+	ded := dedicatedFor(p, d.ID)
+	if ded == nil {
 		return "", ""
 	}
 	if c := findByName(d, serviceOf(p)); c != nil {
@@ -319,12 +413,15 @@ func dedicatedAddress(p *store.Project, d *store.Device) (ip, mac string) {
 			}
 		}
 	}
-	return p.Runtime.Dedicated.IP, p.Runtime.Dedicated.MAC
+	return ded.IP, ded.MAC
 }
 
 // dedicatedMoveProblem says why p can't move to dst with its dedicated address.
 func dedicatedMoveProblem(p *store.Project, dst *store.Device) error {
-	d := p.Runtime.Dedicated
+	d := p.Runtime.CopyAddresses[dst.ID] // the destination's own setting wins over the project's
+	if d == nil {
+		d = p.Runtime.Dedicated
+	}
 	if d == nil {
 		return nil
 	}
@@ -405,4 +502,30 @@ func firstHost(sn *net.IPNet) string {
 	ip := append(net.IP(nil), sn.IP.To4()...)
 	ip[3]++
 	return ip.String()
+}
+
+// adoptCopyAddress makes the destination's own address setting the project's main one when the
+// project moves from device from to device to, and keeps the old main setting for from, so the
+// worker takes the right address on each device (and again after a failback). undo reverses it.
+func adoptCopyAddress(p *store.Project, from, to string) (undo func()) {
+	entry := p.Runtime.CopyAddresses[to]
+	if entry == nil {
+		return func() {}
+	}
+	oldMain, oldCopies := p.Runtime.Dedicated, p.Runtime.CopyAddresses
+	next := map[string]*api.DedicatedIP{}
+	for k, v := range oldCopies {
+		if k != to {
+			next[k] = v
+		}
+	}
+	if oldMain != nil {
+		next[from] = oldMain
+	}
+	p.Runtime.Dedicated = entry
+	p.Runtime.CopyAddresses = nil
+	if len(next) > 0 {
+		p.Runtime.CopyAddresses = next
+	}
+	return func() { p.Runtime.Dedicated, p.Runtime.CopyAddresses = oldMain, oldCopies }
 }

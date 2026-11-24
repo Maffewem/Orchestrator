@@ -114,7 +114,8 @@ function MoveBanner() {
 
 /** Tells an open tab that the dashboard was updated: the server serves a new bundle name after every build. */
 function NewVersionBanner() {
-  const [fresh, setFresh] = useState(false);
+  const [fresh, setFresh] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<string | null>(null);
   useEffect(() => {
     const loaded = document.querySelector<HTMLScriptElement>('script[src*="/assets/index-"]')?.src.match(/assets\/index-[^/]+\.js/)?.[0];
     if (!loaded) return;
@@ -122,7 +123,7 @@ function NewVersionBanner() {
       try {
         const html = await (await fetch("/", { cache: "no-store" })).text();
         const now = html.match(/assets\/index-[^"'/]+\.js/)?.[0];
-        if (now && now !== loaded) setFresh(true);
+        if (now && now !== loaded) setFresh(now);
       } catch {
         /* offline or the server is restarting: try again later */
       }
@@ -130,11 +131,14 @@ function NewVersionBanner() {
     const t = setInterval(check, 60000);
     return () => clearInterval(t);
   }, []);
-  if (!fresh) return null;
+  if (!fresh || fresh === dismissed) return null;
   return (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm">
-      <span>Orchestrator was updated. This page is still running the old dashboard, so some screens may look out of date.</span>
-      <button type="button" onClick={() => location.reload()} className="rounded-md bg-primary px-3 py-1 text-white">Reload</button>
+    <div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm">
+      <span>A new version is ready. Reload to use it.</span>
+      <span className="flex items-center gap-2">
+        <button type="button" onClick={() => setDismissed(fresh)} className="rounded-md px-3 py-1 text-neutral-600 hover:bg-blue-100">Not now</button>
+        <button type="button" onClick={() => location.reload()} className="rounded-md bg-primary px-3 py-1 text-white">Reload</button>
+      </span>
     </div>
   );
 }

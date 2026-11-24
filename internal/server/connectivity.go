@@ -104,7 +104,26 @@ func (s *Server) handleAckNetNotice(w http.ResponseWriter, r *http.Request) {
 // noteNetworkChanges compares a heartbeat with the device's previous state and records what
 // changed about how it is connected: its own addresses, and the address it reaches us at.
 func (s *Server) noteNetworkChanges(ctx context.Context, d *store.Device, now api.HostInfo) {
-	if old, cur := d.Host.Addresses, now.Addresses; len(old) > 0 && len(cur) > 0 {
+	// Addresses on the agent's own interfaces (orch-shim, orch-lan-*, VLAN access) come and go with
+	// deployments, so they never count as the device's addresses changing.
+	managed := map[string]bool{}
+	for _, h := range []api.HostInfo{d.Host, now} {
+		for _, n := range h.Network {
+			if strings.HasPrefix(n.Interface, "orch-") {
+				managed[n.Address] = true
+			}
+		}
+	}
+	unmanaged := func(in []string) []string {
+		var out []string
+		for _, a := range in {
+			if !managed[a] {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	if old, cur := unmanaged(d.Host.Addresses), unmanaged(now.Addresses); len(old) > 0 && len(cur) > 0 {
 		var gone, added []string
 		for _, a := range old {
 			if !slices.Contains(cur, a) {

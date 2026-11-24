@@ -37,6 +37,10 @@ type ProjectView struct {
 	Replicas []replicaState `json:"replicas,omitempty"`
 	// MainURL is where the main copy answers directly (device address and port, or its dedicated address).
 	MainURL string `json:"main_url,omitempty"`
+	// MainRunningURL is where the main copy's running container answers, and MainPending says the saved
+	// own-address settings differ from it and wait for a redeploy.
+	MainRunningURL string `json:"main_running_url,omitempty"`
+	MainPending    bool   `json:"main_pending,omitempty"`
 }
 
 func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView, error) {
@@ -47,6 +51,7 @@ func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView
 	} else if d, err := s.store.GetDevice(ctx, p.DeviceID); err == nil {
 		v.DeviceName = d.Name
 		v.MainURL = copyURL(p, d, true)
+		v.MainRunningURL, v.MainPending = copyRunning(p, d, true)
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return v, err
 	}

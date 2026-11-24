@@ -14,15 +14,15 @@ export default function DedicatedAddress({
   device,
   projectId,
   canEdit,
-  replicaView,
+  copyLabel,
 }: {
   value: DedicatedIP | null;
   onChange: (v: DedicatedIP | null) => void;
   device?: Device;
   projectId?: string;
   canEdit: boolean;
-  /** Set to the replica's device name while a replica is being viewed. */
-  replicaView?: string;
+  /** Names the copy these settings belong to, such as "Claude (main)" or "cm4 (replica)". */
+  copyLabel?: string;
 }) {
   const [check, setCheck] = useState<DedicatedCheck | null>(null);
   // A network check belongs to the device it ran on (this form's device) and to the settings it
@@ -30,8 +30,11 @@ export default function DedicatedAddress({
   useEffect(() => {
     setCheck(null);
     setErr(null);
-  }, [device?.id, projectId, replicaView]);
+    setAutoHost(null);
+  }, [device?.id, projectId, copyLabel]);
   const [busy, setBusy] = useState(false);
+  // The device-side address the last check filled in; shown with a note until it is edited.
+  const [autoHost, setAutoHost] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const supported = !!device?.host.capabilities?.includes("dedicated-ip");
   const nets = device?.host.network ?? [];
@@ -49,7 +52,11 @@ export default function DedicatedAddress({
     try {
       const r = await api.checkDedicated(device.id, { ...value, project_id: projectId });
       setCheck(r);
-      if (!value.mac && r.mac) onChange({ ...value, mac: r.mac });
+      const fillHost = !value.host_ip && !!r.suggest_host_ip;
+      if ((!value.mac && r.mac) || fillHost) {
+        onChange({ ...value, mac: value.mac || r.mac || "", ...(fillHost ? { host_ip: r.suggest_host_ip } : {}) });
+      }
+      setAutoHost(fillHost ? r.suggest_host_ip ?? null : null);
     } catch (e) {
       setCheck(null);
       setErr(e instanceof Error ? e.message : String(e));
@@ -98,27 +105,6 @@ export default function DedicatedAddress({
     }
   }
 
-  // A replica never takes the worker's own address, so nothing about this section applies to the
-  // copy being viewed. The settings (and the interface list and checks, which describe the main
-  // device) are the main copy's: show only a summary, not controls that look like the replica's.
-  if (replicaView) {
-    return (
-      <div className="rounded-xl border border-neutral-200 bg-white p-5">
-        <h4 className="flex items-center gap-2 text-sm font-semibold">
-          <Network className="size-4" /> Own address on the network
-        </h4>
-        <p className="mt-2 text-sm text-neutral-600">
-          You are viewing the copy on {replicaView}, a replica. Replicas run on their device's normal ports and ignore the worker's own address and VLAN, so there is nothing to set or check for this copy.
-        </p>
-        <p className="mt-2 text-sm text-neutral-600">
-          {value
-            ? `The main copy${device ? ` on ${device.name}` : ""} uses its own address (${value.mode === "static" ? value.ip || "static" : "from DHCP"}${value.vlan ? `, VLAN ${value.vlan}` : ""}). Switch to the main copy to change it.`
-            : `The main copy${device ? ` on ${device.name}` : ""} has no own address. Switch to the main copy to set one.`}
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="rounded-xl border border-neutral-200 bg-white p-5">
       <div className="flex items-start justify-between gap-4">
@@ -127,7 +113,7 @@ export default function DedicatedAddress({
             <Network className="size-4" /> Own address on the network <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Beta</span>
           </h4>
           <p className="mt-0.5 text-xs text-neutral-500">
-            Gives this worker its own IP and MAC address, so it can use ports like 80 and 443 even when the device already does.
+            Gives this worker its own IP and MAC address, so it can use ports like 80 and 443 even when the device already does.{copyLabel ? ` These settings are for the copy on ${copyLabel}.` : ""}
           </p>
         </div>
         <Toggle
@@ -176,6 +162,16 @@ export default function DedicatedAddress({
           <details className="text-sm" open={!!value.vlan || !!value.host_ip || undefined}>
             <summary className="cursor-pointer text-neutral-600">Advanced{value.vlan ? ` · VLAN ${value.vlan}` : ""}</summary>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <Field label="Ports on this address" hint="One per line, like 80:80. Leave empty to use the project's ports.">
+                <textarea
+                  className={inputClass}
+                  rows={2}
+                  disabled={!canEdit}
+                  placeholder="Same as the project"
+                  value={(value.ports ?? []).join("\n")}
+                  onChange={(e) => set({ ports: e.target.value.split("\n").map((l) => l.trim()).filter(Boolean) })}
+                />
+              </Field>
               <Field label="Network interface" hint="Leave on Automatic unless the device has several networks.">
                 <select className={inputClass} disabled={!canEdit} value={value.parent ?? ""} onChange={(e) => set({ parent: e.target.value })}>
                   <option value="">Automatic</option>
@@ -206,6 +202,9 @@ export default function DedicatedAddress({
                   )}
                 </div>
                 {hostStatus}
+                {autoHost && value.host_ip === autoHost && (
+                  <p className="mt-1.5 text-xs text-neutral-600">Filled in for you from a free address. Change it if you like; it is only saved when you save the settings.</p>
+                )}
                 <p className="mt-1.5 text-xs text-amber-700">
                   Pick an address outside your router's DHCP range.
                 </p>
@@ -247,7 +246,7 @@ export default function DedicatedAddress({
               </div>
               {!!value.vlan && (
                 <p className="mt-3 text-xs text-neutral-600">
-                  The switch port must carry VLAN {value.vlan} tagged and the router must serve it. See the Dedicated address docs.
+                  The switch port must carry VLAN {value.vlan} tagged and the router must serve it. Other networks reach this address only if the router routes to this VLAN and its firewall allows it.
                 </p>
               )}
             </div>

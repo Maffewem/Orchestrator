@@ -45,6 +45,8 @@ export interface DedicatedIP {
   parent?: string;
   /** Spare address that lets the device itself reach the worker. */
   host_ip?: string;
+  /** Ports for the copy on this address; empty uses the project's ports. */
+  ports?: string[];
   /** 802.1Q VLAN ID (1-4094): the agent creates a tagged sub-interface such as eth0.1005. */
   vlan?: number;
   /** The VLAN's network (static mode); learned from DHCP otherwise. */
@@ -263,6 +265,8 @@ export interface Runtime {
   network?: string;
   /** Own address on the device's network, so the worker can use ports the device holds (80, 443). */
   dedicated?: DedicatedIP | null;
+  /** Own-address settings of other devices the worker runs on (replicas), by device id. */
+  copy_addresses?: Record<string, DedicatedIP>;
   /** Name of the container, when it differs from the project name (adopted containers). */
   container?: string;
   /** Created from a container that already existed; it keeps running until the first deployment. */
@@ -411,6 +415,8 @@ export interface ReplicaInfo {
   deployment_error?: string;
   conflicts?: string[];
   url?: string;
+  running_url?: string;
+  pending?: boolean;
 }
 
 export interface Project {
@@ -420,6 +426,8 @@ export interface Project {
   device_name: string;
   replicas?: ReplicaInfo[];
   main_url?: string;
+  main_running_url?: string;
+  main_pending?: boolean;
   source: Source;
   runtime: Runtime;
   created_at: string;

@@ -81,7 +81,8 @@ func addresses() []string {
 	}
 	for _, ifc := range ifaces {
 		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 ||
-			strings.HasPrefix(ifc.Name, "docker") || strings.HasPrefix(ifc.Name, "br-") || strings.HasPrefix(ifc.Name, "veth") {
+			strings.HasPrefix(ifc.Name, "docker") || strings.HasPrefix(ifc.Name, "br-") || strings.HasPrefix(ifc.Name, "veth") || strings.HasPrefix(ifc.Name, "orch-") {
+			// orch-* are the interfaces the agent manages itself (worker access, networks).
 			continue
 		}
 		addrs, _ := ifc.Addrs()

@@ -357,6 +357,11 @@ type replicaState struct {
 	DeploymentError  string `json:"deployment_error,omitempty"`
 	// URL is where this copy answers directly (device address and published port); empty when it has none.
 	URL string `json:"url,omitempty"`
+	// RunningURL is where the container that is running answers; it differs from URL while saved
+	// address settings are waiting for a redeploy (Pending).
+	RunningURL string `json:"running_url,omitempty"`
+	// Pending is true when the saved own-address settings differ from what the container runs with.
+	Pending bool `json:"pending,omitempty"`
 	// Conflicts are host ports the worker publishes that another container on this device already holds.
 	Conflicts []string `json:"conflicts,omitempty"`
 }
@@ -370,6 +375,7 @@ func (s *Server) replicaStates(ctx context.Context, p *store.Project, pol Cluste
 		if d, err := s.store.GetDevice(ctx, id); err == nil {
 			st.Device, st.Online, st.Maintenance = d.Name, !d.Offline, d.Maintenance
 			st.URL = copyURL(p, d, false)
+			st.RunningURL, st.Pending = copyRunning(p, d, false)
 			if c := findByName(d, serviceOf(p)); c != nil {
 				st.ContainerID, st.State, st.Running = c.ID, c.State, c.State == "running"
 			}
@@ -571,14 +577,9 @@ func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID s
 	}
 	cp := *p
 	cp.DeviceID = deviceID
-	inner := tweak
-	tweak = func(spec *api.DeploySpec) {
-		// The address belongs to the main copy; a replica serves on its own device's ports.
-		spec.Dedicated = nil
-		if inner != nil {
-			inner(spec)
-		}
-	}
+	// A replica has its own address setting, or none: it never takes the main copy's address and
+	// otherwise serves on its own device's ports.
+	cp.Runtime.Dedicated = copyOf(p.Runtime.CopyAddresses[deviceID])
 	dep, err := s.deployWith(ctx, &cp, commit, replicaTrigger, tweak)
 	if err != nil {
 		s.event(ctx, deviceID, "error", "cluster.replica", fmt.Sprintf("Deploying a replica of %s to %s failed: %s", p.Name, d.Name, err))
@@ -617,7 +618,7 @@ func (s *Server) reconcileReplicas(ctx context.Context, p *store.Project, pol Cl
 
 // portConflictsOn lists the worker's published host ports that another container on d holds.
 func portConflictsOn(p *store.Project, d *store.Device) []string {
-	if len(p.Runtime.Ports) == 0 || p.Source.Type == store.SourceCompose || p.Runtime.Dedicated != nil {
+	if len(p.Runtime.Ports) == 0 || p.Source.Type == store.SourceCompose || dedicatedFor(p, d.ID) != nil {
 		return nil // a dedicated address is served on its own IP, so device ports can't clash
 	}
 	return agent.ContainerPortConflicts(api.DeploySpec{Service: serviceOf(p), Ports: p.Runtime.Ports}, d.Containers)
@@ -671,6 +672,7 @@ func (s *Server) handleRetryReplica(w http.ResponseWriter, r *http.Request) {
 	}
 	cp := *p
 	cp.DeviceID = id
+	cp.Runtime.Dedicated = copyOf(p.Runtime.CopyAddresses[id])
 	dep, err := s.deployWith(r.Context(), &cp, commit, replicaTrigger, nil)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
@@ -733,16 +735,72 @@ func (s *Server) retireReplica(ctx context.Context, p *store.Project, d *store.D
 // own port. Domains, the proxy and tunnels route to the main copy only; replicas have no public route.
 func copyURL(p *store.Project, d *store.Device, main bool) string {
 	cp := *p
-	if !main {
-		cp.Runtime.Dedicated = nil
+	cp.Runtime.Dedicated = dedicatedFor(p, d.ID)
+	if main {
+		cp.Runtime.Dedicated = p.Runtime.Dedicated
+	}
+	if cp.Runtime.Dedicated != nil {
+		// A copy with its own address answers there, on the worker's web port.
+		ip, _ := dedicatedAddress(&cp, d)
+		if ip == "" {
+			return ""
+		}
+		if port := dedicatedWebPort(&cp); port != "" && port != "80" {
+			return "http://" + net.JoinHostPort(ip, port)
+		}
+		return "http://" + ip
 	}
 	port := upstreamPort(&cp)
 	ips := ipv4s(d)
 	if port == "" || len(ips) == 0 {
-		if main && p.Runtime.Dedicated != nil && p.Runtime.Dedicated.IP != "" {
-			return "http://" + p.Runtime.Dedicated.IP
-		}
 		return ""
 	}
 	return "http://" + net.JoinHostPort(ips[0], port)
+}
+
+// copyOf returns a copy of an address setting, or nil.
+func copyOf(d *api.DedicatedIP) *api.DedicatedIP {
+	if d == nil {
+		return nil
+	}
+	c := *d
+	return &c
+}
+
+// copyRunning reports where the running container of a copy really answers and whether the saved
+// own-address settings differ from it (so the copy needs a redeploy to take them up). It is empty
+// and false when nothing runs on the device.
+func copyRunning(p *store.Project, d *store.Device, main bool) (url string, pending bool) {
+	c := findByName(d, serviceOf(p))
+	if c == nil {
+		return "", false
+	}
+	ded := dedicatedFor(p, d.ID)
+	if main {
+		ded = p.Runtime.Dedicated
+	}
+	runIP := ""
+	for _, n := range c.Networks {
+		if strings.HasPrefix(n.Name, "orch-lan-") {
+			runIP = n.IP
+		}
+	}
+	cp := *p
+	cp.Runtime.Dedicated = ded
+	port := upstreamPort(&cp)
+	if runIP != "" {
+		if ded != nil {
+			if wp := dedicatedWebPort(&cp); wp != "" {
+				port = wp
+			}
+		}
+		url = "http://" + runIP
+		if port != "" && port != "80" {
+			url = "http://" + net.JoinHostPort(runIP, port)
+		}
+	} else if ips := ipv4s(d); len(ips) > 0 && port != "" {
+		url = "http://" + net.JoinHostPort(ips[0], port)
+	}
+	pending = (ded != nil) != (runIP != "") || (ded != nil && ded.IP != "" && runIP != ded.IP)
+	return url, pending
 }

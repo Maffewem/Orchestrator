@@ -78,6 +78,9 @@ type DedicatedIP struct {
 	// sub-interface (for example eth0.1005) on Parent and uses it as the macvlan parent. The
 	// switch port must carry the VLAN tagged and the router must serve it.
 	VLAN int `json:"vlan,omitempty"`
+	// Ports, when set, replace the project's ports for the copy on this address (for example 80:80
+	// and 443:443 on one device and 8000 on another). Empty uses the project's ports.
+	Ports []string `json:"ports,omitempty"`
 	// Subnet (like 192.168.5.0/24) and Gateway describe the VLAN's network in static mode. In DHCP
 	// mode they are learned from the DHCP server. Unused without a VLAN.
 	Subnet  string `json:"subnet,omitempty"`

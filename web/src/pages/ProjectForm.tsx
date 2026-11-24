@@ -44,8 +44,11 @@ export default function ProjectForm({
   submitLabel,
   onSubmit,
   replicaView,
+  viewDeviceId,
   onDirty,
 }: {
+  /** Device of the copy being viewed; its own-address settings are the ones shown. */
+  viewDeviceId?: string;
   /** Told whether the form has unsaved edits. */
   onDirty?: (dirty: boolean) => void;
   initial?: Project;
@@ -68,6 +71,8 @@ export default function ProjectForm({
   const [ports, setPorts] = useState((initial?.runtime.ports ?? []).join("\n"));
   const [webPort, setWebPort] = useState(initial?.runtime.web_port ?? "");
   const [dedicated, setDedicated] = useState<DedicatedIP | null>(initial?.runtime.dedicated ?? null);
+  // Each other copy (replica) has its own address settings, by device id.
+  const [copyAddrs, setCopyAddrs] = useState<Record<string, DedicatedIP>>(initial?.runtime.copy_addresses ?? {});
   const [env, setEnv] = useState((initial?.runtime.env ?? []).join("\n"));
   const [volumes, setVolumes] = useState((initial?.runtime.volumes ?? []).join("\n"));
   const [restart, setRestart] = useState(initial?.runtime.restart || "unless-stopped");
@@ -75,7 +80,7 @@ export default function ProjectForm({
   const [busy, setBusy] = useState(false);
 
   // Unsaved edits are reported so a page can ask before throwing them away.
-  const snapshot = JSON.stringify([name, deviceId, source, ports, webPort, dedicated, env, volumes, restart]);
+  const snapshot = JSON.stringify([name, deviceId, source, ports, webPort, dedicated, copyAddrs, env, volumes, restart]);
   const baseline = useRef(snapshot);
   const report = useRef(onDirty);
   report.current = onDirty;
@@ -102,6 +107,9 @@ export default function ProjectForm({
   const renamedCF = !!initial && initial.source.type === "cloudflare" && isCF && name.trim() !== initial.name;
 
   const device = deviceId || devices.data?.[0]?.id || "";
+  // The copy whose own-address settings are shown: the main device, or a replica being viewed.
+  const viewing = viewDeviceId || device;
+  const viewingCopy = viewing !== device;
   const set = (patch: Partial<Source>) => setSource((s) => ({ ...s, ...patch }));
   const node = source.node;
   const setNode = (patch: Partial<NodeBuild>) => setSource((s) => ({ ...s, node: { ...s.node, ...patch } }));
@@ -149,13 +157,19 @@ export default function ProjectForm({
     setBusy(true);
     try {
       // A typed address for this device to reach the worker is checked on the network again before it is saved.
-      const dev = devices.data?.find((d) => d.id === device);
-      if (dedicated?.host_ip && dedicated.host_ip !== initial?.runtime.dedicated?.host_ip && dev && dev.status !== "offline" && dev.host.capabilities?.includes("dedicated-ip")) {
-        const r = await api.checkDedicated(dev.id, { ...dedicated, project_id: initial?.id });
-        if (r.problems?.length) throw new Error(r.problems.join(". "));
+      const toCheck: [string, DedicatedIP | null | undefined, string | undefined][] = [
+        [device, dedicated, initial?.runtime.dedicated?.host_ip],
+        ...Object.entries(copyAddrs).map(([id, d]): [string, DedicatedIP, string | undefined] => [id, d, initial?.runtime.copy_addresses?.[id]?.host_ip]),
+      ];
+      for (const [id, d, was] of toCheck) {
+        const dev = devices.data?.find((x) => x.id === id);
+        if (d?.host_ip && d.host_ip !== was && dev && dev.status !== "offline" && dev.host.capabilities?.includes("dedicated-ip")) {
+          const r = await api.checkDedicated(dev.id, { ...d, project_id: initial?.id });
+          if (r.problems?.length) throw new Error(`${dev.name}: ${r.problems.join(". ")}`);
+        }
       }
       await onSubmit(
-        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, env: normalizeEnv(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, copy_addresses: isCF || source.type === "compose" || Object.keys(copyAddrs).length === 0 ? undefined : copyAddrs, env: normalizeEnv(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
       baseline.current = snapshot;
@@ -169,6 +183,7 @@ export default function ProjectForm({
 
   return (
     <form onSubmit={submit} className="space-y-8">
+      {!isCF && <p className="rounded-lg bg-neutral-50 px-4 py-2 text-sm text-neutral-600">Changes to the source, ports, address and environment are saved now but only take effect when the worker is redeployed. Redeploy runs the same source again with the new settings; a new commit or version is deployed from the Deployments tab.</p>}
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Source</legend>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -547,7 +562,22 @@ export default function ProjectForm({
             </select>
           </Field>
         </div>
-        <DedicatedAddress value={dedicated} onChange={setDedicated} device={devices.data?.find((d) => d.id === device)} projectId={initial?.id} canEdit={isAdmin} replicaView={replicaView} />
+        <DedicatedAddress
+          value={viewingCopy ? (copyAddrs[viewing] ?? null) : dedicated}
+          onChange={(v) => {
+            if (!viewingCopy) return setDedicated(v);
+            setCopyAddrs((m) => {
+              const next = { ...m };
+              if (v) next[viewing] = v;
+              else delete next[viewing];
+              return next;
+            });
+          }}
+          device={devices.data?.find((d) => d.id === viewing)}
+          projectId={initial?.id}
+          canEdit={isAdmin}
+          copyLabel={viewingCopy || replicaView ? `${devices.data?.find((d) => d.id === viewing)?.name ?? ""} (${viewingCopy ? "replica" : "main"})` : undefined}
+        />
         <Field label="Volumes" hint="One per line: name:/path for a named volume, /host/path:/path for a folder, add :ro for read-only. Existing data stays when the container is recreated.">
           <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
         </Field>

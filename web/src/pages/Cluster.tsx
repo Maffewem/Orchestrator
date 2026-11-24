@@ -121,7 +121,8 @@ export default function ClusterPage() {
                     <div className="flex flex-wrap items-center justify-between gap-3 p-4">
                       <div>
                         <Link to={`/projects/${w.project_id}`} className="font-medium hover:underline">{w.name}</Link>
-                        <span className="ml-2 text-sm text-neutral-500">on {w.device || "(unknown device)"}</span>
+                        <span className="ml-2 text-sm text-neutral-500">· {w.device || "(unknown device)"} (main)</span>
+                        {w.url && <a href={w.url} target="_blank" rel="noreferrer" className="ml-2 text-sm text-primary hover:underline">{w.url.replace("http://", "")}</a>}
                         {w.last_failover && (
                           <p className="mt-1 text-xs text-neutral-500">
                             Failed over from {w.last_failover.from_name} to {w.last_failover.to_name} {ago(w.last_failover.at)}
@@ -136,7 +137,7 @@ export default function ClusterPage() {
                       </label>
                     </div>
                     <div className="space-y-2 border-t border-neutral-100 p-4 text-sm">
-                      <p className="font-medium">Replicas <span className="font-normal text-neutral-500">(an extra, independent copy on each device ticked; deployed together with the main one. Nothing is synced or moved, so the app must cope with several copies)</span></p>
+                      <p className="font-medium">Replicas of {w.name} <span className="font-normal text-neutral-500">(an extra, independent copy on each device ticked; deployed together with the main one. Nothing is synced or moved, so the app must cope with several copies)</span></p>
                       <div className="flex flex-wrap gap-x-5 gap-y-1">
                         {devices.filter((d) => d.id !== w.device_id).map((d) => {
                           const st = w.replicas?.find((r) => r.device_id === d.id);
@@ -145,6 +146,7 @@ export default function ClusterPage() {
                               <input type="checkbox" checked={(p.replicas ?? []).includes(d.id)} onChange={(e) => toggleReplica(w, d.id, d.name, e.target.checked)} />
                               {d.name}
                               {d.maintenance && !st && <Badge tone="warn">in maintenance</Badge>}
+                              {st?.url && st.running && <a href={st.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">{st.url.replace("http://", "")}</a>}
                               {st && <ReplicaBadge st={st} onRetry={() => run(() => api.retryReplica(w.project_id, d.id))} />}
                             </label>
                           );

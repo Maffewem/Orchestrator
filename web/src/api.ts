@@ -401,6 +401,7 @@ export interface ReplicaInfo {
   deployment_status?: string;
   deployment_error?: string;
   conflicts?: string[];
+  url?: string;
 }
 
 export interface Project {
@@ -409,6 +410,7 @@ export interface Project {
   device_id: string;
   device_name: string;
   replicas?: ReplicaInfo[];
+  main_url?: string;
   source: Source;
   runtime: Runtime;
   created_at: string;
@@ -1018,6 +1020,7 @@ export interface ClusterView {
     device: string;
     policy: ClusterPolicy;
     replicas?: ReplicaInfo[];
+    url?: string;
     last_failover?: { from_name: string; to_name: string; at: string; with_data: boolean; home: boolean };
   }[];
 }

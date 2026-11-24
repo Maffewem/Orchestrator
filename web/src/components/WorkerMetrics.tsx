@@ -630,7 +630,7 @@ const DEVICE_SECTIONS: Section[] = [
 ];
 
 /** The Metrics tab of a project. */
-export function ProjectMetricsTab({ p }: { p: Project }) {
+export function ProjectMetricsTab({ p, deviceId }: { p: Project; deviceId?: string }) {
   const isCF = p.source.type === "cloudflare";
   const isWorker = isCF && p.source.cloudflare?.kind === "worker";
   const canOperate = useCan("operator");
@@ -653,7 +653,9 @@ export function ProjectMetricsTab({ p }: { p: Project }) {
       setBusy(false);
     }
   };
-  const workers = pm.data?.workers ?? [];
+  // With replicas the project page picks the copy; otherwise any containers of the project are listed here.
+  const allWorkers = pm.data?.workers ?? [];
+  const workers = deviceId && (p.replicas?.length ?? 0) > 0 ? allWorkers.filter((w) => w.device_id === deviceId) : allWorkers;
   const current = workers.find((w) => w.device_id + w.name === picked) ?? workers[0];
   const cfSections: Section[] = [
     { id: "status", label: "Status", icon: Activity },
@@ -674,7 +676,7 @@ export function ProjectMetricsTab({ p }: { p: Project }) {
         </>
       ) : (
         <>
-          {workers.length > 1 && (
+          {workers.length > 1 && !((p.replicas?.length ?? 0) > 0 && deviceId) && (
             <div className="flex flex-wrap gap-2" role="group" aria-label="Container">
               {workers.map((w) => (
                 <button
@@ -684,7 +686,7 @@ export function ProjectMetricsTab({ p }: { p: Project }) {
                   aria-pressed={current?.device_id === w.device_id && current?.name === w.name}
                   className={cx("rounded-lg border px-3 py-1.5 text-sm", current?.device_id === w.device_id && current?.name === w.name ? "border-primary bg-primary/5 font-medium" : "border-neutral-300 bg-white hover:bg-neutral-50")}
                 >
-                  {w.name} <span className="text-neutral-500">on {w.device_name}</span>
+                  {w.name} <span className="text-neutral-500">· {w.device_name}{w.device_id === p.device_id ? " (main)" : (p.replicas?.length ?? 0) > 0 ? " (replica)" : ""}</span>
                 </button>
               ))}
             </div>

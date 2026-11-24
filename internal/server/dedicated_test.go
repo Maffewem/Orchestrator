@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -364,5 +365,36 @@ func TestSaveAfterDeviceAccessAddressApplied(t *testing.T) {
 	ded["host_ip"] = "192.168.0.184"
 	if code := h.do("PATCH", "/api/projects/"+p.ID, adminToken, mk([]string{"80:80"}), &store.Project{}); code == http.StatusOK {
 		t.Fatal("the device's own address must still be refused")
+	}
+}
+
+// Addresses on the agent's own interfaces come and go with deployments and must not raise a
+// device network warning; a change on a physical interface still does.
+func TestNetworkChangeIgnoresManagedInterfaces(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	d, err := h.st.GetDevice(context.Background(), reg.DeviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phys := api.NetAddr{Interface: "eth0", Address: "192.168.0.184"}
+	shim := api.NetAddr{Interface: "orch-shimv1005", Address: "192.168.5.250"}
+	d.Host.Addresses = []string{"192.168.0.184", "192.168.5.250"}
+	d.Host.Network = []api.NetAddr{phys, shim}
+	now := api.HostInfo{Addresses: []string{"192.168.0.184"}, Network: []api.NetAddr{phys}}
+	h.srv.noteNetworkChanges(context.Background(), d, now)
+	if _, ok := h.srv.netNote(d.ID); ok {
+		t.Fatal("the access address going away must not warn")
+	}
+	d.Host = api.HostInfo{Addresses: []string{"192.168.0.184"}, Network: []api.NetAddr{phys}}
+	now = api.HostInfo{Addresses: []string{"192.168.0.184", "192.168.5.250"}, Network: []api.NetAddr{phys, shim}}
+	h.srv.noteNetworkChanges(context.Background(), d, now)
+	if _, ok := h.srv.netNote(d.ID); ok {
+		t.Fatal("the access address appearing must not warn")
+	}
+	now = api.HostInfo{Addresses: []string{"192.168.0.99"}, Network: []api.NetAddr{{Interface: "eth0", Address: "192.168.0.99"}}}
+	h.srv.noteNetworkChanges(context.Background(), d, now)
+	if _, ok := h.srv.netNote(d.ID); !ok {
+		t.Fatal("a change on the physical interface must still warn")
 	}
 }

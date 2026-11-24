@@ -596,7 +596,7 @@ func (s *Server) deployWith(ctx context.Context, p *store.Project, commit *store
 	}
 	s.event(ctx, p.DeviceID, "info", "deployment.queued", msg)
 	if trigger != replicaTrigger && trigger != "migration" {
-		s.deployReplicas(ctx, p, commit, tweak)
+		s.rollReplicas(ctx, p, d, commit, tweak)
 	}
 	return d, nil
 }

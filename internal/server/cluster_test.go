@@ -106,21 +106,81 @@ func TestClusterReplicas(t *testing.T) {
 	if len(deps) != 1 || deps[0].DeviceID != b.DeviceID || deps[0].Trigger != replicaTrigger {
 		t.Fatalf("replica deployments: %+v", deps)
 	}
-	// A normal deployment fans out to the replica as well.
-	if code := h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, nil); code != http.StatusAccepted && code != http.StatusCreated {
+	// A normal deployment updates the main copy first; the replica follows once it is live.
+	h.srv.migratePoll = 10 * time.Millisecond
+	var main store.Deployment
+	if code := h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, &main); code != http.StatusAccepted && code != http.StatusCreated {
 		t.Fatalf("deploy: %d", code)
 	}
-	deps, _ = h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, Limit: 10})
-	onA, onB := 0, 0
-	for _, d := range deps {
-		if d.DeviceID == a.DeviceID {
-			onA++
-		} else if d.DeviceID == b.DeviceID {
-			onB++
-		}
+	count := func(dev string) int {
+		deps, _ := h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: dev, Limit: 20})
+		return len(deps)
 	}
-	if onA != 1 || onB != 2 {
-		t.Fatalf("deployments a=%d b=%d", onA, onB)
+	time.Sleep(100 * time.Millisecond)
+	if count(b.DeviceID) != 1 {
+		t.Fatalf("the replica started before the main copy was live: %d deployments", count(b.DeviceID))
+	}
+	h.st.FinishDeployment(ctx, main.ID, true, "")
+	for i := 0; i < 200 && count(b.DeviceID) < 2; i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if count(a.DeviceID) != 1 || count(b.DeviceID) != 2 {
+		t.Fatalf("deployments a=%d b=%d", count(a.DeviceID), count(b.DeviceID))
+	}
+}
+
+func TestRollingUpdateStopsAtFirstFailure(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.srv.cluster.grace = time.Hour
+	h.srv.migratePoll = 10 * time.Millisecond
+	caps := api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview}}
+	a, b, c := h.register("pi-a"), h.register("pi-b"), h.register("pi-c")
+	for _, r := range []api.RegisterResponse{a, b, c} {
+		h.do("POST", "/api/agent/heartbeat", r.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	}
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": a.DeviceID,
+		"source": map[string]any{"type": "image", "image": "nginx"}}, &p)
+	h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Replicas: []string{b.DeviceID, c.DeviceID}}, nil)
+	count := func(dev string) int {
+		deps, _ := h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: dev, Limit: 20})
+		return len(deps)
+	}
+	waitFor := func(cond func() bool) bool {
+		for i := 0; i < 200; i++ {
+			if cond() {
+				return true
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return false
+	}
+
+	// If the main copy fails, no replica is touched.
+	var d1 store.Deployment
+	h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, &d1)
+	h.st.FinishDeployment(ctx, d1.ID, false, "build failed")
+	time.Sleep(150 * time.Millisecond)
+	if count(b.DeviceID) != 0 || count(c.DeviceID) != 0 {
+		t.Fatalf("replicas updated after a failed main deployment: b=%d c=%d", count(b.DeviceID), count(c.DeviceID))
+	}
+
+	// Main succeeds: the first replica goes alone; if it fails the second is not started.
+	var d2 store.Deployment
+	h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, &d2)
+	h.st.FinishDeployment(ctx, d2.ID, true, "")
+	if !waitFor(func() bool { return count(b.DeviceID) == 1 }) {
+		t.Fatal("the first replica was not started")
+	}
+	if count(c.DeviceID) != 0 {
+		t.Fatal("two replicas were updated at the same time")
+	}
+	deps, _ := h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: b.DeviceID, Limit: 5})
+	h.st.FinishDeployment(ctx, deps[0].ID, false, "unhealthy")
+	time.Sleep(150 * time.Millisecond)
+	if count(c.DeviceID) != 0 {
+		t.Fatal("the rolling update carried on after a replica failed")
 	}
 }
 

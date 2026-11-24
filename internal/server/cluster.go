@@ -509,32 +509,66 @@ func (s *Server) handleSetClusterPolicy(w http.ResponseWriter, r *http.Request) 
 // replicaTrigger marks deployments that only exist to run an extra copy; they never fan out again.
 const replicaTrigger = "replica"
 
-// deployReplicas deploys the same revision to every replica device of a worker. It is called
-// after the main deployment is queued and never fails it: a replica that can't be reached is
-// retried by reconcileReplicas.
-func (s *Server) deployReplicas(ctx context.Context, p *store.Project, commit *store.Commit, tweak func(*api.DeploySpec)) {
+// rollReplicas updates the replicas of a worker one at a time, after the main copy has gone
+// live. Each copy is replaced blue/green on its own device, so it keeps serving until its new
+// version is up; rolling means they never all swap at the same moment, and a bad release is
+// stopped at the first copy that fails instead of reaching every copy. It returns at once.
+func (s *Server) rollReplicas(ctx context.Context, p *store.Project, main *store.Deployment, commit *store.Commit, tweak func(*api.DeploySpec)) {
 	if p.Source.Type == store.SourceCloudflare {
 		return
 	}
 	pol := s.clusterPolicy(ctx, p.ID)
-	for _, id := range pol.Replicas {
-		s.deployReplica(ctx, p, id, commit, tweak)
-	}
-}
-
-func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID string, commit *store.Commit, tweak func(*api.DeploySpec)) {
-	if deviceID == p.DeviceID {
-		return
-	}
-	d, err := s.store.GetDevice(ctx, deviceID)
-	if err != nil || d.Offline || d.Maintenance {
+	if len(pol.Replicas) == 0 {
 		return
 	}
 	cp := *p
-	cp.DeviceID = deviceID
-	if _, err := s.deployWith(ctx, &cp, commit, replicaTrigger, tweak); err != nil {
-		s.event(ctx, deviceID, "error", "cluster.replica", fmt.Sprintf("Deploying a replica of %s to %s failed: %s", p.Name, d.Name, err))
+	go func() {
+		bg := context.WithoutCancel(ctx)
+		wait := func(dep *store.Deployment) error {
+			return s.waitFor(bg, 45*time.Minute, func() (bool, error) {
+				cur, err := s.store.GetDeployment(bg, dep.ID)
+				if err != nil {
+					return false, err
+				}
+				if cur.Status == store.DeploymentFailed {
+					return false, fmt.Errorf("%s", cur.Error)
+				}
+				return cur.Status == store.DeploymentSucceeded, nil
+			})
+		}
+		if err := wait(main); err != nil {
+			s.event(bg, cp.DeviceID, "warning", "cluster.rolling", fmt.Sprintf("The new version of %s did not go live on its main device (%v), so the replicas were left on the version they run", cp.Name, err))
+			return
+		}
+		for _, id := range pol.Replicas {
+			dep := s.deployReplica(bg, &cp, id, commit, tweak)
+			if dep == nil {
+				continue // offline, in maintenance or refused: the server starts it when it can
+			}
+			if err := wait(dep); err != nil {
+				s.event(bg, id, "error", "cluster.rolling", fmt.Sprintf("The new version of %s failed on a replica (%v). The remaining replicas were not updated, and the replica that failed keeps its previous version", cp.Name, err))
+				return
+			}
+		}
+	}()
+}
+
+func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID string, commit *store.Commit, tweak func(*api.DeploySpec)) *store.Deployment {
+	if deviceID == p.DeviceID {
+		return nil
 	}
+	d, err := s.store.GetDevice(ctx, deviceID)
+	if err != nil || d.Offline || d.Maintenance {
+		return nil
+	}
+	cp := *p
+	cp.DeviceID = deviceID
+	dep, err := s.deployWith(ctx, &cp, commit, replicaTrigger, tweak)
+	if err != nil {
+		s.event(ctx, deviceID, "error", "cluster.replica", fmt.Sprintf("Deploying a replica of %s to %s failed: %s", p.Name, d.Name, err))
+		return nil
+	}
+	return dep
 }
 
 // reconcileReplicas starts a replica on any chosen device that has none, for example a newly

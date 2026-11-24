@@ -29,6 +29,7 @@ func (a *Agent) serverVia() string {
 // process, so the answer is reused for a minute unless the addresses themselves changed.
 func (a *Agent) network() []api.NetAddr {
 	var out []api.NetAddr
+	route, gw := defaultRoute()
 	ifaces, _ := net.Interfaces()
 	for _, ifc := range ifaces {
 		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 || virtualIface(ifc.Name) {
@@ -37,7 +38,12 @@ func (a *Agent) network() []api.NetAddr {
 		addrs, _ := ifc.Addrs()
 		for _, ad := range addrs {
 			if ipn, ok := ad.(*net.IPNet); ok && ipn.IP.To4() != nil {
-				out = append(out, api.NetAddr{Interface: ifc.Name, Address: ipn.IP.String()})
+				na := api.NetAddr{Interface: ifc.Name, Address: ipn.IP.String(), Wireless: isWireless(ifc.Name)}
+				na.Prefix, _ = ipn.Mask.Size()
+				if ifc.Name == route && gw != nil && ipn.Contains(gw) {
+					na.Gateway = gw.String()
+				}
+				out = append(out, na)
 			}
 		}
 	}
@@ -45,7 +51,7 @@ func (a *Agent) network() []api.NetAddr {
 	defer a.netMu.Unlock()
 	same := len(out) == len(a.netCache)
 	for i := 0; same && i < len(out); i++ {
-		same = out[i].Address == a.netCache[i].Address && out[i].Interface == a.netCache[i].Interface
+		same = out[i].Address == a.netCache[i].Address && out[i].Interface == a.netCache[i].Interface && out[i].Gateway == a.netCache[i].Gateway
 	}
 	if !same || time.Since(a.netAt) > time.Minute {
 		assigned := assignments()

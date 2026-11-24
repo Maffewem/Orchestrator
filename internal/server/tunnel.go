@@ -219,6 +219,14 @@ func (s *Server) resolveRoute(projects []*store.Project, dev *store.Device, shar
 	}
 	for _, p := range projects {
 		if p.DeviceID == deviceID && p.Name == name {
+			if p.Runtime.Dedicated != nil {
+				// Any connector on the network can reach the worker's own address; the owning
+				// device does so through its access address.
+				if addr := upstreamAddr(p, dev); addr != "" {
+					return "http://" + addr, nil
+				}
+				return "", fmt.Errorf("project %s: %s", name, errNoUpstream(p))
+			}
 			if port := upstreamPort(p); port != "" {
 				if !shared {
 					return "http://localhost:" + port, nil
@@ -441,8 +449,9 @@ func (s *Server) checkTunnelable(ctx context.Context, p *store.Project, route bo
 	if !ok {
 		return errors.New("set up a Cloudflare Tunnel on this project's device first (Device > Settings)")
 	}
-	if upstreamPort(p) == "" {
-		return errors.New("the project publishes no port for the tunnel to send traffic to")
+	dev, _ := s.store.GetDevice(ctx, p.DeviceID)
+	if upstreamAddr(p, dev) == "" {
+		return errors.New(errNoUpstream(p))
 	}
 	if cfg.Via != "proxy" {
 		if s.projectProtected(ctx, p.ID) {

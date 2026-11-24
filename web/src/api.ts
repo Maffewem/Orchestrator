@@ -23,6 +23,39 @@ export interface HostInfo {
   docker?: DockerInfo;
   in_container?: boolean;
   capabilities?: string[];
+  /** Each address with its interface, subnet, gateway and whether it is on Wi-Fi. */
+  network?: NetAddr[];
+}
+
+export interface NetAddr {
+  interface: string;
+  address: string;
+  assigned?: "dhcp" | "static";
+  prefix?: number;
+  gateway?: string;
+  wireless?: boolean;
+}
+
+/** A worker's own address on the device's LAN (a macvlan network). */
+export interface DedicatedIP {
+  mode: "dhcp" | "static";
+  ip?: string;
+  /** Generated once, so a router can reserve an address for it. */
+  mac?: string;
+  parent?: string;
+  /** Spare address that lets the device itself reach the worker. */
+  host_ip?: string;
+}
+
+export interface DedicatedCheck {
+  problems?: string[];
+  notes?: string[];
+  offer?: string;
+  subnet?: string;
+  gateway?: string;
+  parent?: string;
+  wireless?: boolean;
+  mac: string;
 }
 
 export interface Metrics {
@@ -57,6 +90,8 @@ export interface Container {
   compose_project?: string;
   /** Named Docker volumes mounted in the container (not bind mounts). */
   volumes?: string[];
+  /** Docker networks the container is on, with its address and MAC (a macvlan one is a dedicated address). */
+  networks?: { name: string; ip?: string; mac?: string }[];
 }
 
 export type Health = "ok" | "warning" | "critical";
@@ -217,6 +252,8 @@ export interface Runtime {
   volumes?: string[];
   labels?: Record<string, string>;
   network?: string;
+  /** Own address on the device's network, so the worker can use ports the device holds (80, 443). */
+  dedicated?: DedicatedIP | null;
   /** Name of the container, when it differs from the project name (adopted containers). */
   container?: string;
   /** Created from a container that already existed; it keeps running until the first deployment. */
@@ -1113,6 +1150,8 @@ export const api = {
     request<void>("DELETE", `/api/projects/${id}${removeContainer ? "?remove_container=1" : ""}`),
   migrateProject: (id: string, body: { device_id: string; with_data: boolean; stop_source: boolean; from_backup?: boolean }) =>
     request<Migration>("POST", `/api/projects/${id}/migrate`, body),
+  checkDedicated: (deviceId: string, body: DedicatedIP & { project_id?: string }) =>
+    request<DedicatedCheck>("POST", `/api/devices/${deviceId}/dedicated/check`, body),
   migration: (id: string) => request<Migration>("GET", `/api/projects/${id}/migration`),
   cloudflareStatus: (id: string) => request<CloudflareStatus | null>("GET", `/api/projects/${id}/cloudflare`),
   cloudflareRemote: (id: string) => request<CloudflareRemote | null>("GET", `/api/projects/${id}/cloudflare/remote`),

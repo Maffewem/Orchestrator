@@ -563,6 +563,14 @@ func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID s
 	}
 	cp := *p
 	cp.DeviceID = deviceID
+	inner := tweak
+	tweak = func(spec *api.DeploySpec) {
+		// The address belongs to the main copy; a replica serves on its own device's ports.
+		spec.Dedicated = nil
+		if inner != nil {
+			inner(spec)
+		}
+	}
 	dep, err := s.deployWith(ctx, &cp, commit, replicaTrigger, tweak)
 	if err != nil {
 		s.event(ctx, deviceID, "error", "cluster.replica", fmt.Sprintf("Deploying a replica of %s to %s failed: %s", p.Name, d.Name, err))
@@ -601,8 +609,8 @@ func (s *Server) reconcileReplicas(ctx context.Context, p *store.Project, pol Cl
 
 // portConflictsOn lists the worker's published host ports that another container on d holds.
 func portConflictsOn(p *store.Project, d *store.Device) []string {
-	if len(p.Runtime.Ports) == 0 || p.Source.Type == store.SourceCompose {
-		return nil
+	if len(p.Runtime.Ports) == 0 || p.Source.Type == store.SourceCompose || p.Runtime.Dedicated != nil {
+		return nil // a dedicated address is served on its own IP, so device ports can't clash
 	}
 	return agent.ContainerPortConflicts(api.DeploySpec{Service: serviceOf(p), Ports: p.Runtime.Ports}, d.Containers)
 }

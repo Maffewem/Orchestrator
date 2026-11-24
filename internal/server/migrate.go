@@ -165,6 +165,9 @@ func (s *Server) startMigration(ctx context.Context, p *store.Project, req migra
 	if p.Source.Type == store.SourceGitHub && !hasCap(dst, api.CapPreview) {
 		return none, http.StatusConflict, errAgentTooOld(dst, "migration")
 	}
+	if err := dedicatedMoveProblem(p, dst); err != nil {
+		return none, http.StatusConflict, err
+	}
 
 	s.mig.mu.Lock()
 	if v := s.mig.byProject[p.ID]; v != nil && v.Status == migRunning {
@@ -352,6 +355,28 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 		}()
 	}
 
+	// A dedicated address can't be held twice on one network: the old copy stops first and
+	// comes back if the move fails.
+	restartSource := func() {}
+	if src != nil && !src.Offline && p.Runtime.Dedicated != nil && p.Source.Type != store.SourceCompose {
+		if c := findByName(src, name); c != nil && c.State == "running" && hasCap(src, api.CapPreview) {
+			m.step(p.ID, "Stopping "+name+" on "+src.Name+" so its dedicated address is free")
+			cmd, err := s.store.CreateCommand(ctx, src.ID, api.ActionStop, c.ID, nil)
+			if err == nil {
+				_, err = s.waitCommand(ctx, cmd.ID, time.Minute)
+			}
+			if err != nil {
+				fail(fmt.Errorf("stopping the old copy: %w", err))
+				return
+			}
+			restartSource = func() {
+				if _, err := s.store.CreateCommand(ctx, src.ID, api.ActionStart, c.ID, nil); err != nil {
+					s.log.Error("migrate: restart source", "err", err)
+				}
+			}
+		}
+	}
+
 	// 2. Point the project at the new device and deploy there.
 	m.step(p.ID, "Deploying to "+dst.Name)
 	oldDevice := p.DeviceID
@@ -361,6 +386,7 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 		return
 	}
 	revert := func() {
+		restartSource()
 		p.DeviceID = oldDevice
 		s.store.UpdateProject(ctx, p)
 		s.syncProxy(ctx, dst.ID)

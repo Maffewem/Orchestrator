@@ -98,6 +98,9 @@ type Runtime struct {
 	Labels  map[string]string `json:"labels,omitempty"`
 	// Network is a Docker network name or "host"; empty is the default bridge.
 	Network string `json:"network,omitempty"`
+	// Dedicated gives the worker its own address on the device's LAN (a macvlan network), so it can
+	// use ports such as 80 and 443 that the device holds. Its ports are served there, not on the device.
+	Dedicated *api.DedicatedIP `json:"dedicated,omitempty"`
 	// Container is the name of the container when it differs from the project name (adopted containers).
 	Container string `json:"container,omitempty"`
 	// Adopted marks a project created from a container that already existed. Orchestrator left that

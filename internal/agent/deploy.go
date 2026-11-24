@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -112,7 +113,12 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		return fmt.Errorf("docker engine unavailable: %s", info.Error)
 	}
 	st.logf("Docker engine %s ready", info.Version)
-	if err := a.checkPorts(ctx, st, spec); err != nil {
+	var att *attachment
+	if spec.Dedicated != nil {
+		if att, err = a.prepareDedicated(ctx, st, spec); err != nil {
+			return err
+		}
+	} else if err := a.checkPorts(ctx, st, spec); err != nil {
 		return err
 	}
 
@@ -149,8 +155,10 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 
 	st.begin(ctx, api.StepIndex(spec, api.StepDeploy))
 	// The build can take minutes, so look again before touching the running version.
-	if err := a.checkPorts(ctx, st, spec); err != nil {
-		return err
+	if spec.Dedicated == nil {
+		if err := a.checkPorts(ctx, st, spec); err != nil {
+			return err
+		}
 	}
 	previous, err := a.docker.ContainerByName(ctx, spec.Service)
 	if err != nil {
@@ -168,7 +176,18 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		}
 	}
 	labels := map[string]string{"orchestrator.deployment": deploymentID, "orchestrator.service": spec.Service}
-	id, err := a.docker.Create(ctx, spec.Service, spec, labels)
+	var prevIP, prevDedicated string
+	if previous != "" {
+		prevDedicated, _ = a.docker.LabelOf(ctx, previous, labelDedicated)
+		prevIP = a.docker.containerIPOn(ctx, previous, macvlanPrefix)
+	}
+	if att != nil {
+		labels[labelDedicated], labels[labelDedMAC] = spec.Dedicated.Mode, att.MAC.String()
+		if spec.Dedicated.HostIP != "" {
+			labels[labelDedHost] = spec.Dedicated.HostIP
+		}
+	}
+	id, err := a.docker.CreateOn(ctx, spec.Service, spec, labels, att)
 	if err != nil {
 		a.restore(ctx, st, previous, spec.Service)
 		return fmt.Errorf("create container: %w", err)
@@ -181,6 +200,13 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	}
 	st.logf("Started container %.12s", id)
 
+	if att != nil && spec.Dedicated.HostIP != "" {
+		if err := ensureShim(ctx, att.LAN.Parent, spec.Dedicated.HostIP, att.IP); err != nil {
+			st.logf("Warning: the device can't reach the worker's address: %v", err)
+		} else {
+			st.logf("This device reaches the worker at %s through %s (own address %s)", att.IP, shimName, spec.Dedicated.HostIP)
+		}
+	}
 	st.begin(ctx, api.StepIndex(spec, api.StepVerify))
 	st.logf("Waiting for the container to stay up…")
 	state, err := a.docker.waitRunning(ctx, id, 8*time.Second)
@@ -199,7 +225,24 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 		return err
 	}
 	st.logf("Container is %s", state.Status)
-	if rerr := a.waitReachable(ctx, st, id, spec, 40*time.Second); rerr != nil {
+	probe := spec
+	if att != nil {
+		// Published ports don't exist here: probe the container ports on its own address, which the
+		// device can only reach through the shim.
+		probe.Ports = nil
+		if spec.Dedicated.HostIP != "" {
+			for _, m := range spec.Ports {
+				_, c, ok := strings.Cut(m, ":")
+				if !ok {
+					c = m
+				}
+				probe.Ports = append(probe.Ports, "1:"+c)
+			}
+		} else if len(spec.Ports) > 0 {
+			st.logf("Skipping the port check: this device can't reach a worker's own address without a device access address")
+		}
+	}
+	if rerr := a.waitReachable(ctx, st, id, probe, 40*time.Second); rerr != nil {
 		if logs, lerr := a.docker.Logs(ctx, id, 40); lerr == nil && logs != "" {
 			st.logf("Last output from the container:")
 			for _, l := range strings.Split(strings.TrimRight(logs, "\n"), "\n") {
@@ -212,6 +255,15 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 			return rerr
 		}
 		st.logf("Warning: %v", rerr)
+	}
+	switch {
+	case att != nil && spec.Dedicated.Mode == api.DedicatedDHCP && att.Lease != nil:
+		a.holdLease(spec.Service, att.LAN.Parent, att.MAC, att.Lease)
+	case att == nil && prevDedicated != "":
+		a.dropLease(spec.Service)
+	}
+	if prevIP != "" && (att == nil || !att.IP.Equal(net.ParseIP(prevIP))) {
+		dropShimRoute(ctx, prevIP)
 	}
 	if previous != "" {
 		if err := a.docker.Remove(ctx, previous); err != nil {

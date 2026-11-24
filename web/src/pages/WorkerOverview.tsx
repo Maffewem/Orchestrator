@@ -76,6 +76,7 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
   const prod = domains.data?.production;
   const eps = w.state === "running" ? endpoints(w, addresses) : [];
   const mainUrl = prod?.enabled ? `https://${prod.hostname}` : eps[0] ? `http://${eps[0]}` : null;
+  const own = w.networks?.find((n) => n.name.startsWith("orch-lan-") && n.ip);
   const env = p?.runtime.env.filter((e) => e.trim() && !e.trimStart().startsWith("#")).map((e) => e.split("=")[0]) ?? [];
   const publishedPorts = p?.runtime.ports ?? [];
   const mode = policy.data?.mode ?? "off";
@@ -107,6 +108,11 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
           </a>
         ) : (
           <span className="text-neutral-500">No address yet</span>
+        )}
+        {own && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 px-3 py-1 font-mono text-xs" title="This worker has its own address on the network. Reserve it in your router by MAC address.">
+            {own.ip}{own.mac ? ` · ${own.mac}` : ""}
+          </span>
         )}
         <span className="min-w-0 flex-1 truncate text-neutral-600" title={latest?.commit?.message}>
           {latest ? (latest.commit?.message?.split("\n")[0] ?? latest.spec.image) : w.image}

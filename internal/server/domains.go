@@ -431,6 +431,9 @@ func (s *Server) handleSetBaseDomain(w http.ResponseWriter, r *http.Request) {
 // upstreamPort is the host port that carries a project's web traffic: the one chosen in its
 // settings, otherwise the first published TCP host port.
 func upstreamPort(p *store.Project) string {
+	if p.Runtime.Dedicated != nil {
+		return "" // it listens on its own address, not on a port of the device
+	}
 	if p.Runtime.WebPort != "" {
 		return p.Runtime.WebPort
 	}
@@ -443,24 +446,73 @@ func upstreamPort(p *store.Project) string {
 	return ""
 }
 
+// dedicatedWebPort is the container port a dedicated-address worker serves its web traffic on:
+// the chosen web port (matched against the host side of a mapping, else taken as the container
+// port) or the first TCP port.
+func dedicatedWebPort(p *store.Project) string {
+	for _, m := range p.Runtime.Ports {
+		if strings.HasSuffix(m, "/udp") {
+			continue
+		}
+		host, c, ok := strings.Cut(strings.TrimSuffix(m, "/tcp"), ":")
+		if !ok {
+			host, c = "", host
+		}
+		if p.Runtime.WebPort == "" || p.Runtime.WebPort == host || p.Runtime.WebPort == c {
+			return c
+		}
+	}
+	return p.Runtime.WebPort
+}
+
+// upstreamAddr is where a device-side proxy or tunnel connector sends a project's web traffic:
+// 127.0.0.1 and the published host port, or for a worker with its own address, that address and
+// container port. The device itself can only reach such a worker through its access address
+// (the shim), so without one there is no upstream.
+func upstreamAddr(p *store.Project, d *store.Device) string {
+	ded := p.Runtime.Dedicated
+	if ded == nil {
+		if port := upstreamPort(p); port != "" {
+			return "127.0.0.1:" + port
+		}
+		return ""
+	}
+	if ded.HostIP == "" {
+		return ""
+	}
+	ip, _ := dedicatedAddress(p, d)
+	port := dedicatedWebPort(p)
+	if ip == "" || port == "" {
+		return ""
+	}
+	return net.JoinHostPort(ip, port)
+}
+
+// errNoUpstream explains why a project has nothing for a proxy or tunnel to send traffic to.
+func errNoUpstream(p *store.Project) string {
+	if p.Runtime.Dedicated != nil {
+		return "this worker has its own network address, which the device can only reach through its \"address for the device itself\" (in the worker's settings). Set that and redeploy so domains and the tunnel can use it"
+	}
+	return "the project publishes no port for the tunnel to send traffic to"
+}
+
 type site struct{ path, upstream, project string }
 
 // buildCaddyfile renders the proxy configuration for one device. It returns the number of
 // hostnames served.
 func buildCaddyfile(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool, previews map[string][]*store.Preview) (string, int) {
-	file, hosts := buildCaddy(base, serverURL, projects, doms, prefs, protected, previews)
+	file, hosts := buildCaddy(base, serverURL, projects, doms, prefs, protected, previews, func(p *store.Project) string { return upstreamAddr(p, nil) })
 	return file, len(hosts)
 }
 
 // buildCaddy is buildCaddyfile that also returns the hostnames it serves.
-func buildCaddy(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool, previews map[string][]*store.Preview) (string, []string) {
+func buildCaddy(base, serverURL string, projects []*store.Project, doms map[string][]*store.Domain, prefs map[string]urlPrefs, protected map[string]bool, previews map[string][]*store.Preview, upstream func(*store.Project) string) (string, []string) {
 	sites := map[string][]site{}
 	for _, p := range projects {
-		port := upstreamPort(p)
-		if port == "" {
+		up := upstream(p)
+		if up == "" {
 			continue
 		}
-		up := "127.0.0.1:" + port
 		if base != "" {
 			pf := prefs[p.ID]
 			if pf.Production {
@@ -567,7 +619,7 @@ func (s *Server) pushProxy(ctx context.Context, deviceID string, force bool) err
 			prefs[id] = pf
 		}
 	}
-	file, hosts := buildCaddy(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews)
+	file, hosts := buildCaddy(s.baseDomain(ctx), d.Host.Server, projects, doms, prefs, protected, previews, func(p *store.Project) string { return upstreamAddr(p, d) })
 	n := len(hosts)
 	if viaProxy {
 		file = markHTTPOnly(file, tunnelHosts)

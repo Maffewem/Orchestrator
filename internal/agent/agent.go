@@ -312,7 +312,13 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 	switch c.Action {
 	case api.ActionStart:
 		err = a.docker.Start(cctx, c.Target)
+		if err == nil {
+			a.restoreDedicated(cctx) // brings the device's access address and route back
+		}
 	case api.ActionStop:
+		// A stopped worker gives up the device's access address too, so the same address can be
+		// brought up for it on another device.
+		a.releaseHostAccess(cctx, c.Target)
 		err = a.docker.Stop(cctx, c.Target)
 	case api.ActionRestart:
 		err = a.docker.Restart(cctx, c.Target)

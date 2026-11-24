@@ -422,7 +422,11 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 	})
 	if err != nil {
 		revert()
-		fail(fmt.Errorf("%w. %s was left on %s", err, p.Name, src.Name))
+		hint := ""
+		if strings.Contains(err.Error(), "dedicated address") {
+			hint = fmt.Sprintf(" To move it, give %s its own address settings (Settings, then switch to that copy) or free the address, then try again. Update the agent on %s and %s if it is old", dst.Name, src.Name, dst.Name)
+		}
+		fail(fmt.Errorf("%w. %s was left on %s%s", err, p.Name, src.Name, hint))
 		return
 	}
 

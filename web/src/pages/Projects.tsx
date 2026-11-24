@@ -71,9 +71,9 @@ export function deploymentTitle(d: Deployment) {
   return d.spec.compose ? `Deploy stack ${d.spec.service}` : `Deploy ${d.spec.image}`;
 }
 
-const triggerLabel = { manual: "Manual", push: "Push", retry: "Retry", poll: "New commit", rollback: "Rollback" };
+const triggerLabel = { manual: "Manual", push: "Push", retry: "Retry", poll: "New commit", rollback: "Rollback", replica: "Replica", migration: "Migration" };
 
-export function DeploymentRow({ d, title }: { d: Deployment; title?: string }) {
+export function DeploymentRow({ d, title, device }: { d: Deployment; title?: string; device?: string }) {
   useTick(1000);
   const took = span(d.started_at ?? d.created_at, d.finished_at);
   return (
@@ -87,6 +87,7 @@ export function DeploymentRow({ d, title }: { d: Deployment; title?: string }) {
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
           <CommitChip d={d} />
           <span>{triggerLabel[d.trigger]}</span>
+          {device && <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-neutral-700">on {device}</span>}
           {d.commit?.author && <span>by {d.commit.author}</span>}
           <span className="font-mono">#{shortId(d.id)}</span>
         </div>

@@ -193,14 +193,27 @@ func (s *Server) handleProjectMetrics(w http.ResponseWriter, r *http.Request) {
 		if p.Source.Type == store.SourceCompose {
 			v.Kind = "compose"
 		}
-		d, err := s.store.GetDevice(ctx, p.DeviceID)
-		if err == nil {
-			projects, _ := s.store.ListProjects(ctx)
+		// The main copy first, then any replicas on other devices.
+		ids := append([]string{p.DeviceID}, s.clusterPolicy(ctx, p.ID).Replicas...)
+		projects, _ := s.store.ListProjects(ctx)
+		for i, id := range ids {
+			d, err := s.store.GetDevice(ctx, id)
+			if err != nil {
+				continue
+			}
 			for _, c := range d.Containers {
 				if c.Labels["orchestrator.preview"] != "" {
 					continue
 				}
-				if o := containerOwner(projects, d, c); o != nil && o.ID == p.ID {
+				// A replica is the same worker name on another device, owned by this project by name.
+				owned := false
+				if i == 0 {
+					o := containerOwner(projects, d, c)
+					owned = o != nil && o.ID == p.ID
+				} else {
+					owned = c.Name == serviceOf(p)
+				}
+				if owned {
 					v.Workers = append(v.Workers, projectWorker{DeviceID: d.ID, DeviceName: d.Name, Name: c.Name, State: c.State})
 				}
 			}

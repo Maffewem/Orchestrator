@@ -33,6 +33,8 @@ type ProjectView struct {
 	// HostAccess lists the host-level options the project uses (host folder mounts, host
 	// networking, Compose files). Only an administrator can change them.
 	HostAccess []string `json:"host_access,omitempty"`
+	// Replicas are the extra copies of the worker on other devices (see cluster.go).
+	Replicas []replicaState `json:"replicas,omitempty"`
 }
 
 func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView, error) {
@@ -45,12 +47,19 @@ func (s *Server) projectView(ctx context.Context, p *store.Project) (ProjectView
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return v, err
 	}
-	deps, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, Limit: 1})
+	// The latest deployment is the main copy's: a replica's deployment must not stand in for it.
+	deps, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: p.DeviceID, Limit: 1})
+	if err == nil && len(deps) == 0 {
+		deps, err = s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, Limit: 1})
+	}
 	if err != nil {
 		return v, err
 	}
 	if len(deps) > 0 {
 		v.Latest = deps[0]
+	}
+	if p.Source.Type != store.SourceCloudflare {
+		v.Replicas = s.replicaStates(ctx, p, s.clusterPolicy(ctx, p.ID))
 	}
 	return v, nil
 }

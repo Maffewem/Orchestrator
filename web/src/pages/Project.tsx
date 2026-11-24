@@ -132,10 +132,16 @@ export default function ProjectPage() {
   const project = usePoll(() => api.project(id), 4000, [id]);
   const p = project.data;
   const isCF = p?.source.type === "cloudflare";
+  // With replicas a project runs on several devices; this picks the copy the runtime views
+  // (container, power, shell, metrics) are about. Settings and deployments apply to all copies.
+  const [picked, setPicked] = useState<string | null>(null);
+  const instances = p && !isCF ? [{ id: p.device_id, name: p.device_name, main: true }, ...(p.replicas ?? []).map((r) => ({ id: r.device_id, name: r.device, main: false }))] : [];
+  const viewId = instances.find((i) => i.id === picked)?.id ?? p?.device_id ?? "";
+  const viewName = instances.find((i) => i.id === viewId)?.name ?? "";
   const device = usePoll(
-    () => (p && !isCF ? api.device(p.device_id) : Promise.resolve(null)),
+    () => (p && !isCF ? api.device(viewId) : Promise.resolve(null)),
     10000,
-    [p?.device_id, isCF],
+    [viewId, isCF],
   );
   const [deploying, setDeploying] = useState(false);
   const [shell, setShell] = useState(false);
@@ -195,6 +201,22 @@ export default function ProjectPage() {
   const base = `/projects/${p.id}`;
   return (
     <>
+      {instances.length > 1 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Copy of this worker">
+          <span className="text-neutral-600">{p.name} runs on {instances.length} devices. Showing:</span>
+          {instances.map((i) => (
+            <button
+              key={i.id}
+              type="button"
+              onClick={() => setPicked(i.id)}
+              aria-pressed={i.id === viewId}
+              className={"rounded-lg border px-3 py-1.5 " + (i.id === viewId ? "border-primary bg-primary/5 font-medium" : "border-neutral-300 bg-white hover:bg-neutral-50")}
+            >
+              {i.name}{i.main ? " (main)" : " (replica)"}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <Tabs
           items={[
@@ -225,7 +247,7 @@ export default function ProjectPage() {
           )}
           {worker && (
             <PowerControls
-              deviceId={p.device_id}
+              deviceId={viewId}
               containerId={worker.id}
               state={worker.state}
               onDone={device.reload}
@@ -263,7 +285,7 @@ export default function ProjectPage() {
       </div>
       {shell && worker && (
         <Shell
-          deviceId={p.device_id}
+          deviceId={viewId}
           container={worker.id}
           name={worker.name}
           onClose={() => setShell(false)}
@@ -290,7 +312,7 @@ export default function ProjectPage() {
             isCF ? (
               <CloudflareOverview p={p} />
             ) : (
-              <ProjectOverview p={p} device={device.data} url={url} />
+              <ProjectOverview p={p} device={device.data} url={url} deviceName={viewName} />
             )
           }
         />
@@ -341,16 +363,19 @@ function ProjectOverview({
   p,
   device,
   url,
+  deviceName,
 }: {
   p: Project;
   device: Device | null;
   url: string | null;
+  deviceName: string;
 }) {
   const deps = usePoll(() => api.projectDeployments(p.id), 4000, [p.id]);
   // Production is the newest deployment that went live, as on Cloudflare Pages.
-  const d =
-    deps.data?.find((x) => x.status === "succeeded") ?? p.latest_deployment;
-  const latest = p.latest_deployment;
+  // With replicas, only this copy's deployments count.
+  const mine = deps.data?.filter((x) => !device || x.device_id === device.id);
+  const latest = device && device.id !== p.device_id ? (mine?.[0] ?? null) : p.latest_deployment;
+  const d = mine?.find((x) => x.status === "succeeded") ?? latest;
   const container = device?.containers.find(
     (c) => c.name === (p.runtime.container || p.name),
   );
@@ -451,7 +476,7 @@ function ProjectOverview({
                     {device.name}
                   </Link>
                 ) : (
-                  p.device_name || "—"
+                  deviceName || "—"
                 )}
               </dd>
             </div>
@@ -566,7 +591,7 @@ function ProjectDeployments({ p }: { p: Project }) {
         ) : (
           <div className="divide-y divide-neutral-100">
             {deps.data.map((d) => (
-              <DeploymentRow key={d.id} d={d} />
+              <DeploymentRow key={d.id} d={d} device={(p.replicas?.length ?? 0) > 0 ? (d.device_id === p.device_id ? p.device_name : p.replicas?.find((r) => r.device_id === d.device_id)?.device) : undefined} />
             ))}
           </div>
         )}
@@ -583,6 +608,11 @@ function ProjectSettings({ p, onSaved }: { p: Project; onSaved: () => void }) {
   return (
     <div className="space-y-6">
       {p.source.type === "cloudflare" && <CloudflareSettings p={p} />}
+      {(p.replicas?.length ?? 0) > 0 && (
+        <p className="rounded-lg bg-blue-50 px-4 py-2 text-sm">
+          These settings are shared by every copy of {p.name} (on {[p.device_name, ...(p.replicas ?? []).map((r) => r.device)].join(", ")}). The next deployment applies them to all of them.
+        </p>
+      )}
       <Card className="p-6">
         <ProjectForm
           initial={p}

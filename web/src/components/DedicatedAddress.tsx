@@ -116,8 +116,27 @@ export default function DedicatedAddress({
                   ))}
                 </select>
               </Field>
-              <Field label="Address for the device itself" hint="Optional spare address on the same network. Linux blocks a device from reaching its own macvlan workers; this adds an interface that can. Needed only if something on this device must talk to the worker.">
-                <input className={inputClass} disabled={!canEdit} placeholder={value.vlan ? "192.168.5.250" : "192.168.0.250"} value={value.host_ip ?? ""} onChange={(e) => set({ host_ip: e.target.value })} />
+              <Field label="Address for the device itself" hint="Optional spare address on the same network. Linux blocks a device from reaching its own macvlan workers; this adds an interface that can. Needed only if something on this device must talk to the worker, including domains and the Cloudflare Tunnel on this device. It is checked on the network when you leave the field.">
+                <div className="flex items-center gap-2">
+                  <input
+                    className={inputClass}
+                    disabled={!canEdit}
+                    placeholder={value.vlan ? "192.168.5.250" : "192.168.0.250"}
+                    value={value.host_ip ?? ""}
+                    onChange={(e) => set({ host_ip: e.target.value })}
+                    onBlur={() => {
+                      if (value.host_ip && canEdit && supported && device?.status !== "offline") void run();
+                    }}
+                  />
+                  {canEdit && !value.host_ip && (
+                    <Button type="button" onClick={run} loading={busy} disabled={!device || !supported || device.status === "offline"}>
+                      Suggest
+                    </Button>
+                  )}
+                </div>
+                <p className="mt-1.5 text-xs text-amber-700">
+                  The device holds this address itself, so nothing else may use it. Choose one <strong>outside your router's DHCP range</strong>, or reserve it there, or the router may hand it to another device.
+                </p>
               </Field>
             </div>
             <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
@@ -181,7 +200,17 @@ export default function DedicatedAddress({
               {!check.problems?.length && (
                 <p className="flex items-start gap-2 text-ok">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+                  {value.host_ip ? `Device access address ${value.host_ip} looks free. ` : ""}
                   {value.mode === "static" ? `${value.ip} looks free on ${check.subnet ?? "the network"}.` : `DHCP would offer ${check.offer ?? "an address"} on ${check.subnet ?? "the network"}.`}
+                </p>
+              )}
+              {check.suggest_host_ip && !value.host_ip && (
+                <p className="flex flex-wrap items-center gap-2 text-neutral-700">
+                  Suggested address for the device itself: <span className="font-mono font-medium">{check.suggest_host_ip}</span>
+                  <Button type="button" onClick={() => set({ host_ip: check.suggest_host_ip })}>
+                    Use suggestion
+                  </Button>
+                  <span className="text-xs text-neutral-500">Not saved until you save the settings. Outside the DHCP range? Check your router.</span>
                 </p>
               )}
               {check.notes?.map((n) => (

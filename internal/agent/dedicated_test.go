@@ -75,3 +75,23 @@ func TestVLANLearnsSubnetFromLease(t *testing.T) {
 		t.Fatal("a router outside the subnet isn't a usable gateway")
 	}
 }
+
+func TestHostCandidates(t *testing.T) {
+	l := testLAN() // 192.168.0.0/24, gateway .1, device .184
+	got := hostCandidates(l, map[string]bool{"192.168.0.250": true}, []net.IP{net.ParseIP("192.168.0.248")}, 3)
+	var s []string
+	for _, ip := range got {
+		s = append(s, ip.String())
+	}
+	if strings.Join(s, ",") != "192.168.0.249,192.168.0.247,192.168.0.246" {
+		t.Fatalf("got %v", s)
+	}
+	_, sn, _ := net.ParseCIDR("192.168.5.248/29")
+	small := &lan{Parent: "eth0.1005", Subnet: sn, Gateway: net.ParseIP("192.168.5.254")}
+	if c := hostCandidates(small, nil, nil, 1); len(c) != 1 || c[0].String() != "192.168.5.253" {
+		t.Fatalf("small subnet: %v", c)
+	}
+	if c := hostCandidates(&lan{Parent: "eth0.5"}, nil, nil, 1); c != nil {
+		t.Fatal("no subnet, no suggestion")
+	}
+}

@@ -360,7 +360,7 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 			current = a.docker.containerIPOn(cctx, id, macvlanPrefix)
 		}
 		var b []byte
-		if b, err = json.Marshal(a.checkDedicated(cctx, d, current)); err == nil {
+		if b, err = json.Marshal(a.checkDedicated(cctx, d, current, avoidSet(c.Args["avoid"]))); err == nil {
 			output = string(b)
 		}
 	case api.ActionInspect:

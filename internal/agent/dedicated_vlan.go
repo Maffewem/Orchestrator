@@ -69,3 +69,14 @@ func deleteVLAN(ctx context.Context, name string) {
 	}
 	_ = ipRun(ctx, "link", "del", name)
 }
+
+// avoidSet reads the comma-separated addresses the server knows are taken.
+func avoidSet(list string) map[string]bool {
+	m := map[string]bool{}
+	for _, a := range strings.Split(list, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			m[a] = true
+		}
+	}
+	return m
+}

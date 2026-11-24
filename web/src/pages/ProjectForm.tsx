@@ -122,6 +122,12 @@ export default function ProjectForm({
     }
     setBusy(true);
     try {
+      // A typed device access address is checked on the network again before it is saved.
+      const dev = devices.data?.find((d) => d.id === device);
+      if (dedicated?.host_ip && dedicated.host_ip !== initial?.runtime.dedicated?.host_ip && dev && dev.status !== "offline" && dev.host.capabilities?.includes("dedicated-ip")) {
+        const r = await api.checkDedicated(dev.id, { ...dedicated, project_id: initial?.id });
+        if (r.problems?.length) throw new Error(r.problems.join(". "));
+      }
       await onSubmit(
         { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, env: normalizeEnv(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,

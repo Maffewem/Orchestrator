@@ -102,3 +102,25 @@ func TestFirstHostIP(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestShimAddressIsNotTheDevicesOwn(t *testing.T) {
+	for _, n := range []string{"orch-shim", "orch-shimv1005"} {
+		if !isShimName(n) {
+			t.Fatalf("%s is an access interface", n)
+		}
+	}
+	for _, n := range []string{"eth0", "eth0.1005", "orch-lan-eth0"} {
+		if isShimName(n) {
+			t.Fatalf("%s is not an access interface", n)
+		}
+	}
+	// With the shim's address left out of Own, redeploying with the same device-reach address
+	// passes the check every time.
+	_, sn, _ := net.ParseCIDR("192.168.5.0/24")
+	l := &lan{Subnet: sn, Own: []net.IP{net.ParseIP("192.168.0.184")}}
+	for i := 0; i < 2; i++ {
+		if ps := staticProblems(net.ParseIP("192.168.5.250"), l); len(ps) != 0 {
+			t.Fatalf("redeploy %d: %v", i, ps)
+		}
+	}
+}

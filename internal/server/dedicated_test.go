@@ -335,3 +335,34 @@ func TestCopyRunningPending(t *testing.T) {
 		t.Fatal("matching address must not be pending")
 	}
 }
+
+// Once a worker's device-reach address is applied it exists on the device as the worker's own
+// access interface. Saving other settings afterwards must not count it as the device's address.
+func TestSaveAfterDeviceAccessAddressApplied(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	beat := func(host api.HostInfo) {
+		h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{Host: host}, &api.HeartbeatResponse{})
+	}
+	beat(dedicatedHost(api.CapDedicatedIP, api.CapDedicatedVLAN))
+	ded := map[string]any{"mode": "static", "ip": "192.168.0.201", "host_ip": "192.168.0.250"}
+	mk := func(ports []string) map[string]any {
+		return map[string]any{"name": "web", "device_id": reg.DeviceID, "source": map[string]any{"type": "image", "image": "caddy"}, "runtime": map[string]any{"ports": ports, "dedicated": ded}}
+	}
+	var p store.Project
+	if code := h.do("POST", "/api/projects", adminToken, mk([]string{"80:80"}), &p); code != http.StatusCreated {
+		t.Fatalf("create: %d", code)
+	}
+	// The agent now reports the applied access interface among the device's addresses.
+	host := dedicatedHost(api.CapDedicatedIP, api.CapDedicatedVLAN)
+	host.Network = append(host.Network, api.NetAddr{Interface: "orch-shim", Address: "192.168.0.250", Prefix: 32})
+	beat(host)
+	if code := h.do("PATCH", "/api/projects/"+p.ID, adminToken, mk([]string{"80:80", "443:443"}), &store.Project{}); code != http.StatusOK {
+		t.Fatalf("saving unrelated settings after the address was applied must work: %d", code)
+	}
+	// A real clash with the device's own address is still refused.
+	ded["host_ip"] = "192.168.0.184"
+	if code := h.do("PATCH", "/api/projects/"+p.ID, adminToken, mk([]string{"80:80"}), &store.Project{}); code == http.StatusOK {
+		t.Fatal("the device's own address must still be refused")
+	}
+}

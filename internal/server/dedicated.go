@@ -138,6 +138,11 @@ func (s *Server) takenAddresses(ctx context.Context, exceptProject string, sibli
 	devs, _ := s.store.ListDevices(ctx)
 	for _, od := range devs {
 		for _, n := range od.Host.Network {
+			// A worker's own access interface (orch-shim) carries that worker's device-reach
+			// address; it is claimed by the worker below, not held by the device itself.
+			if strings.HasPrefix(n.Interface, "orch-shim") {
+				continue
+			}
 			taken[n.Address] = "the device " + od.Name
 		}
 	}

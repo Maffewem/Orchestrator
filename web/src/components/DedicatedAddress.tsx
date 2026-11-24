@@ -152,7 +152,7 @@ export default function DedicatedAddress({
             </div>
           )}
           <p className="text-xs text-neutral-500">
-            Ports are served on the worker's own address (list them as 80:80 or just 80; the left number is ignored). Domains, previews and tunnels that reach workers through the device's ports don't apply, and replicas keep using their devices' normal ports. Moving the worker stops the old copy first.
+            Ports are served on the worker's own address (list them as 80:80 or just 80; the left number is ignored). Domains and the Cloudflare Tunnel reach the worker's address only if you set the address for the device itself above. Previews don't apply, and replicas keep using their devices' normal ports. Moving the worker stops the old copy first.
           </p>
         </div>
       )}

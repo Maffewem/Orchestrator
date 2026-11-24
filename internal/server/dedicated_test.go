@@ -135,3 +135,38 @@ func TestDedicatedMoveProblems(t *testing.T) {
 		t.Fatal("an old agent can't host it")
 	}
 }
+
+func TestDedicatedWorkerUpstream(t *testing.T) {
+	p := &store.Project{ID: "p1", Name: "web", DeviceID: "d1", Runtime: store.Runtime{
+		Ports: []string{"8080:80", "443:443"}, WebPort: "443",
+		Dedicated: &api.DedicatedIP{Mode: api.DedicatedDHCP, MAC: "02:00:00:00:00:01"},
+	}}
+	dev := &store.Device{ID: "d1", Name: "pi", Containers: []api.Container{{Name: "web", State: "running",
+		Networks: []api.ContainerNet{{Name: "orch-lan-eth0", IP: "192.168.0.77", MAC: "02:00:00:00:00:01"}}}}}
+	if got := upstreamAddr(p, dev); got != "" {
+		t.Fatalf("without the device access address nothing on the device can reach it: %q", got)
+	}
+	p.Runtime.Dedicated.HostIP = "192.168.0.250"
+	if got := upstreamAddr(p, dev); got != "192.168.0.77:443" {
+		t.Fatalf("upstream = %q", got)
+	}
+	p.Runtime.WebPort = ""
+	if got := upstreamAddr(p, dev); got != "192.168.0.77:80" {
+		t.Fatalf("first port = %q", got)
+	}
+
+	// Caddy and the tunnel both send traffic to that address.
+	file, _ := buildCaddy("example.com", "", []*store.Project{p}, nil, map[string]urlPrefs{"p1": {Production: true}}, nil, nil, func(p *store.Project) string { return upstreamAddr(p, dev) })
+	if !strings.Contains(file, "reverse_proxy 192.168.0.77:80") {
+		t.Fatalf("caddyfile: %s", file)
+	}
+	s := &Server{}
+	svc, err := s.resolveRoute([]*store.Project{p}, dev, false, "", tunnelRoute{Hostname: "w.example.com", Service: "project:web"})
+	if err != nil || svc != "http://192.168.0.77:80" {
+		t.Fatalf("tunnel service %q %v", svc, err)
+	}
+	p.Runtime.Dedicated.HostIP = ""
+	if _, err := s.resolveRoute([]*store.Project{p}, dev, false, "", tunnelRoute{Hostname: "w.example.com", Service: "project:web"}); err == nil || !strings.Contains(err.Error(), "address for the device itself") {
+		t.Fatalf("a worker the device can't reach must say why: %v", err)
+	}
+}

@@ -24,7 +24,7 @@ Turn the switch off and redeploy. The worker goes back to the default bridge net
 | Area | Behaviour |
 | --- | --- |
 | Port conflicts | Not checked against the device's ports. The worker listens on its own address. |
-| Domains, Cloudflare Tunnel, production URL | Not routed. Caddy and the tunnel reach workers through the device's ports. Point DNS at the worker's address, or use the address directly. |
+| Domains, Cloudflare Tunnel, production URL | Routed to the worker's own address and container port (the web port setting picks which), **if the worker has an "address for the device itself"**. Caddy and cloudflared run on the device, and Linux blocks the device from reaching its own macvlan workers, so the shim is what makes the route work. Without it the settings say why nothing is routed. With DHCP, reserve the MAC in the router: a changed lease needs a redeploy and a route resync. |
 | Previews | Previews use normal device ports. They never take the worker's address. |
 | Replicas | Replicas run on their own devices' normal ports. |
 | Migration | The old copy is stopped first (an address can't be held twice) and started again if the move fails. A static address must fit the new device's subnet; DHCP works anywhere. |

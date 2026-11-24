@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Network } from "lucide-react";
 import { api, type DedicatedCheck, type DedicatedIP, type Device } from "../api";
 import { Button, CopyButton, Field, Toggle, inputClass } from "./ui";
@@ -56,6 +56,39 @@ export default function DedicatedAddress({
     setCheck(null);
     if (value) onChange({ ...value, ...patch });
   };
+
+  // Result of checking the typed address, shown right under the field.
+  const hostPrefix = "Address for this device to reach the worker:";
+  const agentCanCheckHost = !!device?.host.capabilities?.includes("dedicated-dhcp-raw");
+  const hostProblems = (check?.problems ?? []).filter((p) => p.startsWith(hostPrefix));
+  let hostStatus: ReactNode = null;
+  if (value?.host_ip) {
+    if (supported && !agentCanCheckHost) {
+      hostStatus = (
+        <p className="mt-1.5 flex items-start gap-2 text-xs text-amber-700">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> This device's agent{device?.host.agent_version ? ` (${device.host.agent_version})` : ""} is too old to check this address on the network. Update it from the Updates page. Until then only clashes known to Orchestrator and the subnet are checked, when you save.
+        </p>
+      );
+    } else if (busy) {
+      hostStatus = <p className="mt-1.5 text-xs text-neutral-500">Checking on the network…</p>;
+    } else if (err) {
+      hostStatus = <p className="mt-1.5 text-xs text-bad">Couldn't check: {err}</p>;
+    } else if (hostProblems.length > 0) {
+      hostStatus = hostProblems.map((p) => (
+        <p key={p} className="mt-1.5 flex items-start gap-2 text-xs text-bad">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {p.slice(hostPrefix.length).trim()}
+        </p>
+      ));
+    } else if (check && !check.problems?.length) {
+      hostStatus = (
+        <p className="mt-1.5 flex items-start gap-2 text-xs text-ok">
+          <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" /> {value.host_ip} looks free on {check.subnet ?? "the network"}.
+        </p>
+      );
+    } else if (!check) {
+      hostStatus = <p className="mt-1.5 text-xs text-neutral-500">Not checked yet. It is checked when you leave this field, or with "Check on the network".</p>;
+    }
+  }
 
   // A replica never takes the worker's own address, so nothing about this section applies to the
   // copy being viewed. The settings (and the interface list and checks, which describe the main
@@ -132,7 +165,7 @@ export default function DedicatedAddress({
               </Field>
             )}
           </div>
-          <details className="text-sm" open={!!value.vlan || undefined}>
+          <details className="text-sm" open={!!value.vlan || !!value.host_ip || undefined}>
             <summary className="cursor-pointer text-neutral-600">Advanced{value.vlan ? ` · VLAN ${value.vlan}` : ""}</summary>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <Field label="Network interface" hint="Empty: the one with the default route.">
@@ -146,7 +179,7 @@ export default function DedicatedAddress({
                   ))}
                 </select>
               </Field>
-              <Field label="Address for the device itself" hint="Optional spare address on the same network. Linux blocks a device from reaching its own macvlan workers; this adds an interface that can. Needed only if something on this device must talk to the worker, including domains and the Cloudflare Tunnel on this device. It is checked on the network when you leave the field.">
+              <Field label="Address for this device to reach the worker" hint="Optional spare address that lets this device itself, and its Caddy and Cloudflare Tunnel, reach the worker. Linux blocks a device from reaching its own macvlan workers, so the agent adds a small interface on the device with this address. Checked on the network when you leave the field.">
                 <div className="flex items-center gap-2">
                   <input
                     className={inputClass}
@@ -164,6 +197,7 @@ export default function DedicatedAddress({
                     </Button>
                   )}
                 </div>
+                {hostStatus}
                 <p className="mt-1.5 text-xs text-amber-700">
                   The device holds this address itself, so nothing else may use it. Choose one <strong>outside your router's DHCP range</strong>, or reserve it there, or the router may hand it to another device.
                 </p>
@@ -203,7 +237,7 @@ export default function DedicatedAddress({
                   <p>
                     Before this works: the <strong>switch port must carry VLAN {value.vlan} tagged</strong> (a trunk, alongside the untagged network), and the <strong>router must serve it</strong>: {value.mode === "dhcp" ? "DHCP for the VLAN (the subnet is learned from it)" : "a gateway address on the VLAN"} and routing to the networks that should reach the worker.
                   </p>
-                  <p>The device itself still can't reach the worker at that address unless you set an address for the device itself, which must be a spare address on the VLAN's subnet.</p>
+                  <p>The device itself still can't reach the worker at that address unless you set an address for this device to reach the worker, which must be a spare address on the VLAN's subnet.</p>
                 </div>
               )}
             </div>
@@ -231,13 +265,13 @@ export default function DedicatedAddress({
               {!check.problems?.length && (
                 <p className="flex items-start gap-2 text-ok">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-                  {value.host_ip ? `Device access address ${value.host_ip} looks free. ` : ""}
+                  {value.host_ip ? `The address for this device to reach the worker (${value.host_ip}) looks free. ` : ""}
                   {value.mode === "static" ? `${value.ip} looks free on ${check.subnet ?? "the network"}.` : `DHCP would offer ${check.offer ?? "an address"} on ${check.subnet ?? "the network"}.`}
                 </p>
               )}
               {check.suggest_host_ip && !value.host_ip && (
                 <p className="flex flex-wrap items-center gap-2 text-neutral-700">
-                  Suggested address for the device itself: <span className="font-mono font-medium">{check.suggest_host_ip}</span>
+                  Suggested address for this device to reach the worker: <span className="font-mono font-medium">{check.suggest_host_ip}</span>
                   <Button type="button" onClick={() => set({ host_ip: check.suggest_host_ip })}>
                     Use suggestion
                   </Button>
@@ -250,7 +284,7 @@ export default function DedicatedAddress({
             </div>
           )}
           <p className="text-xs text-neutral-500">
-            Ports are served on the worker's own address (list them as 80:80 or just 80; the left number is ignored). Domains and the Cloudflare Tunnel reach the worker's address only if you set the address for the device itself above. Previews don't apply, and replicas keep using their devices' normal ports. Moving the worker stops the old copy first.
+            Ports are served on the worker's own address (list them as 80:80 or just 80; the left number is ignored). Domains and the Cloudflare Tunnel reach the worker's address only if you set the address for this device to reach the worker above. Previews don't apply, and replicas keep using their devices' normal ports. Moving the worker stops the old copy first.
           </p>
         </div>
       )}

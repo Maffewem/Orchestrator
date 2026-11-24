@@ -108,18 +108,18 @@ func cleanDedicated(d *api.DedicatedIP) error {
 	if d.HostIP != "" {
 		ip := net.ParseIP(d.HostIP)
 		if ip == nil || ip.To4() == nil {
-			return fmt.Errorf("the device access address %q is not an IPv4 address", d.HostIP)
+			return fmt.Errorf("the address for this device to reach the worker, %q, is not an IPv4 address", d.HostIP)
 		}
 		d.HostIP = ip.String()
 		if d.HostIP == d.IP {
-			return errors.New("the device access address must differ from the worker's address")
+			return errors.New("the address for this device to reach the worker must differ from the worker's address")
 		}
 	}
 	return nil
 }
 
 // takenAddresses maps every address Orchestrator knows to who holds it (devices' own addresses and
-// other workers' addresses and device access addresses), and every other worker's MAC to its name.
+// other workers' addresses and device-reach addresses), and every other worker's MAC to its name.
 func (s *Server) takenAddresses(ctx context.Context, exceptProject string) (taken, macs map[string]string) {
 	taken, macs = map[string]string{}, map[string]string{}
 	devs, _ := s.store.ListDevices(ctx)
@@ -138,7 +138,7 @@ func (s *Server) takenAddresses(ctx context.Context, exceptProject string) (take
 			taken[o.IP] = "the worker " + p.Name
 		}
 		if o.HostIP != "" {
-			taken[o.HostIP] = "the device access address of " + p.Name
+			taken[o.HostIP] = "the address that lets this device reach the worker " + p.Name
 		}
 		macs[o.MAC] = p.Name
 	}
@@ -178,7 +178,7 @@ func (s *Server) dedicatedProblems(ctx context.Context, id string, dev *store.De
 	if who, dup := macs[d.MAC]; dup {
 		out = append(out, "that MAC address already belongs to "+who)
 	}
-	for _, c := range []struct{ what, ip string }{{"address", d.IP}, {"device access address", d.HostIP}} {
+	for _, c := range []struct{ what, ip string }{{"address", d.IP}, {"address for this device to reach the worker", d.HostIP}} {
 		if c.ip == "" {
 			continue
 		}

@@ -491,7 +491,7 @@ func upstreamAddr(p *store.Project, d *store.Device) string {
 // errNoUpstream explains why a project has nothing for a proxy or tunnel to send traffic to.
 func errNoUpstream(p *store.Project) string {
 	if p.Runtime.Dedicated != nil {
-		return "this worker has its own network address, which the device can only reach through its \"address for the device itself\" (in the worker's settings). Set that and redeploy so domains and the tunnel can use it"
+		return "this worker has its own network address, which the device can only reach through its \"address for this device to reach the worker\" (in the worker's settings). Set that and redeploy so domains and the tunnel can use it"
 	}
 	return "the project publishes no port for the tunnel to send traffic to"
 }

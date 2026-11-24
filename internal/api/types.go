@@ -98,7 +98,7 @@ type NetworkCheck struct {
 	Wireless bool     `json:"wireless,omitempty"`
 	Problems []string `json:"problems,omitempty"`
 	// SuggestHostIP is a free address the device itself could use to reach the worker (the
-	// "address for the device itself"), offered when none is set. It is only a suggestion.
+	// "address for this device to reach the worker"), offered when none is set. It is only a suggestion.
 	SuggestHostIP string `json:"suggest_host_ip,omitempty"`
 	// Offer is the address DHCP would hand out right now (dhcp mode only).
 	Offer string `json:"offer,omitempty"`

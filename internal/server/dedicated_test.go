@@ -144,7 +144,7 @@ func TestDedicatedWorkerUpstream(t *testing.T) {
 	dev := &store.Device{ID: "d1", Name: "pi", Containers: []api.Container{{Name: "web", State: "running",
 		Networks: []api.ContainerNet{{Name: "orch-lan-eth0", IP: "192.168.0.77", MAC: "02:00:00:00:00:01"}}}}}
 	if got := upstreamAddr(p, dev); got != "" {
-		t.Fatalf("without the device access address nothing on the device can reach it: %q", got)
+		t.Fatalf("without the address for this device to reach the worker nothing on the device can reach it: %q", got)
 	}
 	p.Runtime.Dedicated.HostIP = "192.168.0.250"
 	if got := upstreamAddr(p, dev); got != "192.168.0.77:443" {
@@ -166,7 +166,7 @@ func TestDedicatedWorkerUpstream(t *testing.T) {
 		t.Fatalf("tunnel service %q %v", svc, err)
 	}
 	p.Runtime.Dedicated.HostIP = ""
-	if _, err := s.resolveRoute([]*store.Project{p}, dev, false, "", tunnelRoute{Hostname: "w.example.com", Service: "project:web"}); err == nil || !strings.Contains(err.Error(), "address for the device itself") {
+	if _, err := s.resolveRoute([]*store.Project{p}, dev, false, "", tunnelRoute{Hostname: "w.example.com", Service: "project:web"}); err == nil || !strings.Contains(err.Error(), "address for this device to reach the worker") {
 		t.Fatalf("a worker the device can't reach must say why: %v", err)
 	}
 }

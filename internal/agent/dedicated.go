@@ -286,26 +286,26 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		hip := net.ParseIP(d.HostIP)
 		switch {
 		case hip == nil:
-			bad("%q is not an IP address for the device's own access", d.HostIP)
+			bad("Address for this device to reach the worker: %q is not an IP address", d.HostIP)
 		case l.Subnet == nil:
 			// a DHCP VLAN whose subnet isn't known yet (no offer)
 		default:
 			ps := staticProblems(hip, l)
 			for _, p := range ps {
-				bad("device access address: %s", p)
+				bad("Address for this device to reach the worker: %s", p)
 			}
 			if len(ps) == 0 && avoid[hip.String()] {
-				bad("device access address: %s is already used by another worker or device known to Orchestrator", hip)
+				bad("Address for this device to reach the worker: %s is already used by another worker or device known to Orchestrator", hip)
 			} else if len(ps) == 0 && !heldByShim(l.Parent, hip) && !hip.Equal(net.ParseIP(d.IP)) {
 				// Our own access interface answers for its address, so only a different one is probed.
 				switch inUse, checked := probeIP(ctx, l.Parent, hip); {
 				case inUse:
-					bad("device access address: something on the network already answers for %s", hip)
+					bad("Address for this device to reach the worker: something on the network already answers for %s", hip)
 				case !checked:
-					out.Notes = append(out.Notes, "Couldn't check whether the device access address is free: install arping or ping on the device.")
+					out.Notes = append(out.Notes, "Couldn't check whether the address for this device to reach the worker is free: install arping or ping on the device.")
 				}
 			} else if len(ps) == 0 && hip.Equal(net.ParseIP(d.IP)) {
-				bad("device access address: it must differ from the worker's address")
+				bad("Address for this device to reach the worker: it must differ from the worker's address")
 			}
 		}
 	} else if len(out.Problems) == 0 && l.Subnet != nil {
@@ -316,7 +316,7 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 		ip, checked := suggestHost(ctx, l, avoid, skip...)
 		switch {
 		case ip == "":
-			out.Notes = append(out.Notes, "Couldn't find a free address for the device itself near the top of "+l.Subnet.String()+". Pick one by hand.")
+			out.Notes = append(out.Notes, "Couldn't find a free address to suggest for this device to reach the worker near the top of "+l.Subnet.String()+". Pick one by hand.")
 		case !checked:
 			out.SuggestHostIP = ip
 			out.Notes = append(out.Notes, "Couldn't check whether "+ip+" is free (install arping or ping on the device). Make sure it is outside your DHCP range and unused.")
@@ -324,7 +324,7 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 			out.SuggestHostIP = ip
 			out.Notes = append(out.Notes, ip+" didn't answer on the network. Make sure it is outside your router's DHCP range.")
 		}
-		out.Notes = append(out.Notes, "Without a device access address, this device itself can't reach the worker: the Linux macvlan driver blocks traffic between a host and its own containers. Other devices on the network can.")
+		out.Notes = append(out.Notes, "Without an address for this device to reach the worker, this device itself can't reach it: the Linux macvlan driver blocks traffic between a host and its own containers. Other devices on the network can.")
 	}
 	return out
 }

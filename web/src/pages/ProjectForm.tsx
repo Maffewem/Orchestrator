@@ -138,7 +138,7 @@ export default function ProjectForm({
     }
     setBusy(true);
     try {
-      // A typed device access address is checked on the network again before it is saved.
+      // A typed address for this device to reach the worker is checked on the network again before it is saved.
       const dev = devices.data?.find((d) => d.id === device);
       if (dedicated?.host_ip && dedicated.host_ip !== initial?.runtime.dedicated?.host_ip && dev && dev.status !== "offline" && dev.host.capabilities?.includes("dedicated-ip")) {
         const r = await api.checkDedicated(dev.id, { ...dedicated, project_id: initial?.id });

@@ -721,10 +721,31 @@ function ProjectSettings({ p, onSaved, viewId, viewName, formKey, dirty }: { p: 
           onSubmit={async (input, previews) => {
             await api.updateProject(p.id, input);
             if (previews) await api.setPreviewSettings(p.id, previews);
-            if (JSON.stringify(input.runtime) !== JSON.stringify(p.runtime)) setNeedsDeploy(true);
+            const diff = (a: unknown, b: unknown) => JSON.stringify(a ?? null) !== JSON.stringify(b ?? null);
+            const was = p.runtime as unknown as Record<string, unknown>;
+            const now = input.runtime as unknown as Record<string, unknown>;
+            const what: string[] = [];
+            if (diff(was.dedicated, now.dedicated) || diff(was.copy_addresses, now.copy_addresses)) what.push("own address");
+            if (diff(was.ports, now.ports)) what.push("ports");
+            if (diff(was.env, now.env)) what.push("environment");
+            if (diff(input.source, p.source)) what.push("source");
+            const changed = diff(input.runtime, p.runtime) || diff(input.source, p.source);
+            if (changed) setNeedsDeploy(true);
             setSaved(true);
             setTimeout(() => setSaved(false), 1500);
             onSaved();
+            if (changed && p.source.type !== "cloudflare") {
+              const copies = [p.device_name + " (main)", ...(p.replicas ?? []).map((r) => r.device + " (replica)")];
+              const list = what.length ? what.join(", ") : "settings";
+              void confirmDialog({
+                title: "Redeploy now to apply these changes?",
+                message: `Saved changes to ${list}. The running worker keeps its old settings until it is redeployed. Redeploying updates ${copies.length > 1 ? `${copies.join(", ")}: the main copy first, then each replica one at a time, stopping if one fails` : copies[0]}.`,
+                confirmLabel: "Redeploy",
+                cancelLabel: "Later",
+              }).then((ok) => {
+                if (ok) void deployNow();
+              });
+            }
           }}
         />
       </Card>

@@ -112,23 +112,23 @@ type NetworkCheck struct {
 const NoBackupMarker = ".orchestrator-no-backup"
 
 const (
-	CapBackup        = "backup"         // container.backup and container.restore
-	CapUpdate        = "update"         // agent.update
-	CapProxy         = "proxy"          // proxy.sync
-	CapProxyDNS      = "proxy-dns"      // proxy.sync with a Cloudflare token (DNS challenge)
-	CapPreview       = "preview"        // container.remove
-	CapStream        = "stream"         // live log following and container shells
-	CapInspect       = "inspect"        // container.inspect, used to adopt existing containers
-	CapFileStore     = "filestore"      // file.store, receives server backups
-	CapCompose       = "compose"        // deploy of a Compose stack, and stack.start/stop/down
-	CapTunnel        = "tunnel"         // tunnel.sync, runs cloudflared
-	CapTunnelUpdate  = "tunnel-update"  // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
-	CapDiscover      = "discover"       // finds the server again by itself when its address changes
-	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
+	CapBackup           = "backup"             // container.backup and container.restore
+	CapUpdate           = "update"             // agent.update
+	CapProxy            = "proxy"              // proxy.sync
+	CapProxyDNS         = "proxy-dns"          // proxy.sync with a Cloudflare token (DNS challenge)
+	CapPreview          = "preview"            // container.remove
+	CapStream           = "stream"             // live log following and container shells
+	CapInspect          = "inspect"            // container.inspect, used to adopt existing containers
+	CapFileStore        = "filestore"          // file.store, receives server backups
+	CapCompose          = "compose"            // deploy of a Compose stack, and stack.start/stop/down
+	CapTunnel           = "tunnel"             // tunnel.sync, runs cloudflared
+	CapTunnelUpdate     = "tunnel-update"      // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
+	CapDiscover         = "discover"           // finds the server again by itself when its address changes
+	CapServerInstall    = "server-install"     // server.install, sets up a new Orchestrator server from a transfer bundle
 	CapDedicatedDHCPRaw = "dedicated-dhcp-raw" // DHCP replies read on a packet socket, with a detailed "no answer" error
-	CapDedicatedVLAN = "dedicated-vlan" // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
-	CapDedicatedIP   = "dedicated-ip"   // deploy with DeploySpec.Dedicated, and network.check
-	CapStats         = "stats"          // sends per-container StatsReport with heartbeats, and proxy metrics
+	CapDedicatedVLAN    = "dedicated-vlan"     // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
+	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
+	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
 )
 
 // DockerInfo summarises the container engine on a device.

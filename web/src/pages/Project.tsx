@@ -86,7 +86,7 @@ function StackControls({
       const res = await confirmWithOption({
         title: `Remove stack ${p.name}?`,
         message:
-          "Its containers and networks are removed. The project stays, and New deployment brings the stack back.",
+          "Its containers and networks are removed. The project stays, and Deploy brings the stack back.",
         confirmLabel: "Remove stack",
         danger: true,
         option: {
@@ -296,7 +296,7 @@ export default function ProjectPage() {
               onClick={deploy}
               loading={deploying}
             >
-              New deployment
+              {worker ? "Redeploy" : "Deploy"}
             </Button>
           )}
           {url && (
@@ -514,7 +514,7 @@ function ProjectOverview({
               icon={<Rocket className="size-8" />}
               title="Not deployed yet"
             >
-              Use New deployment to roll this project out.
+              Use Deploy to roll this project out.
             </Empty>
           )}
         </Card>

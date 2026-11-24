@@ -96,7 +96,7 @@ export function CloudflareOverview({ p }: { p: Project }) {
             <RemoteProduction r={remote.data} loading={!remote.data} />
           ) : (
             <Empty icon={<Rocket className="size-8" />} title="Not deployed yet">
-              {remote.data?.notes?.deployments ?? "Use New deployment to build this project and upload it to Cloudflare."}
+              {remote.data?.notes?.deployments ?? "Use Deploy to build this project and upload it to Cloudflare."}
             </Empty>
           )}
         </Card>

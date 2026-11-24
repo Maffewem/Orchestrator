@@ -183,6 +183,7 @@ export default function ProjectForm({
 
   return (
     <form onSubmit={submit} className="space-y-8">
+      {!isCF && <p className="rounded-lg bg-neutral-50 px-4 py-2 text-sm text-neutral-600">Changes to the source, ports, address and environment are saved now but only take effect when the worker is redeployed. Redeploy runs the same source again with the new settings; a new commit or version is deployed from the Deployments tab.</p>}
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Source</legend>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

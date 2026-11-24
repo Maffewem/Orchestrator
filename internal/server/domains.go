@@ -431,6 +431,9 @@ func (s *Server) handleSetBaseDomain(w http.ResponseWriter, r *http.Request) {
 // upstreamPort is the host port that carries a project's web traffic: the one chosen in its
 // settings, otherwise the first published TCP host port.
 func upstreamPort(p *store.Project) string {
+	if p.Runtime.Dedicated != nil {
+		return "" // it listens on its own address, not on a port of the device
+	}
 	if p.Runtime.WebPort != "" {
 		return p.Runtime.WebPort
 	}

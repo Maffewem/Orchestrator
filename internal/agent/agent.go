@@ -84,6 +84,8 @@ type Agent struct {
 	lastCPUTotal, lastCPUIdle uint64
 
 	stats statsState // per-container samples waiting for the next heartbeat
+
+	leases leaseTable // DHCP addresses held for workers with a dedicated address
 }
 
 var errUnauthorized = errors.New("control plane rejected the agent token")
@@ -130,6 +132,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.worker(ctx)
 	go a.streamLoop(ctx)
 	go a.statsLoop(ctx)
+	go a.dedicatedLoop(ctx)
 
 	backoff := time.Second
 	for {
@@ -340,6 +343,17 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 			} else {
 				err = a.docker.Remove(cctx, id)
 			}
+		}
+	case api.ActionNetworkCheck:
+		var d api.DedicatedIP
+		d.Mode, d.IP, d.MAC, d.Parent, d.HostIP = c.Args["mode"], c.Args["ip"], c.Args["mac"], c.Args["parent"], c.Args["host_ip"]
+		current := ""
+		if id, _ := a.docker.ContainerByName(cctx, c.Args["service"]); id != "" {
+			current = a.docker.containerIPOn(cctx, id, macvlanPrefix)
+		}
+		var b []byte
+		if b, err = json.Marshal(a.checkDedicated(cctx, d, current)); err == nil {
+			output = string(b)
 		}
 	case api.ActionInspect:
 		var spec api.ContainerSpec

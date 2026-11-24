@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Box, Cloud, Github, Globe, Layers, Package, Server } from "lucide-react";
-import { api, type NodeBuild, type PreviewBuild, type Project, type ProjectInput, type Source } from "../api";
+import { api, type DedicatedIP, type NodeBuild, type PreviewBuild, type Project, type ProjectInput, type Source } from "../api";
+import DedicatedAddress from "../components/DedicatedAddress";
 import EnvEditor from "../components/EnvEditor";
 import { normalizeEnv } from "../env";
 import { Button, ChipInput, ErrorNote, Field, Toggle, inputClass } from "../components/ui";
@@ -60,6 +61,7 @@ export default function ProjectForm({
   );
   const [ports, setPorts] = useState((initial?.runtime.ports ?? []).join("\n"));
   const [webPort, setWebPort] = useState(initial?.runtime.web_port ?? "");
+  const [dedicated, setDedicated] = useState<DedicatedIP | null>(initial?.runtime.dedicated ?? null);
   const [env, setEnv] = useState((initial?.runtime.env ?? []).join("\n"));
   const [volumes, setVolumes] = useState((initial?.runtime.volumes ?? []).join("\n"));
   const [restart, setRestart] = useState(initial?.runtime.restart || "unless-stopped");
@@ -121,7 +123,7 @@ export default function ProjectForm({
     setBusy(true);
     try {
       await onSubmit(
-        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), env: normalizeEnv(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, env: normalizeEnv(env), restart, volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
     } catch (err) {
@@ -511,6 +513,7 @@ export default function ProjectForm({
             </select>
           </Field>
         </div>
+        <DedicatedAddress value={dedicated} onChange={setDedicated} device={devices.data?.find((d) => d.id === device)} projectId={initial?.id} canEdit={isAdmin} />
         <Field label="Volumes" hint="One per line: name:/path for a named volume, /host/path:/path for a folder, add :ro for read-only. Existing data stays when the container is recreated.">
           <textarea className={cx(inputClass, "font-mono")} rows={3} value={volumes} onChange={(e) => setVolumes(e.target.value)} />
         </Field>

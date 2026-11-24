@@ -295,6 +295,7 @@ func (s *Server) deployPreview(ctx context.Context, p *store.Project, pv *store.
 		return nil, errors.New("the project publishes no TCP port to preview")
 	}
 	spec.Ports = []string{fmt.Sprintf("%d:%s", pv.HostPort, cport)}
+	spec.Dedicated = nil // a preview must not take the worker's address
 	spec.Labels = map[string]string{"orchestrator.project": p.ID, "orchestrator.preview": pv.Branch}
 	d, err := s.store.CreateDeployment(ctx, store.NewDeployment{
 		ProjectID: p.ID, DeviceID: p.DeviceID, Trigger: trigger, Commit: commit, Spec: spec, PreviewID: pv.ID,

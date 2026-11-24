@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -174,6 +175,12 @@ type dockerContainer struct {
 		Type string `json:"Type"`
 		Name string `json:"Name"`
 	} `json:"Mounts"`
+	NetworkSettings struct {
+		Networks map[string]struct {
+			IPAddress  string `json:"IPAddress"`
+			MacAddress string `json:"MacAddress"`
+		} `json:"Networks"`
+	} `json:"NetworkSettings"`
 }
 
 // namedVolumes lists the named (not bind) volumes a container mounts.
@@ -196,6 +203,12 @@ func (c dockerContainer) toAPI() api.Container {
 		ID: c.ID, Name: name, Image: c.Image, State: c.State, Status: c.Status, Created: c.Created,
 		Labels: c.Labels, ComposeProject: c.Labels["com.docker.compose.project"], Volumes: c.namedVolumes(),
 	}
+	for name, n := range c.NetworkSettings.Networks {
+		if n.IPAddress != "" && name != "bridge" && name != "host" {
+			out.Networks = append(out.Networks, api.ContainerNet{Name: name, IP: n.IPAddress, MAC: n.MacAddress})
+		}
+	}
+	sort.Slice(out.Networks, func(i, j int) bool { return out.Networks[i].Name < out.Networks[j].Name })
 	for _, p := range c.Ports {
 		out.Ports = append(out.Ports, api.Port{IP: p.IP, PrivatePort: p.PrivatePort, PublicPort: p.PublicPort, Type: p.Type})
 	}
@@ -497,6 +510,12 @@ func (d *Docker) buildAPI(ctx context.Context, remote, dockerfile, tag string, l
 
 // Create creates (but does not start) a container for spec named spec.Service.
 func (d *Docker) Create(ctx context.Context, name string, spec api.DeploySpec, labels map[string]string) (string, error) {
+	return d.CreateOn(ctx, name, spec, labels, nil)
+}
+
+// CreateOn is Create for a container with a dedicated address on a macvlan network (att != nil):
+// its ports are served on that address, not published on the device.
+func (d *Docker) CreateOn(ctx context.Context, name string, spec api.DeploySpec, labels map[string]string, att *attachment) (string, error) {
 	exposed := map[string]struct{}{}
 	bindings := map[string][]map[string]string{}
 	for _, p := range spec.Ports {
@@ -529,6 +548,15 @@ func (d *Docker) Create(ctx context.Context, name string, spec api.DeploySpec, l
 	if spec.Network != "" {
 		host["NetworkMode"] = spec.Network
 	}
+	var netCfg map[string]any
+	if att != nil {
+		host["PortBindings"] = map[string][]map[string]string{}
+		host["NetworkMode"] = att.Network
+		netCfg = map[string]any{"EndpointsConfig": map[string]any{att.Network: map[string]any{
+			"IPAMConfig": map[string]string{"IPv4Address": att.IP.String()},
+			"MacAddress": att.MAC.String(),
+		}}}
+	}
 	body := map[string]any{
 		"Image":        spec.Image,
 		"Env":          spec.Env,
@@ -538,6 +566,10 @@ func (d *Docker) Create(ctx context.Context, name string, spec api.DeploySpec, l
 	}
 	if len(spec.Command) > 0 {
 		body["Cmd"] = spec.Command
+	}
+	if att != nil {
+		body["NetworkingConfig"] = netCfg
+		body["MacAddress"] = att.MAC.String() // older engines read it here
 	}
 	var out struct {
 		ID string `json:"Id"`

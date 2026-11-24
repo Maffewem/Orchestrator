@@ -47,6 +47,10 @@ func (a *Agent) hostInfo() api.HostInfo {
 		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapCompose, api.CapTunnel, api.CapTunnelUpdate, api.CapDiscover, api.CapServerInstall, api.CapStats},
 		Server:       strings.TrimRight(a.server(), "/"),
 	}
+	if runtime.GOOS == "linux" && !h.InContainer {
+		// A dedicated address needs the agent to speak on the device's own LAN.
+		h.Capabilities = append(h.Capabilities, api.CapDedicatedIP)
+	}
 	if a.cfg.HostRoot != "" {
 		h.Hostname = readTrim(a.hostPath("/etc/hostname"))
 	}

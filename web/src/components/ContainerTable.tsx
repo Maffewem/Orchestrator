@@ -13,6 +13,12 @@ import { confirmWithOption } from "./dialogs";
 export function endpoints(c: Container, addresses: string[]): string[] {
   const host = addresses[0];
   const out = new Set<string>();
+  // A worker with its own address serves its ports there; nothing is published on the device.
+  const own = c.networks?.find((n) => n.name.startsWith("orch-lan-") && n.ip);
+  if (own) {
+    for (const p of c.ports ?? []) if (p.type === "tcp") out.add(`${own.ip}:${p.private_port}`);
+    return [...out];
+  }
   for (const p of c.ports ?? []) {
     if (!p.public_port || p.type !== "tcp") continue;
     const ip = p.ip && p.ip !== "0.0.0.0" && p.ip !== "::" ? p.ip : host;

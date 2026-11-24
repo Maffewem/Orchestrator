@@ -18,7 +18,7 @@ import (
 // take over the device, so changing them needs an administrator. Operators keep deploying,
 // restarting, rolling back and editing environment variables.
 
-const errHostAccessAdmin = "only administrators can use host-level options (host folder mounts, host or shared networking, Compose files), because they give a container control of the device; operators can still deploy, restart, roll back and edit environment variables"
+const errHostAccessAdmin = "only administrators can use host-level options (host folder mounts, host or shared networking, a dedicated network address, Compose files), because they give a container control of the device; operators can still deploy, restart, roll back and edit environment variables"
 
 // namedVolumeRe matches a Docker named volume; anything else in a volume source is a host path.
 var namedVolumeRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
@@ -38,6 +38,9 @@ func hostAccessOf(src store.Source, rt store.Runtime) []string {
 	}
 	if n := strings.TrimSpace(rt.Network); n == "host" || strings.HasPrefix(n, "container:") {
 		out = append(out, "Network mode "+n)
+	}
+	if d := rt.Dedicated; d != nil {
+		out = append(out, "Dedicated network address ("+d.Mode+" "+d.IP+" "+d.HostIP+")")
 	}
 	if src.Type == store.SourceCompose {
 		if src.Repo != "" {

@@ -368,7 +368,13 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, errCloudflareAdmin)
 		return
 	}
-	if err := s.validateProject(r.Context(), &in); err != nil {
+	if err := s.validateProject(r.Context(), &in); err == nil {
+		err = s.validateDedicated(r.Context(), "", &in)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -456,7 +462,11 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		serviceName(in.Name) != cfNameOf(p) {
 		in.Source.Cloudflare.Name = cfNameOf(p)
 	}
-	if err := s.validateProject(r.Context(), &in); err != nil {
+	err := s.validateProject(r.Context(), &in)
+	if err == nil {
+		err = s.validateDedicated(r.Context(), p.ID, &in)
+	}
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

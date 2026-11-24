@@ -50,6 +50,49 @@ type NetAddr struct {
 	Address   string `json:"address"`
 	// Assigned is "dhcp", "static" or "" when the agent cannot tell.
 	Assigned string `json:"assigned,omitempty"`
+	// Prefix is the length of the subnet mask, for example 24.
+	Prefix int `json:"prefix,omitempty"`
+	// Gateway is the default route's next hop when this interface carries the default route.
+	Gateway string `json:"gateway,omitempty"`
+	// Wireless marks a Wi-Fi interface, which can't carry dedicated worker addresses.
+	Wireless bool `json:"wireless,omitempty"`
+}
+
+// DedicatedIP gives a worker its own address on the device's LAN through a Docker macvlan
+// network, so it can use any port (such as 80 and 443) whatever else the device runs.
+type DedicatedIP struct {
+	// Mode is "dhcp" (the agent leases the address with MAC) or "static" (IP is used as given).
+	Mode string `json:"mode"`
+	// IP is the fixed address in static mode. In DHCP mode it is empty in settings and filled in
+	// on the way to the agent with the last address the worker leased.
+	IP string `json:"ip,omitempty"`
+	// MAC is the worker's own hardware address, generated once so a router can reserve an address for it.
+	MAC string `json:"mac"`
+	// Parent is the network interface to attach to; empty uses the one with the default route.
+	Parent string `json:"parent,omitempty"`
+	// HostIP, when set, gives the device itself a way to reach the worker: a macvlan "shim"
+	// interface on the device with this spare address in the same subnet (macvlan otherwise
+	// blocks traffic between a device and its own containers).
+	HostIP string `json:"host_ip,omitempty"`
+}
+
+// Dedicated IP modes.
+const (
+	DedicatedDHCP   = "dhcp"
+	DedicatedStatic = "static"
+)
+
+// NetworkCheck is the agent's answer to a network.check command.
+type NetworkCheck struct {
+	Parent   string   `json:"parent,omitempty"`
+	Subnet   string   `json:"subnet,omitempty"`
+	Gateway  string   `json:"gateway,omitempty"`
+	Wireless bool     `json:"wireless,omitempty"`
+	Problems []string `json:"problems,omitempty"`
+	// Offer is the address DHCP would hand out right now (dhcp mode only).
+	Offer string `json:"offer,omitempty"`
+	// Notes are things worth knowing that don't block the worker.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // Agent capabilities.
@@ -71,6 +114,7 @@ const (
 	CapTunnelUpdate  = "tunnel-update"  // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
 	CapDiscover      = "discover"       // finds the server again by itself when its address changes
 	CapServerInstall = "server-install" // server.install, sets up a new Orchestrator server from a transfer bundle
+	CapDedicatedIP   = "dedicated-ip"   // deploy with DeploySpec.Dedicated, and network.check
 	CapStats         = "stats"          // sends per-container StatsReport with heartbeats, and proxy metrics
 )
 
@@ -112,6 +156,15 @@ type Container struct {
 	ComposeProject string            `json:"compose_project,omitempty"`
 	// Volumes are the names of the named Docker volumes mounted in the container (not bind mounts).
 	Volumes []string `json:"volumes,omitempty"`
+	// Networks lists the Docker networks the container is attached to with its address and MAC on each.
+	Networks []ContainerNet `json:"networks,omitempty"`
+}
+
+// ContainerNet is a container's attachment to one Docker network.
+type ContainerNet struct {
+	Name string `json:"name"`
+	IP   string `json:"ip,omitempty"`
+	MAC  string `json:"mac,omitempty"`
 }
 
 // Port is a published or exposed container port.
@@ -247,6 +300,9 @@ const (
 	// ActionInspect reads a container's configuration and returns a ContainerSpec as JSON in the output.
 	// It never changes the container.
 	ActionInspect = "container.inspect"
+	// ActionNetworkCheck validates a dedicated address before it is saved: Args["mode"], ["ip"],
+	// ["mac"], ["parent"], ["service"]. The output is a NetworkCheck as JSON.
+	ActionNetworkCheck = "network.check"
 	// ActionFileStore downloads the server backup Args["name"] into the folder Args["dir"], keeping the newest Args["keep"].
 	ActionFileStore = "file.store"
 	// ActionServerInstall sets up a new Orchestrator server on this device from the transfer
@@ -336,6 +392,9 @@ type DeploySpec struct {
 	Volumes []string `json:"volumes,omitempty"`
 	// Network is a network name or "host"; empty is Docker's default bridge.
 	Network string `json:"network,omitempty"`
+	// Dedicated, when set, attaches the container to the device's LAN with its own address. Network
+	// must be empty and published host ports are not used: the container listens on that address directly.
+	Dedicated *DedicatedIP `json:"dedicated,omitempty"`
 	// Compose, when set, makes this a Compose stack: Service is the stack (project) name and Image is unused.
 	Compose *ComposeSpec `json:"compose,omitempty"`
 	// Reuse lets the agent skip the build when Image already exists on the device (rollbacks).

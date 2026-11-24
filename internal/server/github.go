@@ -266,6 +266,10 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 		Network: p.Runtime.Network,
 		Labels:  map[string]string{},
 	}
+	if d := p.Runtime.Dedicated; d != nil {
+		cp := *d
+		spec.Dedicated = &cp
+	}
 	for k, v := range p.Runtime.Labels {
 		spec.Labels[k] = v
 	}
@@ -291,7 +295,7 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 			spec.Compose.Remote = githubRemote + p.Source.Repo + ".git#" + commit.SHA
 		}
 		spec.Service = p.Name
-		spec.Ports, spec.Env, spec.Volumes, spec.Command, spec.Network, spec.Labels = nil, nil, nil, nil, "", nil
+		spec.Ports, spec.Env, spec.Volumes, spec.Command, spec.Network, spec.Labels, spec.Dedicated = nil, nil, nil, nil, "", nil, nil
 	case store.SourceGitHub:
 		if commit == nil || commit.SHA == "" {
 			return spec, errors.New("no commit to build")

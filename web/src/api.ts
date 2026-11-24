@@ -949,7 +949,52 @@ async function exportServerCopy(password: string) {
   URL.revokeObjectURL(url);
 }
 
+export interface ClusterPolicy {
+  failover: boolean;
+  allowed?: string[];
+  fail_back: boolean;
+  start_empty: boolean;
+  replicas?: string[];
+}
+export interface ClusterView {
+  config: { enabled: boolean; grace_seconds: number };
+  workers: {
+    project_id: string;
+    name: string;
+    device_id: string;
+    device: string;
+    policy: ClusterPolicy;
+    replicas?: { device_id: string; device: string; online: boolean; running: boolean }[];
+    last_failover?: { from_name: string; to_name: string; at: string; with_data: boolean; home: boolean };
+  }[];
+}
+
+export interface HAView {
+  role: "active" | "standby";
+  epoch: number;
+  peer_url?: string;
+  self_url?: string;
+  paired: boolean;
+  token?: string;
+  last_sync?: string;
+  sync_error?: string;
+  sync_version?: string;
+  ready: boolean;
+  standby_last_pull?: string;
+  previous?: string;
+  version: string;
+  can_restart: boolean;
+}
+
 export const api = {
+  serverHA: () => request<HAView>("GET", "/api/server-ha"),
+  haPair: () => request<HAView>("POST", "/api/server-ha/pair"),
+  haJoin: (b: { active_url: string; token: string; self_url: string }) => request<HAView>("POST", "/api/server-ha/join", b),
+  haLeave: () => request<{ status: string }>("POST", "/api/server-ha/leave"),
+  haPromote: (activeIsDown: boolean) => request<{ status: string }>("POST", "/api/server-ha/promote", { active_is_down: activeIsDown }),
+  cluster: () => request<ClusterView>("GET", "/api/cluster"),
+  setCluster: (c: { enabled: boolean; grace_seconds: number }) => request<ClusterView["config"]>("PUT", "/api/cluster", c),
+  setClusterPolicy: (id: string, p: ClusterPolicy) => request<ClusterPolicy>("PUT", `/api/projects/${id}/cluster`, p),
   serverMove: () => request<MoveView>("GET", "/api/server-move"),
   startServerMove: (b: { device_id: string; port: number; address: string; old_url: string }) => request<MoveView>("POST", "/api/server-move", b),
   switchServerMove: () => request<MoveView>("POST", "/api/server-move/switch"),

@@ -91,9 +91,15 @@ type Server struct {
 	mig           migrations
 	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
 	migratePoll   time.Duration // test hook; 2s when zero
+	cluster       clusterState
 	moveTick      time.Duration // test hook: how often a server move polls; 2s when zero
 	moveFrozen    atomic.Bool   // a server move is under way: dashboard changes are paused
 	standbyTo     atomic.Pointer[string]
+	haRole        atomic.Pointer[string] // see ha.go
+	haEpoch       atomic.Int64
+	haLastPull    atomic.Int64  // unix time the standby last fetched a copy
+	haTick        time.Duration // test hook; 15s when zero
+	haRestartIn   time.Duration // test hook: overrides the delay before an HA restart
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState
@@ -191,6 +197,12 @@ func (s *Server) offlineAfter() time.Duration { return 3 * s.cfg.HeartbeatInterv
 
 // Run performs background housekeeping until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) {
+	s.loadHAState(ctx)
+	go s.haLoop(ctx)
+	if s.haStandby() {
+		<-ctx.Done() // a standby only syncs: no loops, no sweeps, no devices
+		return
+	}
 	s.recoverCloudflare(ctx)
 	s.recoverMove(ctx)
 	go s.cfMonitorLoop(ctx)
@@ -228,6 +240,7 @@ func (s *Server) sweep(ctx context.Context) {
 			s.event(ctx, d.ID, "info", "device.maintenance", d.Name+" left maintenance mode (the scheduled end time passed)")
 		}
 	}
+	s.clusterSweep(ctx)
 	if _, err := s.store.ExpireCommands(ctx, time.Now().Add(-2*time.Minute), time.Now().Add(-30*time.Minute)); err != nil {
 		s.log.Error("expire commands", "err", err)
 	}
@@ -334,6 +347,9 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
 	admin("POST /api/projects/{id}/migrate", s.handleMigrateProject)
 	admin("GET /api/projects/{id}/migration", s.handleGetMigration)
+	admin("GET /api/cluster", s.handleGetCluster)
+	admin("PUT /api/cluster", s.handleSetCluster)
+	admin("PUT /api/projects/{id}/cluster", s.handleSetClusterPolicy)
 	admin("GET /api/projects/{id}/deployments", s.handleListDeployments)
 	admin("GET /api/deployments", s.handleListDeployments)
 	admin("GET /api/deployments/{id}", s.handleGetDeployment)
@@ -377,6 +393,13 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/server-move/back", s.handleMoveBack)
 	admin("POST /api/server-move/export", s.handleMoveExport)
 	mux.HandleFunc("POST /api/server-move/peer", s.handlePeer)
+	mux.HandleFunc("GET /api/server-ha/snapshot", s.handleHASnapshot)
+	mux.HandleFunc("POST /api/server-ha/fence", s.handleHAFence)
+	admin("GET /api/server-ha", s.handleHAStatus)
+	admin("POST /api/server-ha/pair", s.handleHAPair)
+	admin("POST /api/server-ha/join", s.handleHAJoin)
+	admin("POST /api/server-ha/leave", s.handleHALeave)
+	admin("POST /api/server-ha/promote", s.handleHAPromote)
 	mux.Handle("GET "+moveBundlePath, s.agentAuth(s.handleMoveBundle))
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/sso", s.handleSetSSO)
@@ -405,7 +428,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
 	mux.Handle("/", s.uiHandler())
-	return securityHeaders(s.httpsRedirect(s.pausedMiddleware(mux)))
+	return securityHeaders(s.httpsRedirect(s.haMiddleware(s.pausedMiddleware(mux))))
 }
 
 type ctxKey int

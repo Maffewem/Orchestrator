@@ -345,6 +345,7 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		var id string
 		if id, err = a.docker.ContainerByName(cctx, c.Target); err == nil && id != "" {
 			parent, ip := a.docker.containerParentOn(cctx, id), a.docker.containerIPOn(cctx, id, macvlanPrefix)
+			a.releaseHostAccess(cctx, id) // the device's access address goes with the worker
 			if c.Args["volumes"] == "delete" {
 				output, err = a.docker.RemoveWithVolumes(cctx, id)
 			} else {

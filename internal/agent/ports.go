@@ -86,3 +86,10 @@ func portStartError(err error) error {
 	}
 	return err
 }
+
+// ContainerPortConflicts lists the host ports in spec already published by another running
+// container. Unlike the check made during a deployment it can't see other processes on the
+// device, so it is for warning ahead of time (the server uses it before placing a copy).
+func ContainerPortConflicts(spec api.DeploySpec, containers []api.Container) []string {
+	return portConflicts(spec, containers, func(string, int) bool { return false })
+}

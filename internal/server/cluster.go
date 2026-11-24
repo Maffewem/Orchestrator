@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Maffewem/Orchestrator/internal/agent"
 	"github.com/Maffewem/Orchestrator/internal/api"
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
@@ -139,6 +140,8 @@ func (s *Server) pickFailoverTarget(ctx context.Context, p *store.Project, pol C
 			continue
 		case !hasCap(d, api.CapBackup):
 			continue
+		case len(portConflictsOn(p, d)) > 0:
+			continue // its published ports are taken on that device
 		}
 		if best == nil || count[d.ID] < count[best.ID] || (count[d.ID] == count[best.ID] && d.Name < best.Name) {
 			best = d
@@ -342,6 +345,7 @@ type replicaState struct {
 	DeviceID    string `json:"device_id"`
 	Device      string `json:"device"`
 	Online      bool   `json:"online"`
+	Maintenance bool   `json:"maintenance,omitempty"` // the device is in maintenance: nothing is placed on it until that ends
 	Running     bool   `json:"running"`
 	ContainerID string `json:"container_id,omitempty"`
 	State       string `json:"state,omitempty"`
@@ -349,6 +353,8 @@ type replicaState struct {
 	DeploymentID     string `json:"deployment_id,omitempty"`
 	DeploymentStatus string `json:"deployment_status,omitempty"`
 	DeploymentError  string `json:"deployment_error,omitempty"`
+	// Conflicts are host ports the worker publishes that another container on this device already holds.
+	Conflicts []string `json:"conflicts,omitempty"`
 }
 
 // replicaStates describes each replica of a worker: whether its device is up, whether the
@@ -358,9 +364,12 @@ func (s *Server) replicaStates(ctx context.Context, p *store.Project, pol Cluste
 	for _, id := range pol.Replicas {
 		st := replicaState{DeviceID: id}
 		if d, err := s.store.GetDevice(ctx, id); err == nil {
-			st.Device, st.Online = d.Name, !d.Offline
+			st.Device, st.Online, st.Maintenance = d.Name, !d.Offline, d.Maintenance
 			if c := findByName(d, serviceOf(p)); c != nil {
 				st.ContainerID, st.State, st.Running = c.ID, c.State, c.State == "running"
+			}
+			if !st.Running {
+				st.Conflicts = portConflictsOn(p, d)
 			}
 		}
 		if deps, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: id, Limit: 1}); err == nil && len(deps) > 0 {
@@ -426,10 +435,11 @@ func (s *Server) handleSetClusterPolicy(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	var pol ClusterPolicy
-	if !decode(w, r, &pol) {
+	var req clusterPolicyRequest
+	if !decode(w, r, &req) {
 		return
 	}
+	pol := req.ClusterPolicy
 	for i, id := range pol.Allowed {
 		pol.Allowed[i] = strings.TrimSpace(id)
 		if _, err := s.store.GetDevice(r.Context(), pol.Allowed[i]); err != nil {
@@ -440,6 +450,28 @@ func (s *Server) handleSetClusterPolicy(w http.ResponseWriter, r *http.Request) 
 	if pol.Failover && p.Source.Type == store.SourceCompose && len(pol.Allowed) == 1 && pol.Allowed[0] == p.DeviceID {
 		writeError(w, http.StatusBadRequest, "choose at least one device other than the one it runs on")
 		return
+	}
+	// Warn before placing a copy on a device where its published ports are already taken.
+	if r.URL.Query().Get("confirm") != "1" {
+		before := map[string]bool{}
+		for _, id := range s.clusterPolicy(r.Context(), p.ID).Replicas {
+			before[id] = true
+		}
+		var bad []string
+		for _, id := range pol.Replicas {
+			if before[id] || id == p.DeviceID {
+				continue
+			}
+			if d, err := s.store.GetDevice(r.Context(), id); err == nil {
+				for _, c := range portConflictsOn(p, d) {
+					bad = append(bad, d.Name+": "+c)
+				}
+			}
+		}
+		if len(bad) > 0 {
+			writeError(w, http.StatusConflict, "The copy would not start: "+strings.Join(bad, "; "))
+			return
+		}
 	}
 	seen := map[string]bool{}
 	for _, id := range pol.Replicas {
@@ -453,10 +485,23 @@ func (s *Server) handleSetClusterPolicy(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
+	// Taking a device off the list must say what happens to the copy already running there.
+	removed := s.removedReplicas(r.Context(), p, pol)
+	if len(removed) > 0 && req.OnRemove != "keep" && req.OnRemove != "stop" && req.OnRemove != "remove" {
+		names := []string{}
+		for _, d := range removed {
+			names = append(names, d.Name)
+		}
+		writeError(w, http.StatusConflict, "A copy of "+p.Name+" is running on "+strings.Join(names, ", ")+". Choose what happens to it: leave it running, stop it, or remove it")
+		return
+	}
 	b, _ := json.Marshal(pol)
 	if err := s.store.SetSetting(r.Context(), clusterPolicyKey+p.ID, string(b)); err != nil {
 		s.internal(w, err)
 		return
+	}
+	for _, d := range removed {
+		s.retireReplica(r.Context(), p, d, req.OnRemove, req.DeleteVolumes)
 	}
 	writeJSON(w, http.StatusOK, pol)
 }
@@ -464,32 +509,66 @@ func (s *Server) handleSetClusterPolicy(w http.ResponseWriter, r *http.Request) 
 // replicaTrigger marks deployments that only exist to run an extra copy; they never fan out again.
 const replicaTrigger = "replica"
 
-// deployReplicas deploys the same revision to every replica device of a worker. It is called
-// after the main deployment is queued and never fails it: a replica that can't be reached is
-// retried by reconcileReplicas.
-func (s *Server) deployReplicas(ctx context.Context, p *store.Project, commit *store.Commit, tweak func(*api.DeploySpec)) {
+// rollReplicas updates the replicas of a worker one at a time, after the main copy has gone
+// live. Each copy is replaced blue/green on its own device, so it keeps serving until its new
+// version is up; rolling means they never all swap at the same moment, and a bad release is
+// stopped at the first copy that fails instead of reaching every copy. It returns at once.
+func (s *Server) rollReplicas(ctx context.Context, p *store.Project, main *store.Deployment, commit *store.Commit, tweak func(*api.DeploySpec)) {
 	if p.Source.Type == store.SourceCloudflare {
 		return
 	}
 	pol := s.clusterPolicy(ctx, p.ID)
-	for _, id := range pol.Replicas {
-		s.deployReplica(ctx, p, id, commit, tweak)
-	}
-}
-
-func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID string, commit *store.Commit, tweak func(*api.DeploySpec)) {
-	if deviceID == p.DeviceID {
-		return
-	}
-	d, err := s.store.GetDevice(ctx, deviceID)
-	if err != nil || d.Offline || d.Maintenance {
+	if len(pol.Replicas) == 0 {
 		return
 	}
 	cp := *p
-	cp.DeviceID = deviceID
-	if _, err := s.deployWith(ctx, &cp, commit, replicaTrigger, tweak); err != nil {
-		s.event(ctx, deviceID, "error", "cluster.replica", fmt.Sprintf("Deploying a replica of %s to %s failed: %s", p.Name, d.Name, err))
+	go func() {
+		bg := context.WithoutCancel(ctx)
+		wait := func(dep *store.Deployment) error {
+			return s.waitFor(bg, 45*time.Minute, func() (bool, error) {
+				cur, err := s.store.GetDeployment(bg, dep.ID)
+				if err != nil {
+					return false, err
+				}
+				if cur.Status == store.DeploymentFailed {
+					return false, fmt.Errorf("%s", cur.Error)
+				}
+				return cur.Status == store.DeploymentSucceeded, nil
+			})
+		}
+		if err := wait(main); err != nil {
+			s.event(bg, cp.DeviceID, "warning", "cluster.rolling", fmt.Sprintf("The new version of %s did not go live on its main device (%v), so the replicas were left on the version they run", cp.Name, err))
+			return
+		}
+		for _, id := range pol.Replicas {
+			dep := s.deployReplica(bg, &cp, id, commit, tweak)
+			if dep == nil {
+				continue // offline, in maintenance or refused: the server starts it when it can
+			}
+			if err := wait(dep); err != nil {
+				s.event(bg, id, "error", "cluster.rolling", fmt.Sprintf("The new version of %s failed on a replica (%v). The remaining replicas were not updated, and the replica that failed keeps its previous version", cp.Name, err))
+				return
+			}
+		}
+	}()
+}
+
+func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID string, commit *store.Commit, tweak func(*api.DeploySpec)) *store.Deployment {
+	if deviceID == p.DeviceID {
+		return nil
 	}
+	d, err := s.store.GetDevice(ctx, deviceID)
+	if err != nil || d.Offline || d.Maintenance {
+		return nil
+	}
+	cp := *p
+	cp.DeviceID = deviceID
+	dep, err := s.deployWith(ctx, &cp, commit, replicaTrigger, tweak)
+	if err != nil {
+		s.event(ctx, deviceID, "error", "cluster.replica", fmt.Sprintf("Deploying a replica of %s to %s failed: %s", p.Name, d.Name, err))
+		return nil
+	}
+	return dep
 }
 
 // reconcileReplicas starts a replica on any chosen device that has none, for example a newly
@@ -497,7 +576,7 @@ func (s *Server) deployReplica(ctx context.Context, p *store.Project, deviceID s
 func (s *Server) reconcileReplicas(ctx context.Context, p *store.Project, pol ClusterPolicy, byID map[string]*store.Device) {
 	for _, id := range pol.Replicas {
 		d := byID[id]
-		if d == nil || d.Offline || d.Maintenance || d.ID == p.DeviceID || findByName(d, serviceOf(p)) != nil {
+		if d == nil || d.Offline || d.Maintenance || d.ID == p.DeviceID || !s.replicaNeedsDeploy(ctx, p, d) {
 			continue
 		}
 		key := p.ID + "@" + id
@@ -517,5 +596,118 @@ func (s *Server) reconcileReplicas(ctx context.Context, p *store.Project, pol Cl
 			}
 		}
 		s.deployReplica(ctx, p, id, commit, nil)
+	}
+}
+
+// portConflictsOn lists the worker's published host ports that another container on d holds.
+func portConflictsOn(p *store.Project, d *store.Device) []string {
+	if len(p.Runtime.Ports) == 0 || p.Source.Type == store.SourceCompose {
+		return nil
+	}
+	return agent.ContainerPortConflicts(api.DeploySpec{Service: serviceOf(p), Ports: p.Runtime.Ports}, d.Containers)
+}
+
+// replicaNeedsDeploy reports whether the server should start a deployment for a replica: only
+// when the device has no container and its last attempt is not failed or still going. A failed
+// replica stays failed until someone retries it, or the next deployment of the worker repeats it.
+func (s *Server) replicaNeedsDeploy(ctx context.Context, p *store.Project, d *store.Device) bool {
+	if findByName(d, serviceOf(p)) != nil {
+		return false
+	}
+	deps, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: d.ID, Limit: 1})
+	if err != nil || len(deps) == 0 {
+		return err == nil
+	}
+	switch deps[0].Status {
+	case store.DeploymentFailed, store.DeploymentQueued, store.DeploymentRunning:
+		return false
+	}
+	return true
+}
+
+// handleRetryReplica starts a fresh deployment of a replica, for example once a port conflict is fixed.
+func (s *Server) handleRetryReplica(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.lookupDeviceProject(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("device")
+	pol := s.clusterPolicy(r.Context(), p.ID)
+	found := false
+	for _, x := range pol.Replicas {
+		found = found || x == id
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "that device is not a replica of this worker")
+		return
+	}
+	d, err := s.store.GetDevice(r.Context(), id)
+	if err != nil || d.Offline || d.Maintenance {
+		writeError(w, http.StatusConflict, "that device is offline or in maintenance")
+		return
+	}
+	var commit *store.Commit
+	if p.Source.FromRepo() {
+		if commit, err = s.latestCommit(r.Context(), p.Source.Repo, p.Source.Branch); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+	}
+	cp := *p
+	cp.DeviceID = id
+	dep, err := s.deployWith(r.Context(), &cp, commit, replicaTrigger, nil)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, dep)
+}
+
+// clusterPolicyRequest is a policy plus what to do with copies that the policy no longer lists.
+type clusterPolicyRequest struct {
+	ClusterPolicy
+	// OnRemove is keep (leave the copy running, untracked), stop, or remove, for each replica
+	// device taken off the list that still has the copy.
+	OnRemove      string `json:"on_remove,omitempty"`
+	DeleteVolumes bool   `json:"delete_volumes,omitempty"` // with remove: also delete its volumes
+}
+
+// removedReplicas lists the devices that were replicas and no longer are, and still hold the copy.
+func (s *Server) removedReplicas(ctx context.Context, p *store.Project, next ClusterPolicy) []*store.Device {
+	keep := map[string]bool{}
+	for _, id := range next.Replicas {
+		keep[id] = true
+	}
+	var out []*store.Device
+	for _, id := range s.clusterPolicy(ctx, p.ID).Replicas {
+		if keep[id] || id == p.DeviceID {
+			continue
+		}
+		if d, err := s.store.GetDevice(ctx, id); err == nil && findByName(d, serviceOf(p)) != nil {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func (s *Server) retireReplica(ctx context.Context, p *store.Project, d *store.Device, how string, volumes bool) {
+	c := findByName(d, serviceOf(p))
+	if c == nil || how == "keep" {
+		if how == "keep" {
+			s.event(ctx, d.ID, "warning", "cluster.replica", fmt.Sprintf("%s is no longer a replica of %s but its container was left running on %s", d.Name, p.Name, d.Name))
+		}
+		return
+	}
+	switch how {
+	case "stop":
+		s.store.CreateCommand(ctx, d.ID, api.ActionStop, c.ID, nil)
+		s.event(ctx, d.ID, "warning", "cluster.replica", fmt.Sprintf("The replica of %s on %s is being stopped (its container and data are kept)", p.Name, d.Name))
+	case "remove":
+		var args map[string]string
+		if volumes {
+			args = map[string]string{"volumes": "delete"}
+		}
+		s.store.CreateCommand(ctx, d.ID, api.ActionRemove, c.Name, args)
+		s.event(ctx, d.ID, "warning", "cluster.replica", fmt.Sprintf("The replica of %s on %s is being removed%s", p.Name, d.Name, map[bool]string{true: " together with its volumes", false: " (its volumes are kept)"}[volumes]))
 	}
 }

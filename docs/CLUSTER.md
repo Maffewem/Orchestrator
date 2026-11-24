@@ -13,6 +13,12 @@ Automatic failover of workers between devices. Off by default.
 
 A worker can also run an extra, independent copy on other devices. Tick devices under *Replicas* on the Cluster page. Every deployment of the worker (manual, push, retry) is repeated on each replica device, and a missing replica is started by the server (retried every 10 minutes), for example on a newly added device or when one comes back online. Nothing is synced or moved between copies: the application itself must handle several copies (own replication, or stateless). Domains and the Caddy proxy still point at the main copy only, so traffic is not load-balanced yet. Replica deployments show on the project's Deployments list with the trigger `replica`.
 
+- **Rolling updates.** A deployment updates the main copy first. Only once it is live are the replicas updated, one at a time, each waiting for the previous one to succeed. If the main copy fails the replicas are left on their current version; if a replica fails the remaining ones are not touched. Each device still swaps blue/green with automatic rollback, so a copy keeps serving until its new version is up. The server starts a missing replica at once (it has nothing to keep serving).
+- **Failures are shown, not retried.** If a replica's deployment fails (for example a host port already taken on that device), the Cluster page and the project page show the error with a link and a *Retry* button, and the alerts bell lists it. The server does not start another attempt by itself; the next deployment of the worker, or *Retry*, does.
+- **Port check before ticking.** Ticking a device whose containers already publish one of the worker's host ports asks for confirmation first. (Ports held by other processes on the device are only found when the deployment runs.) Failover also skips such devices.
+- **Maintenance.** A device in maintenance is marked in the list; ticking it warns that the copy is queued and starts when maintenance ends.
+- **Unticking.** If the device already runs the copy, you must choose: stop it (container and data kept) or remove it, optionally with its volumes. Nothing is stopped or removed without that choice.
+
 ## Server high availability: manual standby (Beta)
 
 A second server (the standby) keeps a verified copy of the active server and can be promoted by hand. Cluster page > Server high availability.

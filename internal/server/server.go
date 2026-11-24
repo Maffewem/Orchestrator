@@ -350,6 +350,7 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/cluster", s.handleGetCluster)
 	admin("PUT /api/cluster", s.handleSetCluster)
 	admin("PUT /api/projects/{id}/cluster", s.handleSetClusterPolicy)
+	admin("POST /api/projects/{id}/cluster/replicas/{device}/retry", s.handleRetryReplica)
 	admin("GET /api/projects/{id}/deployments", s.handleListDeployments)
 	admin("GET /api/deployments", s.handleListDeployments)
 	admin("GET /api/deployments/{id}", s.handleGetDeployment)

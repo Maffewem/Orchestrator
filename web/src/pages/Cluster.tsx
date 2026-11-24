@@ -1,20 +1,23 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { Network } from "lucide-react";
-import { api, type ClusterPolicy, type ReplicaInfo } from "../api";
+import { api, ApiError, type ClusterPolicy, type ClusterView, type ReplicaInfo } from "../api";
+import { confirmDialog, confirmWithOption } from "../components/dialogs";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Card, CardHeader, Empty, ErrorNote, Loading, PageHeader, Toggle, inputClass } from "../components/ui";
 import { ago, usePoll } from "../lib";
 import ServerHA from "../components/ServerHA";
 
-function ReplicaBadge({ st }: { st: ReplicaInfo }) {
+export function ReplicaBadge({ st, onRetry }: { st: ReplicaInfo; onRetry?: () => void }) {
+  const retry = onRetry ? <button type="button" onClick={onRetry} className="ml-2 text-xs text-primary hover:underline">Retry</button> : null;
   if (st.running) return <Badge tone="ok">running</Badge>;
-  if (!st.online) return <Badge tone="bad">offline</Badge>;
+  if (st.maintenance) return <Badge tone="warn">in maintenance: will deploy when it ends</Badge>;
+  if (!st.online) return <Badge tone="bad">offline: will deploy when it is back</Badge>;
   const link = st.deployment_id ? <Link to={`/deployments/${st.deployment_id}`} className="ml-1 text-xs text-primary hover:underline">deployment</Link> : null;
-  if (st.deployment_status === "failed") return <span><Badge tone="bad">deployment failed</Badge>{link}{st.deployment_error && <span className="ml-1 text-xs text-red-700">{st.deployment_error}</span>}</span>;
+  if (st.deployment_status === "failed") return <span><Badge tone="bad">deployment failed</Badge>{link}{retry}{st.deployment_error && <span className="mt-1 block text-xs text-red-700">{st.deployment_error}</span>}</span>;
   if (st.deployment_status === "queued" || st.deployment_status === "running") return <span><Badge tone="info">deploying</Badge>{link}</span>;
-  if (st.deployment_status === "succeeded") return <span><Badge tone="warn">{st.state ? st.state : "container not found"}</Badge>{link}</span>;
-  return <Badge tone="warn">waiting for the server to deploy it</Badge>;
+  if (st.deployment_status === "succeeded") return <span><Badge tone="warn">{st.state ? st.state : "container not found"}</Badge>{link}{retry}</span>;
+  return <span><Badge tone="warn">waiting for the server to deploy it</Badge>{retry}</span>;
 }
 
 export default function ClusterPage() {
@@ -37,6 +40,46 @@ export default function ClusterPage() {
     }
   };
   const setPolicy = (id: string, p: ClusterPolicy, patch: Partial<ClusterPolicy>) => run(() => api.setClusterPolicy(id, { ...p, ...patch }));
+
+  // Ticking warns when the device already uses the worker's published ports; unticking says what
+  // happens to the copy that is already running there and lets you stop it or remove it.
+  const toggleReplica = async (w: ClusterView["workers"][number], deviceId: string, deviceName: string, on: boolean) => {
+    const p = w.policy;
+    const replicas = on ? [...(p.replicas ?? []), deviceId] : (p.replicas ?? []).filter((x) => x !== deviceId);
+    const next = { ...p, replicas };
+    if (on) {
+      if (devices.find((d) => d.id === deviceId)?.maintenance && !(await confirmDialog({ title: `${deviceName} is in maintenance`, message: `Nothing is deployed to a device in maintenance. The copy of ${w.name} is queued and starts by itself when maintenance ends.`, confirmLabel: "Add and wait" }))) return;
+      return run(async () => {
+        try {
+          await api.setClusterPolicy(w.project_id, next);
+        } catch (e) {
+          if (!(e instanceof ApiError && e.status === 409)) throw e;
+          if (!(await confirmDialog({ title: `${deviceName} can't run ${w.name} yet`, message: `${e.message}. You can add it anyway and fix this later, then use Retry.`, confirmLabel: "Add anyway" }))) return;
+          await api.setClusterPolicy(w.project_id, next, { confirm: true });
+        }
+      });
+    }
+    const st = w.replicas?.find((r) => r.device_id === deviceId);
+    if (!st?.container_id) return run(() => api.setClusterPolicy(w.project_id, next));
+    const remove = await confirmWithOption({
+      title: `Take ${deviceName} off ${w.name}?`,
+      message: `A copy of ${w.name} is running on ${deviceName}. Stopping keeps its container and data there, so it can be started again. Tick the box to remove the container instead.`,
+      confirmLabel: "Continue",
+      danger: true,
+      option: { label: "Remove the container instead of only stopping it", checked: false },
+    });
+    if (remove === null) return;
+    if (!remove) return run(() => api.setClusterPolicy(w.project_id, next, { on_remove: "stop" }));
+    const volumes = await confirmWithOption({
+      title: `Remove ${w.name} from ${deviceName}?`,
+      message: "The container is deleted. Data in bind-mounted folders stays on the device; named volumes are kept unless you tick the box below.",
+      confirmLabel: "Remove",
+      danger: true,
+      option: { label: "Also delete its volumes (data is lost)", checked: false },
+    });
+    if (volumes === null) return;
+    return run(() => api.setClusterPolicy(w.project_id, next, { on_remove: "remove", delete_volumes: volumes }));
+  };
 
   return (
     <>
@@ -99,9 +142,10 @@ export default function ClusterPage() {
                           const st = w.replicas?.find((r) => r.device_id === d.id);
                           return (
                             <label key={d.id} className="flex items-center gap-1.5">
-                              <input type="checkbox" checked={(p.replicas ?? []).includes(d.id)} onChange={(e) => setPolicy(w.project_id, p, { replicas: e.target.checked ? [...(p.replicas ?? []), d.id] : (p.replicas ?? []).filter((x) => x !== d.id) })} />
+                              <input type="checkbox" checked={(p.replicas ?? []).includes(d.id)} onChange={(e) => toggleReplica(w, d.id, d.name, e.target.checked)} />
                               {d.name}
-                              {st && <ReplicaBadge st={st} />}
+                              {d.maintenance && !st && <Badge tone="warn">in maintenance</Badge>}
+                              {st && <ReplicaBadge st={st} onRetry={() => run(() => api.retryReplica(w.project_id, d.id))} />}
                             </label>
                           );
                         })}

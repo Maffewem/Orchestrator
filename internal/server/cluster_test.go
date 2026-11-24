@@ -123,3 +123,30 @@ func TestClusterReplicas(t *testing.T) {
 		t.Fatalf("deployments a=%d b=%d", onA, onB)
 	}
 }
+
+func TestProjectViewShowsReplicasAndKeepsMainDeployment(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.srv.cluster.grace = time.Hour
+	caps := api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview}}
+	a, b := h.register("pi-a"), h.register("pi-b")
+	h.do("POST", "/api/agent/heartbeat", a.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": a.DeviceID,
+		"source": map[string]any{"type": "image", "image": "nginx"}}, &p)
+	h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Replicas: []string{b.DeviceID}}, nil)
+	h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, nil, nil)
+	h.srv.clusterSweep(ctx)
+
+	var v ProjectView
+	if code := h.do("GET", "/api/projects/"+p.ID, adminToken, nil, &v); code != http.StatusOK {
+		t.Fatalf("get project: %d", code)
+	}
+	if v.Latest == nil || v.Latest.DeviceID != a.DeviceID {
+		t.Fatalf("the latest deployment must be the main copy's: %+v", v.Latest)
+	}
+	if len(v.Replicas) != 1 || v.Replicas[0].DeviceID != b.DeviceID || v.Replicas[0].DeploymentID == "" || v.Replicas[0].DeploymentStatus != "queued" {
+		t.Fatalf("replicas: %+v", v.Replicas)
+	}
+}

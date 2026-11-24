@@ -312,7 +312,7 @@ export interface Deployment {
   id: string;
   project_id: string;
   device_id: string;
-  trigger: "manual" | "push" | "retry" | "poll" | "rollback";
+  trigger: "manual" | "push" | "retry" | "poll" | "rollback" | "replica" | "migration";
   preview_id?: string;
   commit: Commit | null;
   spec: DeploySpec;
@@ -351,11 +351,25 @@ export interface PreviewsView {
   supported: boolean;
 }
 
+/** An extra copy of a worker on another device (a replica). */
+export interface ReplicaInfo {
+  device_id: string;
+  device: string;
+  online: boolean;
+  running: boolean;
+  container_id?: string;
+  state?: string;
+  deployment_id?: string;
+  deployment_status?: string;
+  deployment_error?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   device_id: string;
   device_name: string;
+  replicas?: ReplicaInfo[];
   source: Source;
   runtime: Runtime;
   created_at: string;
@@ -964,7 +978,7 @@ export interface ClusterView {
     device_id: string;
     device: string;
     policy: ClusterPolicy;
-    replicas?: { device_id: string; device: string; online: boolean; running: boolean }[];
+    replicas?: ReplicaInfo[];
     last_failover?: { from_name: string; to_name: string; at: string; with_data: boolean; home: boolean };
   }[];
 }

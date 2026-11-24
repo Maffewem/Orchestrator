@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { Network } from "lucide-react";
-import { api, type ClusterPolicy } from "../api";
+import { api, type ClusterPolicy, type ReplicaInfo } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Card, CardHeader, Empty, ErrorNote, Loading, PageHeader, Toggle, inputClass } from "../components/ui";
 import { ago, usePoll } from "../lib";
 import ServerHA from "../components/ServerHA";
+
+function ReplicaBadge({ st }: { st: ReplicaInfo }) {
+  if (st.running) return <Badge tone="ok">running</Badge>;
+  if (!st.online) return <Badge tone="bad">offline</Badge>;
+  const link = st.deployment_id ? <Link to={`/deployments/${st.deployment_id}`} className="ml-1 text-xs text-primary hover:underline">deployment</Link> : null;
+  if (st.deployment_status === "failed") return <span><Badge tone="bad">deployment failed</Badge>{link}{st.deployment_error && <span className="ml-1 text-xs text-red-700">{st.deployment_error}</span>}</span>;
+  if (st.deployment_status === "queued" || st.deployment_status === "running") return <span><Badge tone="info">deploying</Badge>{link}</span>;
+  if (st.deployment_status === "succeeded") return <span><Badge tone="warn">{st.state ? st.state : "container not found"}</Badge>{link}</span>;
+  return <Badge tone="warn">waiting for the server to deploy it</Badge>;
+}
 
 export default function ClusterPage() {
   useCrumbs([{ label: "Cluster" }]);
@@ -91,7 +101,7 @@ export default function ClusterPage() {
                             <label key={d.id} className="flex items-center gap-1.5">
                               <input type="checkbox" checked={(p.replicas ?? []).includes(d.id)} onChange={(e) => setPolicy(w.project_id, p, { replicas: e.target.checked ? [...(p.replicas ?? []), d.id] : (p.replicas ?? []).filter((x) => x !== d.id) })} />
                               {d.name}
-                              {st && <Badge tone={st.running ? "ok" : st.online ? "warn" : "bad"}>{st.running ? "running" : st.online ? "starting" : "offline"}</Badge>}
+                              {st && <ReplicaBadge st={st} />}
                             </label>
                           );
                         })}

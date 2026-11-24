@@ -339,10 +339,36 @@ type clusterWorker struct {
 }
 
 type replicaState struct {
-	DeviceID string `json:"device_id"`
-	Device   string `json:"device"`
-	Online   bool   `json:"online"`
-	Running  bool   `json:"running"`
+	DeviceID    string `json:"device_id"`
+	Device      string `json:"device"`
+	Online      bool   `json:"online"`
+	Running     bool   `json:"running"`
+	ContainerID string `json:"container_id,omitempty"`
+	State       string `json:"state,omitempty"`
+	// The newest deployment of the worker on this device, so a replica that never came up shows why.
+	DeploymentID     string `json:"deployment_id,omitempty"`
+	DeploymentStatus string `json:"deployment_status,omitempty"`
+	DeploymentError  string `json:"deployment_error,omitempty"`
+}
+
+// replicaStates describes each replica of a worker: whether its device is up, whether the
+// container exists there and the outcome of its latest deployment.
+func (s *Server) replicaStates(ctx context.Context, p *store.Project, pol ClusterPolicy) []replicaState {
+	var out []replicaState
+	for _, id := range pol.Replicas {
+		st := replicaState{DeviceID: id}
+		if d, err := s.store.GetDevice(ctx, id); err == nil {
+			st.Device, st.Online = d.Name, !d.Offline
+			if c := findByName(d, serviceOf(p)); c != nil {
+				st.ContainerID, st.State, st.Running = c.ID, c.State, c.State == "running"
+			}
+		}
+		if deps, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: id, Limit: 1}); err == nil && len(deps) > 0 {
+			st.DeploymentID, st.DeploymentStatus, st.DeploymentError = deps[0].ID, string(deps[0].Status), deps[0].Error
+		}
+		out = append(out, st)
+	}
+	return out
 }
 
 type clusterView struct {
@@ -371,14 +397,7 @@ func (s *Server) handleGetCluster(w http.ResponseWriter, r *http.Request) {
 		}
 		pol := s.clusterPolicy(ctx, p.ID)
 		cw := clusterWorker{ProjectID: p.ID, Name: p.Name, DeviceID: p.DeviceID, Device: names[p.DeviceID], Policy: pol, Failover: s.failoverRecord(ctx, p.ID)}
-		for _, id := range pol.Replicas {
-			st := replicaState{DeviceID: id, Device: names[id]}
-			if d := byID[id]; d != nil {
-				c := findByName(d, serviceOf(p))
-				st.Online, st.Running = !d.Offline, c != nil && c.State == "running"
-			}
-			cw.Replicas = append(cw.Replicas, st)
-		}
+		cw.Replicas = s.replicaStates(ctx, p, pol)
 		v.Workers = append(v.Workers, cw)
 	}
 	sort.Slice(v.Workers, func(i, j int) bool { return v.Workers[i].Name < v.Workers[j].Name })

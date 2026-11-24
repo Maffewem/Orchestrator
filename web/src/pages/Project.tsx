@@ -46,6 +46,7 @@ import PreviewsPanel from "../components/Previews";
 import TunnelPanel from "../components/ProjectTunnel";
 import PowerControls from "../components/PowerControls";
 import ProjectForm from "./ProjectForm";
+import { ReplicaBadge } from "./Cluster";
 import { ProjectMetricsTab } from "../components/WorkerMetrics";
 import {
   CloudflareOverview,
@@ -201,6 +202,13 @@ export default function ProjectPage() {
   const base = `/projects/${p.id}`;
   return (
     <>
+      {(p.replicas ?? []).filter((r) => !r.running && (r.deployment_status === "failed" || (r.conflicts?.length ?? 0) > 0)).map((r) => (
+        <div key={r.device_id} className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm">
+          <p className="font-medium">The copy of {p.name} on {r.device} is not running</p>
+          <p className="mt-1"><ReplicaBadge st={r} onRetry={canOperate ? () => api.retryReplica(p.id, r.device_id).then(project.reload).catch((e) => setError(e instanceof Error ? e.message : String(e))) : undefined} /></p>
+          {(r.conflicts?.length ?? 0) > 0 && <p className="mt-1 text-xs text-neutral-700">{r.conflicts?.join("; ")}</p>}
+        </div>
+      ))}
       {instances.length > 1 && (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Copy of this worker">
           <span className="text-neutral-600">{p.name} runs on {instances.length} devices. Showing:</span>

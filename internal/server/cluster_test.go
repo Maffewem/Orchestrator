@@ -150,3 +150,112 @@ func TestProjectViewShowsReplicasAndKeepsMainDeployment(t *testing.T) {
 		t.Fatalf("replicas: %+v", v.Replicas)
 	}
 }
+
+func TestReplicaPortConflictFailureRetryAndRemoval(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.srv.cluster.grace = time.Hour
+	caps := api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview}}
+	a, b := h.register("pi-a"), h.register("pi-b")
+	h.do("POST", "/api/agent/heartbeat", a.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	// pi-b already publishes host port 8000 for another container.
+	busy := []api.Container{{ID: "pt", Name: "portainer", State: "running", Ports: []api.Port{{PublicPort: 8000, PrivatePort: 8000, Type: "tcp"}}}}
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: caps, Containers: busy}, nil)
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": a.DeviceID,
+		"source":  map[string]any{"type": "image", "image": "nginx"},
+		"runtime": map[string]any{"ports": []string{"8000:80"}}}, &p)
+
+	// A device where the published port is taken is flagged before the copy is placed.
+	pol := ClusterPolicy{Replicas: []string{b.DeviceID}}
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, pol, nil); code != http.StatusConflict {
+		t.Fatalf("conflicting replica: %d", code)
+	}
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/cluster?confirm=1", adminToken, pol, nil); code != http.StatusOK {
+		t.Fatalf("confirmed replica: %d", code)
+	}
+
+	// The sweep tries once. After the deployment fails it is not repeated by the server.
+	h.srv.clusterSweep(ctx)
+	deps, _ := h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: b.DeviceID, Limit: 10})
+	if len(deps) != 1 {
+		t.Fatalf("replica deployments: %d", len(deps))
+	}
+	if err := h.st.FinishDeployment(ctx, deps[0].ID, false, "port conflict: port 8000/tcp is already published"); err != nil {
+		t.Fatal(err)
+	}
+	h.srv.cluster.tried = map[string]time.Time{}
+	h.srv.clusterSweep(ctx)
+	if deps, _ = h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: b.DeviceID, Limit: 10}); len(deps) != 1 {
+		t.Fatalf("a failed replica was retried by the server: %d deployments", len(deps))
+	}
+	var v ProjectView
+	h.do("GET", "/api/projects/"+p.ID, adminToken, nil, &v)
+	if len(v.Replicas) != 1 || v.Replicas[0].DeploymentStatus != "failed" || v.Replicas[0].DeploymentError == "" || len(v.Replicas[0].Conflicts) == 0 {
+		t.Fatalf("replica state: %+v", v.Replicas)
+	}
+	var alerts []Alert
+	h.do("GET", "/api/alerts", adminToken, nil, &alerts)
+	found := false
+	for _, al := range alerts {
+		found = found || al.Link == "/cluster"
+	}
+	if !found {
+		t.Fatalf("no alert for the failed replica: %+v", alerts)
+	}
+
+	// Retrying starts a new deployment.
+	if code := h.do("POST", "/api/projects/"+p.ID+"/cluster/replicas/"+b.DeviceID+"/retry", adminToken, nil, nil); code != http.StatusAccepted {
+		t.Fatalf("retry: %d", code)
+	}
+	if deps, _ = h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: b.DeviceID, Limit: 10}); len(deps) != 2 {
+		t.Fatalf("after retry: %d deployments", len(deps))
+	}
+
+	// Removing a replica that has its container needs an explicit choice.
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: caps, Containers: []api.Container{{ID: "w1", Name: "web", State: "running"}}}, nil)
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{}, nil); code != http.StatusConflict {
+		t.Fatalf("untick without a choice: %d", code)
+	}
+	body := map[string]any{"on_remove": "remove", "delete_volumes": true}
+	if code := h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, body, nil); code != http.StatusOK {
+		t.Fatalf("untick with a choice: %d", code)
+	}
+	var hb api.HeartbeatResponse
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: caps, Containers: []api.Container{{ID: "w1", Name: "web", State: "running"}}}, &hb)
+	removed := false
+	for _, c := range hb.Commands {
+		if c.Action == api.ActionRemove && c.Target == "web" && c.Args["volumes"] == "delete" {
+			removed = true
+		}
+	}
+	if !removed {
+		t.Fatalf("no remove command: %+v", hb.Commands)
+	}
+}
+
+func TestReplicaOnDeviceInMaintenanceWaits(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.srv.cluster.grace = time.Hour
+	caps := api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview}}
+	a, b := h.register("pi-a"), h.register("pi-b")
+	h.do("POST", "/api/agent/heartbeat", a.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": a.DeviceID,
+		"source": map[string]any{"type": "image", "image": "nginx"}}, &p)
+	if err := h.st.SetDeviceMaintenance(ctx, b.DeviceID, true, "patching", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Replicas: []string{b.DeviceID}}, nil)
+	h.srv.clusterSweep(ctx)
+	if deps, _ := h.st.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: b.DeviceID, Limit: 5}); len(deps) != 0 {
+		t.Fatal("deployed to a device in maintenance")
+	}
+	var v ProjectView
+	h.do("GET", "/api/projects/"+p.ID, adminToken, nil, &v)
+	if len(v.Replicas) != 1 || !v.Replicas[0].Maintenance {
+		t.Fatalf("replica state: %+v", v.Replicas)
+	}
+}

@@ -53,7 +53,13 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, p := range projects {
-		ds, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, Limit: 1})
+		// A replica's outcome is reported separately below, so it can't hide the main copy's.
+		for _, rs := range s.replicaStates(ctx, p, s.clusterPolicy(ctx, p.ID)) {
+			if rs.DeploymentStatus == string(store.DeploymentFailed) && !rs.Running {
+				out = append(out, Alert{ID: "replica:" + rs.DeploymentID, Severity: "warning", Title: "Replica failed: " + p.Name + " on " + rs.Device, Detail: rs.DeploymentError, Link: "/cluster", At: time.Now()})
+			}
+		}
+		ds, err := s.store.ListDeployments(ctx, store.DeploymentFilter{ProjectID: p.ID, DeviceID: p.DeviceID, Limit: 1})
 		if err != nil || len(ds) == 0 || ds[0].Status != store.DeploymentFailed {
 			continue
 		}

@@ -356,12 +356,14 @@ export interface ReplicaInfo {
   device_id: string;
   device: string;
   online: boolean;
+  maintenance?: boolean;
   running: boolean;
   container_id?: string;
   state?: string;
   deployment_id?: string;
   deployment_status?: string;
   deployment_error?: string;
+  conflicts?: string[];
 }
 
 export interface Project {
@@ -1008,7 +1010,9 @@ export const api = {
   haPromote: (activeIsDown: boolean) => request<{ status: string }>("POST", "/api/server-ha/promote", { active_is_down: activeIsDown }),
   cluster: () => request<ClusterView>("GET", "/api/cluster"),
   setCluster: (c: { enabled: boolean; grace_seconds: number }) => request<ClusterView["config"]>("PUT", "/api/cluster", c),
-  setClusterPolicy: (id: string, p: ClusterPolicy) => request<ClusterPolicy>("PUT", `/api/projects/${id}/cluster`, p),
+  setClusterPolicy: (id: string, p: ClusterPolicy, o?: { confirm?: boolean; on_remove?: "keep" | "stop" | "remove"; delete_volumes?: boolean }) =>
+    request<ClusterPolicy>("PUT", `/api/projects/${id}/cluster${o?.confirm ? "?confirm=1" : ""}`, { ...p, on_remove: o?.on_remove, delete_volumes: o?.delete_volumes }),
+  retryReplica: (id: string, deviceId: string) => request<unknown>("POST", `/api/projects/${id}/cluster/replicas/${deviceId}/retry`),
   serverMove: () => request<MoveView>("GET", "/api/server-move"),
   startServerMove: (b: { device_id: string; port: number; address: string; old_url: string }) => request<MoveView>("POST", "/api/server-move", b),
   switchServerMove: () => request<MoveView>("POST", "/api/server-move/switch"),

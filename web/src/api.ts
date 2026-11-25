@@ -906,6 +906,7 @@ export interface HTTPSView {
   cert_set: boolean;
   subject?: string;
   expires?: string;
+  challenge?: "dns";
 }
 
 export interface BackupDest {

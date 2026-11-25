@@ -299,5 +299,11 @@ func (s *Server) handleSetSSL(w http.ResponseWriter, r *http.Request) {
 	s.store.SetSetting(r.Context(), settingSSLMode, req.Mode)
 	s.event(r.Context(), "", "info", "settings.ssl", "Certificate challenge set to "+req.Mode)
 	s.resyncAllProxies(context.WithoutCancel(r.Context()))
+	// The dashboard's own automatic certificate follows the same challenge setting.
+	if c := s.httpsConfig(r.Context()); c.Mode == "auto" {
+		if err := s.applyHTTPS(c); err != nil {
+			s.log.Error("dashboard https", "err", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"ssl_mode": req.Mode})
 }

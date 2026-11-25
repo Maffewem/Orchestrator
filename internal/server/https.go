@@ -44,6 +44,7 @@ type httpsView struct {
 	CertSet   bool       `json:"cert_set"`
 	Subject   string     `json:"subject,omitempty"`
 	Expires   *time.Time `json:"expires,omitempty"`
+	Challenge string     `json:"challenge,omitempty"` // "dns" when Cloudflare DNS validation is used
 }
 
 type httpsState struct {
@@ -53,6 +54,9 @@ type httpsState struct {
 	cfg  HTTPSConfig
 	err  string
 	leaf *x509.Certificate
+
+	dns       *dnsCertManager // set while the DNS challenge is used
+	cancelDNS context.CancelFunc
 }
 
 const defaultHTTPSAddr = ":8443"
@@ -91,8 +95,10 @@ func (s *Server) applyHTTPS(cfg HTTPSConfig) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	var (
-		tlsConf *tls.Config
-		leaf    *x509.Certificate
+		tlsConf   *tls.Config
+		leaf      *x509.Certificate
+		dnsMgr    *dnsCertManager
+		cancelDNS context.CancelFunc
 	)
 	switch cfg.Mode {
 	case "off", "":
@@ -111,17 +117,31 @@ func (s *Server) applyHTTPS(cfg HTTPSConfig) error {
 		if s.cfg.DBPath != "" {
 			dir = filepath.Join(filepath.Dir(s.cfg.DBPath), "certs")
 		}
+		if s.sslMode(context.Background()) == sslDNS {
+			dm := newDNSCertManager(s, cfg.Host, dir, s.cloudflareToken(context.Background()))
+			dctx, dcancel := context.WithCancel(context.Background())
+			cancelDNS = dcancel
+			go dm.run(dctx)
+			tlsConf = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: dm.getCertificate}
+			dnsMgr = dm
+			break
+		}
 		m := &autocert.Manager{Prompt: autocert.AcceptTOS, HostPolicy: autocert.HostWhitelist(cfg.Host), Cache: autocert.DirCache(dir)}
 		tlsConf = m.TLSConfig()
 		tlsConf.MinVersion = tls.VersionTLS12
 	default:
 		return errors.New("unknown HTTPS mode")
 	}
+	if st.cancelDNS != nil {
+		st.cancelDNS()
+		st.cancelDNS, st.dns = nil, nil
+	}
 	if st.srv != nil {
 		st.srv.Close()
 		st.srv, st.ln = nil, nil
 	}
 	st.cfg, st.leaf, st.err = cfg, leaf, ""
+	st.cancelDNS, st.dns = cancelDNS, dnsMgr
 	if tlsConf == nil {
 		return nil
 	}
@@ -173,6 +193,16 @@ func (s *Server) httpsView(ctx context.Context) httpsView {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	v := httpsView{Mode: saved.Mode, Host: saved.Host, Addr: saved.Addr, HSTS: saved.HSTS, Listening: st.ln != nil, Error: st.err, CertSet: saved.CertPEM != ""}
+	if st.dns != nil {
+		v.Challenge = "dns"
+		l, e := st.dns.status()
+		if l != nil {
+			st.leaf = l
+		}
+		if e != "" && v.Error == "" {
+			v.Error = "Certificate not issued yet: " + e
+		}
+	}
 	if st.leaf != nil {
 		v.Subject = st.leaf.Subject.CommonName
 		exp := st.leaf.NotAfter

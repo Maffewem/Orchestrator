@@ -5,7 +5,8 @@ import { api, ApiError, type ClusterPolicy, type ClusterView, type ReplicaInfo }
 import { confirmDialog, confirmWithOption } from "../components/dialogs";
 import { useCrumbs } from "../components/Layout";
 import { Badge, Card, CardHeader, Empty, ErrorNote, Loading, PageHeader, Toggle, inputClass } from "../components/ui";
-import { ago, usePoll } from "../lib";
+import { ago, bytes, usePoll } from "../lib";
+import FailoverHistory from "../components/FailoverHistory";
 import ServerHA from "../components/ServerHA";
 
 export function ReplicaBadge({ st, onRetry }: { st: ReplicaInfo; onRetry?: () => void }) {
@@ -110,6 +111,41 @@ export default function ClusterPage() {
               Nothing moves while every device is offline (the server may be the one cut off), while a device is in maintenance mode, or within the wait after the server restarts. When the original device comes back, the stale copy there is stopped so two instances never run at once.
             </p>
           </Card>
+          {data.capacity.enabled && (
+            <Card className="mb-6">
+              <CardHeader
+                title="Capacity"
+                subtitle="Whether the other devices have room to take over if one is lost, using what each worker uses now."
+                action={<Badge tone={data.capacity.survives_one ? "ok" : "warn"}>{data.capacity.survives_one ? "Can survive losing any one device" : "Some device could not be lost safely"}</Badge>}
+              />
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-neutral-500">
+                      <th className="px-4 py-2 font-medium">Device</th>
+                      <th className="px-4 py-2 font-medium">Free</th>
+                      <th className="px-4 py-2 font-medium">Failover workers</th>
+                      <th className="px-4 py-2 font-medium">If this device is lost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.capacity.devices.map((d) => (
+                      <tr key={d.device_id} className="border-t border-neutral-100 align-top">
+                        <td className="px-4 py-2 font-medium">{d.device}{!d.online && <span className="ml-2"><Badge tone="bad">offline</Badge></span>}</td>
+                        <td className="px-4 py-2 text-neutral-600">{d.cores ? `${d.cores} cores, ` : ""}{d.mem_free ? `${bytes(d.mem_free)} RAM, ` : ""}{d.disk_free ? `${bytes(d.disk_free)} disk` : "not reported"}</td>
+                        <td className="px-4 py-2">{d.workers}</td>
+                        <td className="px-4 py-2">
+                          {d.workers === 0 ? <span className="text-neutral-500">nothing to move</span> : d.can_lose ? <Badge tone="ok">everything fits elsewhere</Badge> : <Badge tone="warn">{(d.stranded ?? []).join(", ")} would not fit</Badge>}
+                          {(d.reasons ?? []).map((r) => <p key={r} className="mt-1 text-xs text-neutral-500">{r}</p>)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="px-4 py-3 text-xs text-neutral-500">Estimates come from each worker's latest memory, CPU and volume size, and a target is treated as full at 90%. A worker with no usage reading yet is not counted, so the answer is only as good as the data.</p>
+            </Card>
+          )}
           {data.workers.length === 0 ? (
             <Empty icon={<Network className="size-8" />} title="No workers yet">Create a project on <Link to="/projects" className="text-primary hover:underline">Projects</Link> first.</Empty>
           ) : (
@@ -153,6 +189,9 @@ export default function ClusterPage() {
                           );
                         })()}
                         <span className="cursor-help text-neutral-400" title={`Copies: each device added with + runs an extra, independent copy of ${w.name}, deployed together with the main one. Nothing is synced or moved, so the app must cope with several copies.`}>ⓘ</span>
+                        {p.failover && (w.targets ?? []).filter((t) => !t.fits).map((t) => (
+                          <p key={t.device_id} className="basis-full text-xs text-amber-700">Capacity warning: {t.device} {(t.problems ?? []).join(", ")}</p>
+                        ))}
                         {w.last_failover && (
                           <p className="basis-full text-xs text-neutral-500">
                             Failed over from {w.last_failover.from_name} to {w.last_failover.to_name} {ago(w.last_failover.at)}
@@ -179,7 +218,11 @@ export default function ClusterPage() {
                             ))}
                           </div>
                         </div>
-                        <label className="flex items-center gap-2"><input type="checkbox" checked={p.fail_back} onChange={(e) => setPolicy(w.project_id, p, { fail_back: e.target.checked })} /> Move back automatically once the original device has been online for the wait above</label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="flex items-center gap-2"><input type="checkbox" checked={p.fail_back} onChange={(e) => setPolicy(w.project_id, p, { fail_back: e.target.checked })} /> Move back to {w.device || "the original device"} automatically once it has stayed online for</label>
+                          <input type="number" min={60} max={86400} disabled={!p.fail_back} defaultValue={p.fail_back_seconds || 300} key={`${w.project_id}-${p.fail_back_seconds}`} onBlur={(e) => { const v = Number(e.target.value); if (v !== (p.fail_back_seconds || 300)) setPolicy(w.project_id, p, { fail_back_seconds: v }); }} className={inputClass + " w-24"} />
+                          seconds
+                        </div>
                         <label className="flex items-center gap-2"><input type="checkbox" checked={p.start_empty} onChange={(e) => setPolicy(w.project_id, p, { start_empty: e.target.checked })} /> Start with no data if the server has no backup of it (only for workers that keep nothing worth saving)</label>
                       </div>
                     )}
@@ -188,6 +231,10 @@ export default function ClusterPage() {
               })}
             </div>
           )}
+          <Card className="mt-6">
+            <CardHeader title="Failover history" subtitle="Each automatic failover and fail back: what failed, where it went and how long the move took." />
+            <FailoverHistory />
+          </Card>
         </>
       )}
     </>

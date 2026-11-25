@@ -64,6 +64,84 @@ func TestClusterFailover(t *testing.T) {
 	if code := h.do("GET", "/api/cluster", adminToken, nil, &view); code != http.StatusOK || len(view.Workers) != 1 || view.Workers[0].Failover == nil {
 		t.Fatalf("cluster view: %d %+v", code, view)
 	}
+	var hist []failoverEntry
+	if code := h.do("GET", "/api/cluster/history?project="+p.ID, adminToken, nil, &hist); code != http.StatusOK || len(hist) == 0 {
+		t.Fatalf("history: %d %+v", code, hist)
+	}
+	last := hist[0]
+	if last.Kind != kindFailover || last.FromID != oldReg.DeviceID || last.ToID != newReg.DeviceID || last.Worker != "web" {
+		t.Fatalf("history entry: %+v", last)
+	}
+}
+
+func TestFailoverHistoryDedupesRepeatedFailures(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	e := failoverEntry{ProjectID: "p1", Worker: "web", Kind: kindFailover, FromID: "d1", Status: histFailed, Error: "No other online device can take it over."}
+	a := h.srv.addHistory(ctx, e)
+	b := h.srv.addHistory(ctx, e)
+	if a != b || len(h.srv.loadHistory(ctx)) != 1 {
+		t.Fatalf("repeated identical failure stored twice: %+v", h.srv.loadHistory(ctx))
+	}
+	e.Error = "different"
+	h.srv.addHistory(ctx, e)
+	if len(h.srv.loadHistory(ctx)) != 2 {
+		t.Fatal("a different failure should be stored")
+	}
+	// A running entry with no matching migration is closed once it is stale.
+	id := h.srv.addHistory(ctx, failoverEntry{ProjectID: "p2", Worker: "api", Kind: kindFailback, Status: histRunning, At: time.Now().Add(-2 * time.Hour)})
+	h.srv.settleHistory(ctx)
+	for _, x := range h.srv.loadHistory(ctx) {
+		if x.ID == id && (x.Status != histFailed || x.Finished == nil) {
+			t.Fatalf("stale entry not closed: %+v", x)
+		}
+	}
+}
+
+func TestFitProblemsAndCapacity(t *testing.T) {
+	gb := uint64(1 << 30)
+	mk := func(cpus int, memTotal, memUsed uint64) *store.Device {
+		return &store.Device{Host: api.HostInfo{CPUs: cpus}, Metrics: api.Metrics{MemoryTotal: memTotal, MemoryUsed: memUsed, DiskTotal: 100 * gb, DiskUsed: 10 * gb}}
+	}
+	need := workerNeed{Cores: 1, Mem: 2 * gb, Disk: int64(5 * gb)}
+	if p := fitProblems(need, mk(4, 8*gb, 1*gb), workerNeed{}); len(p) != 0 {
+		t.Fatalf("roomy device should fit: %v", p)
+	}
+	if p := fitProblems(need, mk(4, 2*gb, 1*gb), workerNeed{}); len(p) != 1 {
+		t.Fatalf("small memory should be the only problem: %v", p)
+	}
+	// A device already promised to another worker has less room.
+	if p := fitProblems(need, mk(4, 8*gb, 1*gb), workerNeed{Mem: 5 * gb}); len(p) != 1 {
+		t.Fatalf("reserved memory ignored: %v", p)
+	}
+	// Unknown needs and unreported devices never block.
+	if p := fitProblems(workerNeed{}, mk(0, 0, 0), workerNeed{}); len(p) != 0 {
+		t.Fatalf("unknown need blocked: %v", p)
+	}
+}
+
+func TestCapacityReportStrandsWorkerWhenNoOtherDevice(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	caps := api.HostInfo{Capabilities: []string{api.CapBackup, api.CapPreview}}
+	a, b := h.register("pi-a"), h.register("pi-b")
+	h.do("POST", "/api/agent/heartbeat", a.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	h.do("POST", "/api/agent/heartbeat", b.AgentToken, api.HeartbeatRequest{Host: caps}, nil)
+	var p store.Project
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": a.DeviceID,
+		"source": map[string]any{"type": "image", "image": "nginx"}}, &p)
+	h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Failover: true, StartEmpty: true, Allowed: []string{a.DeviceID}}, nil)
+	var view clusterView
+	h.do("GET", "/api/cluster", adminToken, nil, &view)
+	if !view.Capacity.Enabled || view.Capacity.SurvivesOne {
+		t.Fatalf("a worker allowed nowhere else should not survive losing its device: %+v", view.Capacity)
+	}
+	h.do("PUT", "/api/projects/"+p.ID+"/cluster", adminToken, ClusterPolicy{Failover: true, StartEmpty: true}, nil)
+	h.do("GET", "/api/cluster", adminToken, nil, &view)
+	if !view.Capacity.SurvivesOne {
+		t.Fatalf("with a second device it should survive: %+v", view.Capacity)
+	}
+	_ = ctx
 }
 
 func TestClusterNoTargetAndAllOffline(t *testing.T) {

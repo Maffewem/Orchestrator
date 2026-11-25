@@ -98,10 +98,10 @@ type Server struct {
 	haRole        atomic.Pointer[string] // see ha.go
 	haEpoch       atomic.Int64
 	haPeer        atomic.Pointer[string] // the paired standby's address, on an active server
-	stale         staleServers          // stale servers agents reported, see fence.go
-	haLastPull    atomic.Int64  // unix time the standby last fetched a copy
-	haTick        time.Duration // test hook; 15s when zero
-	haRestartIn   time.Duration // test hook: overrides the delay before an HA restart
+	stale         staleServers           // stale servers agents reported, see fence.go
+	haLastPull    atomic.Int64           // unix time the standby last fetched a copy
+	haTick        time.Duration          // test hook; 15s when zero
+	haRestartIn   time.Duration          // test hook: overrides the delay before an HA restart
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState

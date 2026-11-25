@@ -47,6 +47,8 @@ type state struct {
 	// Servers are the addresses the server announced; Found is the last one discovery found.
 	Servers []string `json:"servers,omitempty"`
 	Found   string   `json:"found,omitempty"`
+	// Epoch is the highest server epoch seen (see fence.go); a server below it is ignored.
+	Epoch int `json:"epoch,omitempty"`
 }
 
 type Agent struct {
@@ -55,9 +57,11 @@ type Agent struct {
 	servers []string // every known control-plane URL; cfg.Server is the one in use
 	// configured are the URLs from ORCH_SERVER; servers adds announced and discovered ones.
 	configured   []string
-	moved        string    // address a server in standby sent us to (a server move)
-	moveHold     time.Time // do not follow a redirect again before this time
-	fails        int       // heartbeats failed in a row
+	epochMu      sync.Mutex
+	stale        map[string]api.StaleServer // stale servers seen lately, by address
+	moved        string                     // address a server in standby sent us to (a server move)
+	moveHold     time.Time                  // do not follow a redirect again before this time
+	fails        int                        // heartbeats failed in a row
 	lastDiscover time.Time
 	scanHosts    func() []string // hosts discovery probes; nil means the local networks
 
@@ -150,7 +154,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			// The device was removed from the server; join again if we can.
 			a.log.Warn("agent token rejected, re-registering")
 			// Drop the saved identity too, or ensureRegistered would load the rejected token again.
-			a.state = state{}
+			a.state = state{Epoch: a.epoch()} // the epoch outlives the identity
 			os.Remove(a.cfg.StatePath)
 			if err := a.ensureRegistered(ctx); err != nil {
 				return err
@@ -237,7 +241,7 @@ func (a *Agent) ensureRegistered(ctx context.Context) error {
 		case <-time.After(5 * time.Second):
 		}
 	}
-	a.state = state{Server: a.server(), DeviceID: res.DeviceID, AgentToken: res.AgentToken, ServerKey: res.ServerKey}
+	a.state = state{Server: a.server(), DeviceID: res.DeviceID, AgentToken: res.AgentToken, ServerKey: res.ServerKey, Epoch: a.epoch()}
 	if err := os.MkdirAll(filepath.Dir(a.cfg.StatePath), 0o700); err != nil {
 		return err
 	}
@@ -258,7 +262,7 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	if err != nil {
 		containers = nil
 	}
-	req := api.HeartbeatRequest{Host: host, Metrics: a.metrics(), Containers: containers, Stats: a.takeStats()}
+	req := api.HeartbeatRequest{Host: host, Metrics: a.metrics(), Containers: containers, Stats: a.takeStats(), Epoch: a.epoch(), StaleServers: a.staleServers()}
 	var res api.HeartbeatResponse
 	if err := a.post(ctx, "/api/agent/heartbeat", a.state.AgentToken, req, &res); err != nil {
 		return err
@@ -443,6 +447,9 @@ func (a *Agent) post(ctx context.Context, path, token string, body, out any) err
 		return err
 	}
 	defer resp.Body.Close()
+	if err := a.fence(resp); err != nil {
+		return err
+	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return errUnauthorized
 	}

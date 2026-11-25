@@ -354,7 +354,7 @@ func (s *Server) handleStartMove(w http.ResponseWriter, r *http.Request) {
 
 	m := &serverMove{
 		Phase: movePreparing, DeviceID: dev.ID, DeviceName: dev.Name, NewURL: newURL, OldURL: oldURL, Port: req.Port,
-		Token: randHex(24), Password: randHex(24), PrevURLs: s.agentURLs(ctx), StartedAt: time.Now().UTC(),
+		Token: randHex(24), Password: randHex(24), PrevURLs: s.manualAgentURLs(ctx), StartedAt: time.Now().UTC(),
 		Steps: []string{"Pausing changes on this server and copying its data"},
 	}
 	s.saveMove(ctx, m)

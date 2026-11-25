@@ -98,7 +98,9 @@ func (a *Agent) learn(res api.HeartbeatResponse) {
 }
 
 func (a *Agent) saveState() {
+	a.epochMu.Lock()
 	b, _ := json.Marshal(a.state)
+	a.epochMu.Unlock()
 	if err := os.WriteFile(a.cfg.StatePath, b, 0o600); err != nil {
 		a.log.Warn("save state", "err", err)
 	}

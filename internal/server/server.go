@@ -97,6 +97,8 @@ type Server struct {
 	standbyTo     atomic.Pointer[string]
 	haRole        atomic.Pointer[string] // see ha.go
 	haEpoch       atomic.Int64
+	haPeer        atomic.Pointer[string] // the paired standby's address, on an active server
+	stale         staleServers          // stale servers agents reported, see fence.go
 	haLastPull    atomic.Int64  // unix time the standby last fetched a copy
 	haTick        time.Duration // test hook; 15s when zero
 	haRestartIn   time.Duration // test hook: overrides the delay before an HA restart
@@ -397,6 +399,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/server-move/peer", s.handlePeer)
 	mux.HandleFunc("GET /api/server-ha/snapshot", s.handleHASnapshot)
 	mux.HandleFunc("POST /api/server-ha/fence", s.handleHAFence)
+	mux.HandleFunc("POST /api/server-ha/standby-left", s.handleHAStandbyLeft)
 	admin("GET /api/server-ha", s.handleHAStatus)
 	admin("POST /api/server-ha/pair", s.handleHAPair)
 	admin("POST /api/server-ha/join", s.handleHAJoin)

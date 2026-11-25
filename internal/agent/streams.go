@@ -115,6 +115,9 @@ func (a *Agent) get(ctx context.Context, path string, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if err := a.fence(resp); err != nil {
+		return err
+	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return errUnauthorized
 	}

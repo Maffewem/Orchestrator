@@ -539,6 +539,8 @@ export interface DomainsView {
 export interface ConnAddress {
   url: string;
   listed: boolean;
+  /** The paired standby's address: announced automatically, not editable in the list. */
+  auto?: boolean;
   kind: "ip" | "name" | "loopback";
   assigned?: "dhcp" | "static" | "";
   devices: string[];
@@ -565,6 +567,8 @@ export interface Settings {
   base_domain: string;
   /** Addresses agents are told to know this server by, most preferred first. */
   agent_urls: string[] | null;
+  /** Addresses added automatically (the paired standby server). */
+  agent_urls_auto?: string[] | null;
   backup_password_set: boolean;
   cloudflare: { connected: boolean; proxied: boolean; deploy: { configured: boolean; account_id: string; own_token: boolean } };
   ssl_mode: "http" | "dns";

@@ -169,6 +169,8 @@ func (s *Server) noteNetworkChanges(ctx context.Context, d *store.Device, now ap
 type ConnAddress struct {
 	URL    string `json:"url"`
 	Listed bool   `json:"listed"` // in Settings, so announced to every agent
+	// Auto marks the paired standby's address, which is announced automatically and not edited here.
+	Auto bool `json:"auto,omitempty"`
 	// Kind is ip, name or loopback.
 	Kind string `json:"kind"`
 	// Assigned is dhcp or static when the address is an IP of the device hosting the server.
@@ -246,8 +248,11 @@ func (s *Server) connectivity(ctx context.Context) (ConnView, error) {
 		byURL[raw] = a
 		return a
 	}
+	auto := s.autoAgentURLs(ctx)
 	for _, u := range s.agentURLs(ctx) {
-		add(u).Listed = true
+		a := add(u)
+		a.Listed = true
+		a.Auto = slices.Contains(auto, u)
 	}
 	port := ""
 	var old, found []string

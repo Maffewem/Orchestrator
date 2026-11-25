@@ -136,6 +136,7 @@ const (
 	CapDedicatedRelease = "dedicated-release"  // stopping or removing a worker also removes the device's access address
 	CapDedicatedVLAN    = "dedicated-vlan"     // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
 	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
+	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
 )
 
@@ -229,6 +230,18 @@ type HeartbeatRequest struct {
 	Containers []Container `json:"containers"`
 	// Stats is set when the agent has taken a new per-container sample since the last heartbeat.
 	Stats *StatsReport `json:"stats,omitempty"`
+	// Epoch is the highest server epoch the agent has seen (0 when none, or an older agent).
+	Epoch int `json:"epoch,omitempty"`
+	// StaleServers are servers the agent has refused lately because their epoch was lower.
+	StaleServers []StaleServer `json:"stale_servers,omitempty"`
+}
+
+// StaleServer is a server the agent ignored because it reported an older epoch than the agent
+// had already seen: typically an old active server that came back after a failover.
+type StaleServer struct {
+	URL   string    `json:"url"`
+	Epoch int       `json:"epoch"`
+	Seen  time.Time `json:"seen"`
 }
 
 // StatsReport is one per-container resource sample from a device. Counters (network, block

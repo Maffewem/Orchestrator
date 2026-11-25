@@ -36,6 +36,9 @@ const (
 
 	haTokenHeader = "X-HA-Token"
 	haEpochHeader = "X-Orch-Epoch"
+	// haStandbyHeader carries the standby's own address on its snapshot pulls, so the active
+	// server knows it and can hand it to agents as a fallback.
+	haStandbyHeader = "X-Orch-Standby-URL"
 )
 
 // haState is this server's place in a pair.
@@ -81,6 +84,11 @@ func (s *Server) saveHA(ctx context.Context, st haState) {
 	r := st.Role
 	s.haRole.Store(&r)
 	s.haEpoch.Store(int64(st.Epoch))
+	peer := ""
+	if st.Role == haRoleActive {
+		peer = st.PeerURL
+	}
+	s.haPeer.Store(&peer)
 }
 
 // haStandby reports whether this server is a standby: read-only, with no background work.
@@ -125,7 +133,16 @@ func (s *Server) peerAllowed(r *http.Request, st haState) bool {
 // haMiddleware makes a standby read-only and stamps the epoch on every response.
 func (s *Server) haMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(haEpochHeader, strconv.FormatInt(s.haEpoch.Load(), 10))
+		own := s.haEpoch.Load()
+		w.Header().Set(haEpochHeader, strconv.FormatInt(own, 10))
+		// An agent that has already seen a newer epoch is talking to a server that was replaced.
+		// Refuse it work and data; the agent also ignores such a server, this stops it earlier.
+		if strings.HasPrefix(r.URL.Path, "/api/agent/") && r.URL.Path != "/api/agent/identify" {
+			if e, _ := strconv.ParseInt(r.Header.Get(haEpochHeader), 10, 64); e > own {
+				writeError(w, http.StatusConflict, "this server has been replaced by one with a newer epoch; use the active server")
+				return
+			}
+		}
 		if s.haStandby() && strings.HasPrefix(r.URL.Path, "/api/") {
 			p := r.URL.Path
 			switch {
@@ -151,6 +168,13 @@ func (s *Server) handleHASnapshot(w http.ResponseWriter, r *http.Request) {
 	if !s.peerAllowed(r, st) || (st.Role != haRoleActive && st.PeerURL == "") {
 		writeError(w, http.StatusForbidden, "not allowed")
 		return
+	}
+	if raw := r.Header.Get(haStandbyHeader); raw != "" && st.Role == haRoleActive {
+		if u, err := cleanBaseURL(raw); err == nil && u != st.PeerURL {
+			st.PeerURL = u
+			s.saveHA(ctx, st)
+			s.event(ctx, "", "info", "ha.standby_address", "The standby server is at "+u+"; agents now know it as a fallback address")
+		}
 	}
 	if s.cfg.DBPath == "" {
 		writeError(w, http.StatusConflict, "this server has no database file to copy")
@@ -239,6 +263,9 @@ func (s *Server) pullSnapshot(ctx context.Context, st *haState) error {
 		return err
 	}
 	req.Header.Set(haTokenHeader, st.Token)
+	if st.SelfURL != "" {
+		req.Header.Set(haStandbyHeader, st.SelfURL)
+	}
 	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
 	if err != nil {
 		return fmt.Errorf("the active server does not answer: %w", err)
@@ -323,6 +350,8 @@ func (s *Server) handleHAPair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st.Token = newToken()
+	st.PeerURL = "" // the old standby's token no longer works, so it is no longer a fallback
+	s.haLastPull.Store(0)
 	s.saveHA(ctx, st)
 	s.event(ctx, "", "info", "ha.pair", "A pairing token for a standby server was created")
 	writeJSON(w, http.StatusOK, s.haView(ctx))
@@ -358,7 +387,7 @@ func (s *Server) handleHAJoin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "enter the pairing token from the active server")
 		return
 	}
-	if cur := s.loadHA(ctx); cur.Role == haRoleActive && cur.Token != "" && cur.PeerURL == "" && s.haLastPull.Load() > 0 {
+	if cur := s.loadHA(ctx); cur.Role == haRoleActive && cur.Token != "" && (cur.PeerURL != "" || s.haLastPull.Load() > 0) {
 		writeError(w, http.StatusConflict, "this server is already the active side of a pair")
 		return
 	}
@@ -382,6 +411,13 @@ func (s *Server) handleHALeave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	os.Remove(s.standbyPath())
+	// Tell the active server so it stops handing this address to agents. Best effort: if it is
+	// unreachable the address stays until the active server creates a new pairing token.
+	if st.PeerURL != "" && st.Token != "" {
+		nctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		s.haPost(nctx, st.PeerURL, st.Token, "/api/server-ha/standby-left", map[string]string{})
+		cancel()
+	}
 	s.saveHA(ctx, haState{Role: haRoleActive, Epoch: st.Epoch})
 	s.event(ctx, "", "warning", "ha.leave", "This server left its pair and is a standalone server again; restarting")
 	s.restartSoon(500 * time.Millisecond)
@@ -455,6 +491,26 @@ func (s *Server) handleHAPromote(w http.ResponseWriter, r *http.Request) {
 type haFenceRequest struct {
 	Epoch  int    `json:"epoch"`
 	NewURL string `json:"new_url"`
+	// YourURL is the address the new server reaches the old one at, which becomes the old
+	// server's own address once it is a standby.
+	YourURL string `json:"your_url,omitempty"`
+}
+
+// handleHAStandbyLeft is the standby telling the active server it has unpaired.
+func (s *Server) handleHAStandbyLeft(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	st := s.loadHA(ctx)
+	if st.Role != haRoleActive || !s.peerAllowed(r, st) {
+		writeError(w, http.StatusForbidden, "not allowed")
+		return
+	}
+	if st.PeerURL != "" {
+		st.PeerURL = ""
+		s.haLastPull.Store(0)
+		s.saveHA(ctx, st)
+		s.event(ctx, "", "info", "ha.standby_left", "The standby server left; its address was removed from the list agents use")
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) haPost(ctx context.Context, base, token, path string, body any) error {
@@ -477,7 +533,7 @@ func (s *Server) haPost(ctx context.Context, base, token, path string, body any)
 }
 
 func (s *Server) askStepDown(ctx context.Context, st haState) error {
-	return s.haPost(ctx, st.PeerURL, st.Token, "/api/server-ha/fence", haFenceRequest{Epoch: st.Epoch + 1, NewURL: st.SelfURL})
+	return s.haPost(ctx, st.PeerURL, st.Token, "/api/server-ha/fence", haFenceRequest{Epoch: st.Epoch + 1, NewURL: st.SelfURL, YourURL: st.PeerURL})
 }
 
 // handleHAFence is the old active server being told to step down because a higher epoch took over.
@@ -495,7 +551,10 @@ func (s *Server) handleHAFence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "that epoch is not newer than this server's")
 		return
 	}
-	next := haState{Role: haRoleStandby, Epoch: req.Epoch, Token: st.Token, PeerURL: req.NewURL, SelfURL: st.PeerURL}
+	next := haState{Role: haRoleStandby, Epoch: req.Epoch, Token: st.Token, PeerURL: req.NewURL, SelfURL: req.YourURL}
+	if next.SelfURL == "" {
+		next.SelfURL = st.SelfURL
+	}
 	if next.PeerURL == "" {
 		writeError(w, http.StatusBadRequest, "the new server did not say where it can be reached")
 		return
@@ -515,7 +574,7 @@ func (s *Server) haFenceOnce(ctx context.Context) {
 	if st.SelfURL == "" {
 		return // the old server can't be told where to find this one
 	}
-	if err := s.haPost(ctx, st.Previous, st.Token, "/api/server-ha/fence", haFenceRequest{Epoch: st.Epoch, NewURL: st.SelfURL}); err != nil {
+	if err := s.haPost(ctx, st.Previous, st.Token, "/api/server-ha/fence", haFenceRequest{Epoch: st.Epoch, NewURL: st.SelfURL, YourURL: st.Previous}); err != nil {
 		return
 	}
 	st.Previous = ""

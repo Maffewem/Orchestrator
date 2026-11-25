@@ -65,6 +65,10 @@ func (a *Agent) selfUpdate(ctx context.Context) (msg string, restart bool, err e
 	if err != nil {
 		return "", false, err
 	}
+	if err := a.fence(resp); err != nil {
+		resp.Body.Close()
+		return "", false, err
+	}
 	err = json.NewDecoder(resp.Body).Decode(&info)
 	resp.Body.Close()
 	if err != nil || resp.StatusCode != http.StatusOK || info.SHA256 == "" {
@@ -108,6 +112,9 @@ func (a *Agent) download(ctx context.Context, path, dest, wantSum string) error 
 		return err
 	}
 	defer resp.Body.Close()
+	if err := a.fence(resp); err != nil {
+		return err
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed (HTTP %d)", resp.StatusCode)
 	}

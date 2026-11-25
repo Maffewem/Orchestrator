@@ -72,7 +72,9 @@ export function AgentAddresses({ urls, onSaved }: { urls: string[]; onSaved: () 
                 {a.devices.length ? `Used by ${a.devices.join(", ")}` : "Not in use"}
               </span>
               <span className="ml-auto flex items-center gap-2">
-                {a.listed ? (
+                {a.auto ? (
+                  <Badge tone="info">Standby server, added automatically</Badge>
+                ) : a.listed ? (
                   <>
                     <Badge tone="ok">Listed</Badge>
                     <Button size="sm" variant="ghost" aria-label={`Remove ${a.url}`} icon={<X className="size-3.5" />} onClick={() => save(urls.filter((u) => u !== a.url))} />

@@ -263,6 +263,9 @@ func (a *Agent) restoreBackup(ctx context.Context, containerID, backupID string)
 		return err
 	}
 	defer resp.Body.Close()
+	if err := a.fence(resp); err != nil {
+		return err
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("could not download the backup (HTTP %d)", resp.StatusCode)
 	}

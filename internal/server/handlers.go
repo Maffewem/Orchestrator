@@ -47,6 +47,9 @@ func (s *Server) view(d *store.Device) DeviceView {
 		v.NetworkNotice = &n
 		raise("warning", n.Message)
 	}
+	if st := s.staleFor(d.ID); len(st) > 0 {
+		raise("warning", staleIssue(st))
+	}
 	if d.Host.Docker == nil || d.Host.Docker.Error != "" {
 		raise("warning", "Docker engine is unreachable")
 	}
@@ -170,6 +173,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 
 	s.metrics.add(d.ID, req.Metrics)
 	s.ingestStats(ctx, d, req.Containers, req.Stats)
+	s.noteStale(ctx, d.Name, d.ID, req.StaleServers)
 
 	// A server in standby has handed over: it gives out no work, only the new address.
 	if to := s.standby(); to != "" {
@@ -655,7 +659,8 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"heartbeat_interval_seconds": int(s.cfg.HeartbeatInterval / time.Second),
 		"version":                    s.cfg.Version,
 		"base_domain":                s.baseDomain(r.Context()),
-		"agent_urls":                 s.agentURLs(r.Context()),
+		"agent_urls":                 s.manualAgentURLs(r.Context()),
+		"agent_urls_auto":            s.autoAgentURLs(r.Context()),
 		"backup_password_set":        s.backupPassword(r.Context()) != "",
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),

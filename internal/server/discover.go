@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
@@ -63,8 +64,28 @@ func (s *Server) handleIdentify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// agentURLs are the addresses agents should know this server by, in order of preference.
+// agentURLs are the addresses agents should know this server by, in order of preference: the
+// ones the admin listed, then the paired standby's address, so agents fall back to it on their
+// own and it needs no manual entry.
 func (s *Server) agentURLs(ctx context.Context) []string {
+	out := s.manualAgentURLs(ctx)
+	if p := s.haPeer.Load(); p != nil && *p != "" && !slices.Contains(out, *p) {
+		out = append(out, *p)
+	}
+	return out
+}
+
+// autoAgentURLs are the addresses added automatically, for the settings page to show.
+func (s *Server) autoAgentURLs(ctx context.Context) []string {
+	out := []string{}
+	if p := s.haPeer.Load(); p != nil && *p != "" && !slices.Contains(s.manualAgentURLs(ctx), *p) {
+		out = append(out, *p)
+	}
+	return out
+}
+
+// manualAgentURLs is the list the admin edits in Settings > Server addresses.
+func (s *Server) manualAgentURLs(ctx context.Context) []string {
 	v, _ := s.store.GetSetting(ctx, settingAgentURLs)
 	var out []string
 	for _, u := range strings.Split(v, "\n") {

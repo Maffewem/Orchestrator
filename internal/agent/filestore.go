@@ -31,6 +31,9 @@ func (a *Agent) storeServerBackup(ctx context.Context, name, dir, keep string) e
 		return err
 	}
 	defer resp.Body.Close()
+	if err := a.fence(resp); err != nil {
+		return err
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("could not download the backup (HTTP %d)", resp.StatusCode)
 	}

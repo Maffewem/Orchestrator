@@ -4,7 +4,7 @@ import { Button, ErrorNote, Field, inputClass } from "./ui";
 
 const modes = [
   ["off", "None, use my own reverse proxy or tunnel", "Keep serving plain HTTP. Use this behind Cloudflare Tunnel, Caddy, Nginx or Traefik."],
-  ["auto", "Automatic certificate (Let's Encrypt)", "Orchestrator gets and renews a certificate for the hostname below. Port 443 on the internet must reach the HTTPS port; no other port is needed."],
+  ["auto", "Automatic certificate (Let's Encrypt)", "Orchestrator gets and renews a certificate for the hostname below. By default Let's Encrypt must reach port 443 from the internet, which a LAN-only name cannot allow. To use a LAN-only name, connect Cloudflare and choose the Cloudflare DNS challenge under SSL below: then no inbound access is needed."],
   ["upload", "Upload a certificate", "For a private CA, a Cloudflare Origin certificate or an internal hostname."],
 ] as const;
 
@@ -37,6 +37,7 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
   return (
     <div className="space-y-4 p-5">
       {value.error && <ErrorNote>{value.error}</ErrorNote>}
+      {value.challenge === "dns" && <p className="text-sm text-neutral-500">Using the Cloudflare DNS challenge (works for LAN-only names).</p>}
       {value.listening && value.expires && (
         <p className="text-sm text-neutral-500">
           Certificate for <b>{value.subject}</b> expires {new Date(value.expires).toLocaleDateString()}.

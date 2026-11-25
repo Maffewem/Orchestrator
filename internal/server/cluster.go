@@ -48,6 +48,9 @@ type ClusterPolicy struct {
 	Allowed []string `json:"allowed,omitempty"`
 	// FailBack moves the worker back to its home device once that has been online for the grace period.
 	FailBack bool `json:"fail_back"`
+	// FailBackSeconds is how long the home device must stay continuously online before the worker
+	// moves back (a stability delay so a flapping device does not make it bounce). Default 300.
+	FailBackSeconds int `json:"fail_back_seconds,omitempty"`
 	// Replicas are extra devices that run their own independent copy of the worker, deployed
 	// together with the main one. Nothing is synced or moved: the app must cope with several copies.
 	Replicas []string `json:"replicas,omitempty"`
@@ -117,18 +120,14 @@ func (s *Server) saveFailoverRecord(ctx context.Context, project string, r *fail
 	}
 }
 
-// pickFailoverTarget chooses the online device a worker should move to: allowed by the policy,
-// not in maintenance, able to run it, and the least loaded by number of workers.
-func (s *Server) pickFailoverTarget(ctx context.Context, p *store.Project, pol ClusterPolicy, devices []*store.Device, projects []*store.Project) *store.Device {
+// failoverCandidates lists the online devices a worker may move to: allowed by the policy, not in
+// maintenance, able to run it, and with its published ports free.
+func (s *Server) failoverCandidates(p *store.Project, pol ClusterPolicy, devices []*store.Device) []*store.Device {
 	allowed := map[string]bool{}
 	for _, id := range pol.Allowed {
 		allowed[id] = true
 	}
-	count := map[string]int{}
-	for _, q := range projects {
-		count[q.DeviceID]++
-	}
-	var best *store.Device
+	var out []*store.Device
 	for _, d := range devices {
 		switch {
 		case d.ID == p.DeviceID, d.Offline, d.Maintenance:
@@ -144,11 +143,43 @@ func (s *Server) pickFailoverTarget(ctx context.Context, p *store.Project, pol C
 		case len(portConflictsOn(p, d)) > 0:
 			continue // its published ports are taken on that device
 		}
-		if best == nil || count[d.ID] < count[best.ID] || (count[d.ID] == count[best.ID] && d.Name < best.Name) {
+		out = append(out, d)
+	}
+	return out
+}
+
+// pickFailoverTarget chooses the device a worker should move to: among the candidates, one with
+// enough room for it (see the capacity check) and the fewest workers. When none has room, the
+// emptiest candidate is still chosen, and warnings say what is short, so the worker is not left down.
+func (s *Server) pickFailoverTarget(ctx context.Context, p *store.Project, pol ClusterPolicy, src *store.Device, devices []*store.Device, projects []*store.Project) (*store.Device, []string) {
+	count := map[string]int{}
+	for _, q := range projects {
+		count[q.DeviceID]++
+	}
+	need := s.estimateNeed(ctx, p, src)
+	var best, bestAny *store.Device
+	for _, d := range s.failoverCandidates(p, pol, devices) {
+		less := func(b *store.Device) bool {
+			return b == nil || count[d.ID] < count[b.ID] || (count[d.ID] == count[b.ID] && d.Name < b.Name)
+		}
+		if less(bestAny) {
+			bestAny = d
+		}
+		if len(fitProblems(need, d, workerNeed{})) == 0 && less(best) {
 			best = d
 		}
 	}
-	return best
+	if best != nil {
+		return best, nil
+	}
+	if bestAny == nil {
+		return nil, nil
+	}
+	var warn []string
+	for _, pr := range fitProblems(need, bestAny, workerNeed{}) {
+		warn = append(warn, bestAny.Name+" "+pr)
+	}
+	return bestAny, warn
 }
 
 // clusterSweep runs on every server tick: it fails workers over from devices that stayed offline,
@@ -156,6 +187,7 @@ func (s *Server) pickFailoverTarget(ctx context.Context, p *store.Project, pol C
 func (s *Server) clusterSweep(ctx context.Context) {
 	cfg := s.clusterConfig(ctx)
 	cs := &s.cluster
+	s.settleHistory(ctx)
 	cs.mu.Lock()
 	if cs.started.IsZero() {
 		cs.started = time.Now()
@@ -230,11 +262,17 @@ func (s *Server) tryFailover(ctx context.Context, p *store.Project, pol ClusterP
 	if v := s.migrationView(p.ID); v != nil && v.Status == migRunning {
 		return
 	}
-	dst := s.pickFailoverTarget(ctx, p, pol, devices, projects)
+	offline := time.Since(src.LastSeen).Round(time.Second)
+	entry := failoverEntry{ProjectID: p.ID, Worker: p.Name, Kind: kindFailover, FromID: src.ID, FromName: src.Name,
+		Reason: fmt.Sprintf("%s offline for %s", src.Name, offline), OfflineSeconds: int(offline / time.Second), Status: histFailed}
+	dst, warn := s.pickFailoverTarget(ctx, p, pol, src, devices, projects)
 	if dst == nil {
+		entry.Error = "No other online device can take it over."
+		s.addHistory(ctx, entry)
 		s.event(ctx, src.ID, "error", "cluster.failover", fmt.Sprintf("%s is offline but no other online device can take %s over", src.Name, p.Name))
 		return
 	}
+	entry.ToID, entry.ToName = dst.ID, dst.Name
 	hasBackup := false
 	if bs, err := s.store.ListBackups(ctx, src.ID); err == nil {
 		for _, b := range bs {
@@ -247,6 +285,8 @@ func (s *Server) tryFailover(ctx context.Context, p *store.Project, pol ClusterP
 	isStack := p.Source.Type == store.SourceCompose
 	withData := hasBackup && !isStack
 	if !withData && !isStack && !pol.StartEmpty {
+		entry.Error = "The server has no backup of it and starting empty is not allowed."
+		s.addHistory(ctx, entry)
 		s.event(ctx, src.ID, "error", "cluster.failover", fmt.Sprintf("%s is offline and %s has no backup on the server, so it was not moved. Allow starting empty in its cluster settings, or back it up", src.Name, p.Name))
 		return
 	}
@@ -255,8 +295,15 @@ func (s *Server) tryFailover(ctx context.Context, p *store.Project, pol ClusterP
 		f := false
 		req.WithData = &f
 	}
-	s.event(ctx, dst.ID, "warning", "cluster.failover", fmt.Sprintf("%s has been offline for %s: failing %s over to %s", src.Name, time.Since(src.LastSeen).Round(time.Second), p.Name, dst.Name))
+	entry.WithData, entry.Warnings, entry.Status, entry.Error = withData, warn, histRunning, ""
+	level, msg := "warning", fmt.Sprintf("%s has been offline for %s: failing %s over to %s", src.Name, offline, p.Name, dst.Name)
+	if len(warn) > 0 {
+		msg += ". Capacity warning: " + strings.Join(warn, "; ")
+	}
+	s.event(ctx, dst.ID, level, "cluster.failover", msg)
+	id := s.addHistory(ctx, entry)
 	if _, _, err := s.startMigration(ctx, p, req); err != nil {
+		s.failHistory(ctx, id, "Failed to start: "+err.Error())
 		s.event(ctx, dst.ID, "error", "cluster.failover", fmt.Sprintf("Failing %s over to %s failed to start: %s", p.Name, dst.Name, err))
 		return
 	}
@@ -284,27 +331,46 @@ func (s *Server) handleHomeReturn(ctx context.Context, p *store.Project, pol Clu
 	}
 	name := serviceOf(p)
 	if pol.FailBack {
+		delay := time.Duration(pol.FailBackSeconds) * time.Second
+		if pol.FailBackSeconds < minFailBackDelay {
+			delay = defaultFailBackDelay * time.Second
+		}
+		if grace < delay && cs.grace != 0 {
+			delay = grace // test hook
+		}
 		cs.mu.Lock()
 		since, ok := cs.back[p.ID]
 		if !ok {
 			cs.back[p.ID] = time.Now()
 			since = time.Now()
 		}
+		last, tried := cs.tried["back:"+p.ID]
 		cs.mu.Unlock()
-		if time.Since(since) < grace || p.DeviceID == home.ID {
+		if time.Since(since) < delay || p.DeviceID == home.ID {
 			return
+		}
+		if tried && time.Since(last) < failoverRetry && cs.grace == 0 {
+			return // a fail back that failed is not retried straight away
+		}
+		cs.mu.Lock()
+		cs.tried["back:"+p.ID] = time.Now()
+		cs.mu.Unlock()
+		cur, _ := s.store.GetDevice(ctx, p.DeviceID)
+		curName := rec.ToName
+		if cur != nil {
+			curName = cur.Name
 		}
 		t := true
-		s.event(ctx, home.ID, "info", "cluster.failback", fmt.Sprintf("%s is back: moving %s home from %s", home.Name, p.Name, rec.ToName))
+		entry := failoverEntry{ProjectID: p.ID, Worker: p.Name, Kind: kindFailback, FromID: p.DeviceID, FromName: curName, ToID: home.ID, ToName: home.Name,
+			Reason: fmt.Sprintf("%s has been back online for %s", home.Name, time.Since(since).Round(time.Second)), WithData: true, Status: histRunning}
+		id := s.addHistory(ctx, entry)
+		s.event(ctx, home.ID, "info", "cluster.failback", fmt.Sprintf("%s is back: moving %s home from %s", home.Name, p.Name, curName))
 		if _, _, err := s.startMigration(ctx, p, migrateRequest{DeviceID: home.ID, StopSource: true, WithData: &t}); err != nil {
+			s.failHistory(ctx, id, "Failed to start: "+err.Error())
 			s.event(ctx, home.ID, "error", "cluster.failback", fmt.Sprintf("Moving %s back to %s failed to start: %s", p.Name, home.Name, err))
-			cs.mu.Lock()
-			cs.back[p.ID] = time.Now() // retry after another grace period
-			cs.mu.Unlock()
-			return
 		}
-		rec.Home = true
-		s.saveFailoverRecord(ctx, p.ID, rec)
+		// The record is closed (Home) by the sweep once the worker really runs on its home
+		// device, so a move that fails is tried again later.
 		return
 	}
 	// No fail-back: the worker stays where it is, so the copy left on the home device is stale.
@@ -341,6 +407,10 @@ type clusterWorker struct {
 	Failover  *failoverRecord `json:"last_failover,omitempty"`
 	Replicas  []replicaState  `json:"replicas,omitempty"`
 	URL       string          `json:"url,omitempty"`
+	// Targets are the devices a failover could move it to, and whether it fits on each.
+	Targets []targetFit `json:"targets,omitempty"`
+	// Need is the estimated footprint used for that check.
+	Need *workerNeed `json:"need,omitempty"`
 }
 
 type replicaState struct {
@@ -392,8 +462,9 @@ func (s *Server) replicaStates(ctx context.Context, p *store.Project, pol Cluste
 }
 
 type clusterView struct {
-	Config  ClusterConfig   `json:"config"`
-	Workers []clusterWorker `json:"workers"`
+	Config   ClusterConfig   `json:"config"`
+	Workers  []clusterWorker `json:"workers"`
+	Capacity capacityView    `json:"capacity"`
 }
 
 func (s *Server) handleGetCluster(w http.ResponseWriter, r *http.Request) {
@@ -411,6 +482,8 @@ func (s *Server) handleGetCluster(w http.ResponseWriter, r *http.Request) {
 		byID[d.ID] = d
 	}
 	v := clusterView{Config: s.clusterConfig(ctx), Workers: []clusterWorker{}}
+	var targets map[string][]targetFit
+	v.Capacity, targets = s.capacityReport(ctx, devices, projects)
 	for _, p := range projects {
 		if p.Source.Type == store.SourceCloudflare {
 			continue
@@ -418,6 +491,12 @@ func (s *Server) handleGetCluster(w http.ResponseWriter, r *http.Request) {
 		pol := s.clusterPolicy(ctx, p.ID)
 		cw := clusterWorker{ProjectID: p.ID, Name: p.Name, DeviceID: p.DeviceID, Device: names[p.DeviceID], Policy: pol, Failover: s.failoverRecord(ctx, p.ID)}
 		cw.Replicas = s.replicaStates(ctx, p, pol)
+		cw.Targets = targets[p.ID]
+		if pol.Failover {
+			if n := s.estimateNeed(ctx, p, byID[p.DeviceID]); !n.unknown() {
+				cw.Need = &n
+			}
+		}
 		if d := byID[p.DeviceID]; d != nil {
 			cw.URL = copyURL(p, d, true)
 		}
@@ -454,6 +533,10 @@ func (s *Server) handleSetClusterPolicy(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	pol := req.ClusterPolicy
+	if pol.FailBackSeconds != 0 && (pol.FailBackSeconds < minFailBackDelay || pol.FailBackSeconds > 86400) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("the wait before moving back must be between %d seconds and 24 hours", minFailBackDelay))
+		return
+	}
 	for i, id := range pol.Allowed {
 		pol.Allowed[i] = strings.TrimSpace(id)
 		if _, err := s.store.GetDevice(r.Context(), pol.Allowed[i]); err != nil {

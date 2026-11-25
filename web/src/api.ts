@@ -1036,11 +1036,50 @@ export interface ClusterPolicy {
   failover: boolean;
   allowed?: string[];
   fail_back: boolean;
+  fail_back_seconds?: number;
   start_empty: boolean;
   replicas?: string[];
 }
+export interface FailoverEntry {
+  id: string;
+  project_id: string;
+  worker: string;
+  kind: "failover" | "failback";
+  at: string;
+  finished_at?: string;
+  from_id: string;
+  from_name: string;
+  to_id?: string;
+  to_name?: string;
+  status: "running" | "done" | "failed";
+  reason?: string;
+  error?: string;
+  offline_seconds?: number;
+  with_data: boolean;
+  duration_seconds?: number;
+  warnings?: string[];
+}
+export interface TargetFit {
+  device_id: string;
+  device: string;
+  fits: boolean;
+  problems?: string[];
+}
+export interface DeviceCapacity {
+  device_id: string;
+  device: string;
+  cores: number;
+  mem_free: number;
+  disk_free: number;
+  workers: number;
+  online: boolean;
+  can_lose: boolean;
+  stranded?: string[];
+  reasons?: string[];
+}
 export interface ClusterView {
   config: { enabled: boolean; grace_seconds: number };
+  capacity: { enabled: boolean; survives_one: boolean; devices: DeviceCapacity[] };
   workers: {
     project_id: string;
     name: string;
@@ -1049,6 +1088,8 @@ export interface ClusterView {
     policy: ClusterPolicy;
     replicas?: ReplicaInfo[];
     url?: string;
+    targets?: TargetFit[];
+    need?: { cores?: number; mem?: number; disk?: number };
     last_failover?: { from_name: string; to_name: string; at: string; with_data: boolean; home: boolean };
   }[];
 }
@@ -1077,6 +1118,7 @@ export const api = {
   haLeave: () => request<{ status: string }>("POST", "/api/server-ha/leave"),
   haPromote: (activeIsDown: boolean) => request<{ status: string }>("POST", "/api/server-ha/promote", { active_is_down: activeIsDown }),
   cluster: () => request<ClusterView>("GET", "/api/cluster"),
+  clusterHistory: (project?: string) => request<FailoverEntry[]>("GET", `/api/cluster/history${project ? `?project=${project}` : ""}`),
   setCluster: (c: { enabled: boolean; grace_seconds: number }) => request<ClusterView["config"]>("PUT", "/api/cluster", c),
   setClusterPolicy: (id: string, p: ClusterPolicy, o?: { confirm?: boolean; on_remove?: "keep" | "stop" | "remove"; delete_volumes?: boolean }) =>
     request<ClusterPolicy>("PUT", `/api/projects/${id}/cluster${o?.confirm ? "?confirm=1" : ""}`, { ...p, on_remove: o?.on_remove, delete_volumes: o?.delete_volumes }),

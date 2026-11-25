@@ -6,6 +6,7 @@ import { endpoints } from "../components/ContainerTable";
 import { DeploymentLine, Sparkline } from "../components/DeploymentLine";
 import { Badge, Card, Empty } from "../components/ui";
 import { ReplicaBadge } from "./Cluster";
+import FailoverHistory from "../components/FailoverHistory";
 import { PreviewStatus } from "../components/Previews";
 import { ago, bytes, cx, pct, usePoll, useTick } from "../lib";
 
@@ -157,6 +158,7 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
             {copies.last_failover && ` Last failed over from ${copies.last_failover.from_name} to ${copies.last_failover.to_name} ${ago(copies.last_failover.at)}.`}
           </span>
           <Link to="/cluster" className="ml-auto text-xs text-primary hover:underline">Manage on Cluster</Link>
+          <div className="basis-full"><FailoverHistory project={copies.project_id} limit={5} /></div>
         </div>
       )}
 

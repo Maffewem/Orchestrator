@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -169,6 +170,33 @@ func staticProblems(ip net.IP, l *lan) []string {
 // is exact; ping is the fallback and misses hosts that ignore it. checked is false when no
 // tool was available or none could run.
 func probeIP(ctx context.Context, iface string, ip net.IP) (inUse, checked bool) {
+	inUse, checked, _ = probeOnce(ctx, iface, ip)
+	return inUse, checked
+}
+
+// arpMACRe finds the hardware address in an arping reply line such as
+// "Unicast reply from 192.168.5.250 [DC:A6:32:01:02:03]  0.6ms".
+var arpMACRe = regexp.MustCompile(`\[([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})\]`)
+
+// probeHolder is probeIP that also says which hardware address answered when it is known, and
+// asks again for a few seconds before it believes an address is held: an address that was just
+// released (a worker moved away) can still be answered for from a neighbour's cache for a moment.
+func probeHolder(ctx context.Context, iface string, ip net.IP) (inUse, checked bool, mac string) {
+	for attempt := 0; attempt < 3; attempt++ {
+		inUse, checked, mac = probeOnce(ctx, iface, ip)
+		if !inUse || !checked {
+			return inUse, checked, ""
+		}
+		select {
+		case <-ctx.Done():
+			return inUse, checked, mac
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return inUse, checked, mac
+}
+
+func probeOnce(ctx context.Context, iface string, ip net.IP) (inUse, checked bool, mac string) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	if p, err := exec.LookPath("arping"); err == nil {
@@ -179,24 +207,27 @@ func probeIP(ctx context.Context, iface string, ip net.IP) (inUse, checked bool)
 		cmd.Stdout = &out
 		err := cmd.Run()
 		if err == nil {
-			return false, true
+			return false, true, ""
 		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 1 {
-			return true, true
+			if m := arpMACRe.FindStringSubmatch(out.String()); m != nil {
+				mac = strings.ToLower(m[1])
+			}
+			return true, true, mac
 		}
 	}
 	if p, err := exec.LookPath("ping"); err == nil {
 		err := exec.CommandContext(ctx, p, "-c", "2", "-W", "1", "-I", iface, ip.String()).Run()
 		if err == nil {
-			return true, true
+			return true, true, ""
 		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) && ee.ExitCode() == 1 {
-			return false, true
+			return false, true, ""
 		}
 	}
-	return false, false
+	return false, false, ""
 }
 
 // checkDedicated validates a dedicated address without changing anything. current is the address
@@ -253,9 +284,9 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 			break
 		}
 		if d.IP != current {
-			switch inUse, checked := probeIP(ctx, l.Parent, ip); {
+			switch inUse, checked, who := probeHolder(ctx, l.Parent, ip); {
 			case inUse:
-				bad("something on the network already answers for %s", d.IP)
+				bad("something on the network already answers for %s%s", d.IP, answeredBy(who))
 			case !checked:
 				out.Notes = append(out.Notes, "Couldn't check whether the address is free: install arping or ping on the device. Make sure nothing else uses it.")
 			}
@@ -309,9 +340,9 @@ func (a *Agent) checkDedicated(ctx context.Context, d api.DedicatedIP, current s
 				bad("Address for this device to reach the worker: %s is already used by another worker or device known to Orchestrator", hip)
 			} else if len(ps) == 0 && !heldByShim(l.Parent, hip) && !hip.Equal(net.ParseIP(d.IP)) {
 				// Our own access interface answers for its address, so only a different one is probed.
-				switch inUse, checked := probeIP(ctx, l.Parent, hip); {
+				switch inUse, checked, who := probeHolder(ctx, l.Parent, hip); {
 				case inUse:
-					bad("Address for this device to reach the worker: something on the network already answers for %s", hip)
+					bad("Address for this device to reach the worker: something on the network already answers for %s%s", hip, answeredBy(who))
 				case !checked:
 					out.Notes = append(out.Notes, "Couldn't check whether the address for this device to reach the worker is free: install arping or ping on the device.")
 				}
@@ -620,3 +651,12 @@ func firstHostIP(sn *net.IPNet) net.IP {
 // isShimName reports whether an interface is a device access interface made by this agent
 // (orch-shim, or orch-shimv<id> for a VLAN).
 func isShimName(name string) bool { return strings.HasPrefix(name, shimName) }
+
+// answeredBy words the hardware address that answered for an address, when it is known, so the
+// device holding it can be found (compare it with the MAC addresses on your router's client list).
+func answeredBy(mac string) string {
+	if mac == "" {
+		return ""
+	}
+	return " (answered by MAC address " + mac + ")"
+}

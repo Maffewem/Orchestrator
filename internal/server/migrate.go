@@ -359,6 +359,12 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 	// comes back if the move fails.
 	restartSource := func() {}
 	if src != nil && !src.Offline && p.Runtime.Dedicated != nil && p.Runtime.CopyAddresses[dst.ID] == nil && p.Source.Type != store.SourceCompose {
+		if p.Runtime.Dedicated.HostIP != "" && !hasCap(src, api.CapDedicatedRelease) {
+			// An old agent keeps answering for the device access address after the worker stops,
+			// so the destination would find it in use.
+			fail(fmt.Errorf("the agent on %s is too old to release the worker's device access address (%s) when it stops, so %s couldn't use it. Update the agent on %s from the Updates page and try again", src.Name, p.Runtime.Dedicated.HostIP, dst.Name, src.Name))
+			return
+		}
 		if c := findByName(src, name); c != nil && c.State == "running" && hasCap(src, api.CapPreview) {
 			m.step(p.ID, "Stopping "+name+" on "+src.Name+" so its dedicated address is free")
 			cmd, err := s.store.CreateCommand(ctx, src.ID, api.ActionStop, c.ID, nil)

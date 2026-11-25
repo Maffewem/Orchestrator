@@ -49,7 +49,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 	}
 	if runtime.GOOS == "linux" && !h.InContainer {
 		// A dedicated address needs the agent to speak on the device's own LAN.
-		h.Capabilities = append(h.Capabilities, api.CapDedicatedIP, api.CapDedicatedVLAN, api.CapDedicatedDHCPRaw)
+		h.Capabilities = append(h.Capabilities, api.CapDedicatedIP, api.CapDedicatedVLAN, api.CapDedicatedDHCPRaw, api.CapDedicatedRelease)
 	}
 	if a.cfg.HostRoot != "" {
 		h.Hostname = readTrim(a.hostPath("/etc/hostname"))

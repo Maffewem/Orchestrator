@@ -124,3 +124,13 @@ func TestShimAddressIsNotTheDevicesOwn(t *testing.T) {
 		}
 	}
 }
+
+func TestArpReplyMAC(t *testing.T) {
+	m := arpMACRe.FindStringSubmatch("Unicast reply from 192.168.5.250 [DC:A6:32:01:02:03]  0.612ms\n")
+	if m == nil || m[1] != "DC:A6:32:01:02:03" {
+		t.Fatalf("no MAC found: %v", m)
+	}
+	if answeredBy("") != "" || !strings.Contains(answeredBy("dc:a6:32:01:02:03"), "dc:a6:32:01:02:03") {
+		t.Fatal("answeredBy wording")
+	}
+}

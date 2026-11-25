@@ -167,7 +167,7 @@ CI on every push to `main`, so on a server or a Pi 4/5 you can run the control p
 command:
 
 ```sh
-docker run -d --name orchestrator --restart unless-stopped -p 8080:8080 \
+docker run -d --name orchestrator --restart unless-stopped -p 8080:8080 -p 8443:8443 \
   -v orchestrator-data:/data ghcr.io/maffewem/orchestrator:latest
 docker logs orchestrator   # copy the admin token printed on first start
 ```
@@ -393,8 +393,10 @@ this change still include it; update them. The server also refuses to queue a ba
   Authentik, Keycloak and Entra. New users can start pending approval. Roles can follow a group
   claim. Existing password accounts are never claimed by name. The admin token always works.
 - **Dashboard HTTPS** serves the dashboard on a second port (default `:8443`) with an uploaded
-  certificate or an automatic Let's Encrypt one (TLS-ALPN-01, so internet port 443 must reach it;
-  for example `-p 443:8443`). It applies without a restart. Leave it off when you run your own
+  certificate or an automatic Let's Encrypt one. The container must publish that port (`-p
+  8443:8443`; the installer does this). The default challenge (TLS-ALPN-01) needs internet port
+  443 to reach it; for a LAN-only name, connect Cloudflare and pick the Cloudflare DNS challenge
+  under SSL, which needs no inbound access. It applies without a restart. Leave it off when you run your own
   proxy or tunnel.
 
 ## Security notes

@@ -4,7 +4,8 @@ import { ArrowRight, ChevronDown, ChevronUp, Cloud, Github, Globe, GitBranch, He
 import { api, type DomainsView, type Deployment, type FleetContainer, type Project } from "../api";
 import { endpoints } from "../components/ContainerTable";
 import { DeploymentLine, Sparkline } from "../components/DeploymentLine";
-import { Card, Empty } from "../components/ui";
+import { Badge, Card, Empty } from "../components/ui";
+import { ReplicaBadge } from "./Cluster";
 import { PreviewStatus } from "../components/Previews";
 import { ago, bytes, cx, pct, usePoll, useTick } from "../lib";
 
@@ -66,6 +67,8 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
   const policy = usePoll(() => api.backupPolicy(w.device_id, w.name), 0, [w.device_id, w.name]);
   const metrics = usePoll(() => api.deviceMetrics(w.device_id), 15000, [w.device_id]);
   const device = usePoll(() => api.device(w.device_id), 10000, [w.device_id]);
+  const cluster = usePoll(() => (projectId ? api.cluster().catch(() => null) : Promise.resolve(null)), 10000, [projectId]);
+  const copies = cluster.data?.workers.find((x) => x.project_id === projectId);
   useTick(1000);
 
   const base = `/workers/${w.device_id}/${encodeURIComponent(w.name)}`;
@@ -129,6 +132,33 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
           </span>
         )}
       </div>
+
+      {/* Failover and replica copies */}
+      {copies && ((copies.policy.replicas ?? []).length > 0 || copies.policy.failover || copies.last_failover) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white px-5 py-3 text-sm">
+          <span className="font-medium text-neutral-600">Copies</span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-neutral-300 px-2.5 py-0.5">
+            {copies.device} <span className="text-neutral-500">(main{copies.device_id === w.device_id ? ", this page" : ""})</span>
+            {copies.url && <a href={copies.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">{copies.url.replace("http://", "")}</a>}
+          </span>
+          {(copies.policy.replicas ?? []).map((id) => {
+            const st = copies.replicas?.find((r) => r.device_id === id);
+            return (
+              <span key={id} className="inline-flex flex-wrap items-center gap-1.5 rounded-full border border-neutral-300 px-2.5 py-0.5">
+                {st?.device ?? "replica"}
+                {id === w.device_id && <span className="text-neutral-500">(this page)</span>}
+                {st?.url && st.running && <a href={st.url} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">{st.url.replace("http://", "")}</a>}
+                {st ? <ReplicaBadge st={st} /> : <Badge tone="warn">waiting</Badge>}
+              </span>
+            );
+          })}
+          <span className="text-xs text-neutral-500">
+            {copies.policy.failover ? "Fails over to another device if its own goes offline." : "Failover is off."}
+            {copies.last_failover && ` Last failed over from ${copies.last_failover.from_name} to ${copies.last_failover.to_name} ${ago(copies.last_failover.at)}.`}
+          </span>
+          <Link to="/cluster" className="ml-auto text-xs text-primary hover:underline">Manage on Cluster</Link>
+        </div>
+      )}
 
       {/* Diagram */}
       <div className="rounded-xl border border-neutral-200 bg-neutral-50/60 p-4 sm:p-10">

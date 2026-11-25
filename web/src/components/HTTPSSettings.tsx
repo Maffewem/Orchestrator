@@ -60,7 +60,7 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
               <input className={inputClass} value={host} onChange={(e) => setHost(e.target.value)} placeholder="orch.example.com" />
             </Field>
           )}
-          <Field label="HTTPS listen address" hint="Publish this port from the container, for example -p 443:8443.">
+          <Field label="HTTPS listen address" hint="The container must publish this port (-p 8443:8443), or the browser gets connection refused. Servers installed before this was added need recreating with it.">
             <input className={inputClass} value={addr} onChange={(e) => setAddr(e.target.value)} />
           </Field>
           {mode === "upload" && (

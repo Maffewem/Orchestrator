@@ -16,6 +16,7 @@ set -eu
 CHANNEL="${ORCH_CHANNEL:-stable}"   # stable (main) or beta (dev branch); see docs/RELEASING.md
 IMAGE="${ORCH_IMAGE:-}"
 PORT="${ORCH_PORT:-8080}"
+HTTPS_PORT="${ORCH_HTTPS_PORT:-8443}"   # dashboard HTTPS (Settings > Dashboard HTTPS); nothing listens until it is turned on
 NAME="${ORCH_NAME:-orchestrator}"      # container name; change it (and port) to run a second server
 VOLUME="${ORCH_VOLUME:-$NAME-data}"
 RESTORE=0
@@ -90,7 +91,7 @@ if [ "$WEB_UPDATE" = 1 ]; then
 else
   set --
 fi
-docker run -d --name "$NAME" --restart unless-stopped -p "$PORT:8080" \
+docker run -d --name "$NAME" --restart unless-stopped -p "$PORT:8080" -p "$HTTPS_PORT:8443" \
   -v "$VOLUME:/data" "$@" "$IMAGE" >/dev/null
 
 # Repair: containers (workers) created without a restart policy stay down after a reboot.

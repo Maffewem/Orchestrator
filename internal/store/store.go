@@ -679,9 +679,10 @@ func (s *Store) CompleteCommand(ctx context.Context, deviceID, id string, res ap
 		`UPDATE commands SET status = ?, output = ?, error = ?, updated_at = ? WHERE id = ? AND device_id = ? AND status != ? RETURNING `+commandCols,
 		status, res.Output, res.Error, time.Now().Unix(), id, deviceID, api.CommandCancelled)
 	c, err := scanCommand(s.box, row)
-	if err == nil && c.Args["password"] != "" {
-		// A share password is only needed until the agent has it; don't keep it in the history.
+	if err == nil && (c.Args["password"] != "" || c.Args["join_token"] != "") {
+		// A share password or first-boot join token is only needed until the agent has it; don't keep it in the history.
 		delete(c.Args, "password")
+		delete(c.Args, "join_token")
 		s.db.ExecContext(ctx, `UPDATE commands SET args = ? WHERE id = ?`, mustJSON(c.Args), c.ID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {

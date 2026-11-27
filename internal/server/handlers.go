@@ -189,6 +189,15 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withCredentials(cmds, s.githubToken(ctx))
+	// The join token for a rebuilt machine is added only here, in the response to the device that will
+	// write the image, so it is never kept in the command history that dashboard users can read.
+	if join, _ := s.store.GetSetting(ctx, settingJoinToken); join != "" {
+		for i := range cmds {
+			if cmds[i].Action == api.ActionImageFlash && cmds[i].Args["enrol"] == "1" {
+				cmds[i].Args["join_token"] = join
+			}
+		}
+	}
 	cancel, _ := s.store.RecentlyCancelled(ctx, d.ID, time.Now().Add(-15*time.Minute))
 	writeJSON(w, http.StatusOK, api.HeartbeatResponse{
 		Cancel:          cancel,
@@ -291,6 +300,18 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 			state, level = "failed ("+res.Error+")", "error"
 		}
 		s.event(r.Context(), d.ID, level, c.Action, diskSummary(c.Args["by"], c.Action, c.Args, d.Name, state))
+	case api.ActionImageFlash:
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, imageSummary(c.Args["by"], c.Args, d.Name, state))
+	case api.ActionBootSet:
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, fmt.Sprintf("%s: set boot order to %s %s on %s", c.Args["by"], c.Args["order"], state, d.Name))
 	case api.ActionRemove:
 		if !res.OK {
 			s.event(r.Context(), d.ID, "error", "container.remove", fmt.Sprintf("Removing %s failed: %s", c.Target, res.Error))

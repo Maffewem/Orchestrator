@@ -1153,6 +1153,26 @@ export interface HAView {
   can_restart: boolean;
 }
 
+export interface GoldImage {
+  id: string;
+  name: string;
+  arch?: string;
+  notes?: string;
+  format: "raw" | "gz" | "xz" | "zst";
+  size: number;
+  sha256: string;
+  created_by?: string;
+  created_at: string;
+}
+
+export interface BootInfo {
+  supported: boolean;
+  reason?: string;
+  model?: string;
+  order?: string;
+  config?: string;
+}
+
 export const api = {
   serverHA: () => request<HAView>("GET", "/api/server-ha"),
   haPair: () => request<HAView>("POST", "/api/server-ha/pair"),
@@ -1257,6 +1277,18 @@ export const api = {
   disks: (deviceId: string) => request<DiskReport>("GET", `/api/devices/${deviceId}/disks`),
   diskAction: (deviceId: string, action: "format" | "partition" | "mount" | "unmount" | "share", args: Record<string, string>) =>
     request<Command>("POST", `/api/devices/${deviceId}/disks/${action}`, args),
+  images: () => request<GoldImage[]>("GET", "/api/images"),
+  uploadImage: async (file: File, meta: { name: string; arch: string; notes: string }) => {
+    const q = new URLSearchParams(meta);
+    const res = await fetch(`/api/images?${q}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: file });
+    if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error ?? res.statusText);
+    return (await res.json()) as GoldImage;
+  },
+  deleteImage: (id: string) => request<void>("DELETE", `/api/images/${id}`),
+  flashImage: (deviceId: string, body: { image: string; device: string; confirm: string; enrol: boolean; name?: string }) =>
+    request<Command>("POST", `/api/devices/${deviceId}/images/flash`, body),
+  bootInfo: (deviceId: string) => request<BootInfo>("GET", `/api/devices/${deviceId}/boot`),
+  setBootOrder: (deviceId: string, order: string, confirm: string) => request<Command>("POST", `/api/devices/${deviceId}/boot`, { order, confirm }),
   getCommand: (id: string) => request<Command>("GET", `/api/commands/${id}`),
   events: (device?: string, limit = 100) =>
     request<Event[]>("GET", `/api/events?limit=${limit}${device ? `&device=${device}` : ""}`),

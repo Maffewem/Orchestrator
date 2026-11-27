@@ -132,10 +132,10 @@ function LEDCard({ d }: { d: Device }) {
           </ul>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Profile" hint="Pi: the LEDs the kernel lists (activity and power). Compute Blade: reserved, see below.">
+          <Field label="Profile" hint="Pi: the LEDs the kernel lists (activity and power). Compute Blade: the blade's top and edge LEDs.">
             <select className={inputClass} value={cfg.profile} onChange={(e) => setCfg({ ...cfg, profile: e.target.value as LEDConfig["profile"] })}>
               <option value="pi">Raspberry Pi (kernel LEDs)</option>
-              <option value="blade">Compute Blade (not supported yet)</option>
+              <option value="blade">Compute Blade LEDs (CM5, experimental)</option>
             </select>
           </Field>
           <Field label="Show thresholds on the LEDs" as="div" hint="Normal: the LED does what it always does. Warning: slow blink. Critical: fast blink.">
@@ -144,9 +144,13 @@ function LEDCard({ d }: { d: Device }) {
         </div>
         {cfg.profile === "blade" && (
           <p className="rounded-lg bg-neutral-50 p-3 text-xs text-neutral-600">
-            Compute Blade boards drive their own digital LEDs (and stealth mode) outside the kernel LED class, so this agent cannot control them yet. They need a driver for the blade's control method; until then, choose the Raspberry Pi profile to use the compute module's own activity LED.
+            Experimental: drives the blade's two LEDs (blade-top, blade-edge) through the Pi 5 / CM5 PIO block, on GPIO18. It needs <code>/dev/pio0</code> and has not been checked on real hardware yet. CM4 blades are not supported. Warning is amber, critical red, identify blue.
           </p>
         )}
+        <div className="flex items-center justify-between gap-4">
+          <span className="text-sm"><b>Stealth mode</b><br /><span className="text-neutral-500">Keep every LED of this profile off, whatever the rules say. Identify still flashes.</span></span>
+          <Toggle label="Stealth mode" checked={!!cfg.stealth} onChange={(v) => setCfg({ ...cfg, stealth: v })} />
+        </div>
         <div className="space-y-2">
           {rules.length === 0 && <p className="text-sm text-neutral-500">No rules yet. Add one to turn a threshold into a blink.</p>}
           {rules.map((r, i) => {

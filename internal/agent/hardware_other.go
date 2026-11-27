@@ -20,3 +20,8 @@ func (a *Agent) hardwareCommand(context.Context, api.Command) (bool, string, err
 func (a *Agent) serveConsole(context.Context, api.StreamRequest) error {
 	return errors.New("the console is only available on Linux devices")
 }
+
+// BladeLEDTest is only available on Linux.
+func BladeLEDTest(interface{ Write([]byte) (int, error) }) error {
+	return errors.New("the blade LED test only runs on Linux")
+}

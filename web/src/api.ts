@@ -132,7 +132,7 @@ export interface Device {
 
 export interface LED {
   name: string;
-  role: "activity" | "power" | "other";
+  role: "activity" | "power" | "status" | "other";
   brightness: number;
   max: number;
   trigger?: string;
@@ -148,6 +148,8 @@ export interface LEDRule {
 export interface LEDConfig {
   profile: "pi" | "blade";
   enabled: boolean;
+  /** Keep every LED of the profile off. */
+  stealth?: boolean;
   rules?: LEDRule[];
 }
 export interface LEDStatus {

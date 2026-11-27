@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -129,7 +130,7 @@ func TestIdentifyAndBladeHook(t *testing.T) {
 		t.Fatalf("not restored after identify: %q", got)
 	}
 	c.setConfig(api.LEDConfig{Profile: "blade", Enabled: true})
-	if st := c.list(); st.Supported || !strings.Contains(st.Note, "Compute Blade") {
+	if st := c.list(); st.Supported || !strings.Contains(st.Note, "/dev/pio0") {
 		t.Fatalf("blade profile should say it is not supported: %+v", st)
 	}
 	if _, _, err := c.identifyStart(5, nil); err == nil {
@@ -352,5 +353,120 @@ func TestConsolePTY(t *testing.T) {
 	cmd.Wait()
 	if !strings.Contains(buf.String(), "orch-42") || !strings.Contains(buf.String(), "30 100") {
 		t.Fatalf("terminal output: %q", buf.String())
+	}
+}
+
+// --- blade LEDs ---
+
+type fakePixels struct {
+	mu     sync.Mutex
+	writes [][][3]byte
+	closed bool
+}
+
+func (f *fakePixels) Write(px [][3]byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes = append(f.writes, append([][3]byte(nil), px...))
+	return nil
+}
+func (f *fakePixels) Close() error { f.mu.Lock(); f.closed = true; f.mu.Unlock(); return nil }
+func (f *fakePixels) last() [][3]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.writes) == 0 {
+		return nil
+	}
+	return f.writes[len(f.writes)-1]
+}
+
+func TestBladeLEDs(t *testing.T) {
+	px := &fakePixels{}
+	d := newBladeLEDs(func() bool { return true }, func() (pixelWriter, error) { return px, nil })
+	leds, note, _ := d.List()
+	if note != "" || len(leds) != 2 || leds[0].Name != "blade-top" || leds[1].Name != "blade-edge" {
+		t.Fatalf("list: %v %q", leds, note)
+	}
+	if err := d.Set("blade-edge", "on"); err != nil {
+		t.Fatal(err)
+	}
+	if got := px.last(); got[0] != ([3]byte{}) || got[1] != ([3]byte{0, 160, 0}) {
+		t.Fatalf("edge on: %v", got)
+	}
+	d.Set("blade-top", "slow")
+	if got := px.last(); got[0] != ([3]byte{255, 140, 0}) {
+		t.Fatalf("top amber: %v", got)
+	}
+	if d.Set("ACT", "on") == nil || d.Set("blade-top", "sparkle") == nil {
+		t.Fatal("bad names or patterns must be refused")
+	}
+	d.Restore()
+	if !px.closed || px.last()[0] != ([3]byte{}) {
+		t.Fatalf("restore should switch off and release: %v closed=%v", px.last(), px.closed)
+	}
+}
+
+func TestBladeNeedsPIO(t *testing.T) {
+	d := newBladeLEDs(func() bool { return false }, nil)
+	if _, note, _ := d.List(); !strings.Contains(note, "/dev/pio0") {
+		t.Fatalf("note: %q", note)
+	}
+}
+
+func TestBladeStealthAndRules(t *testing.T) {
+	px := &fakePixels{}
+	prev := ledProfiles[api.LEDProfileBlade]
+	ledProfiles[api.LEDProfileBlade] = func(string) ledDriver {
+		return newBladeLEDs(func() bool { return true }, func() (pixelWriter, error) { return px, nil })
+	}
+	defer func() { ledProfiles[api.LEDProfileBlade] = prev }()
+	vals := map[string]float64{"temp": 90}
+	c := newLEDCtl(t.TempDir(), t.TempDir(), func() map[string]float64 { return vals })
+	rule := api.LEDRule{Metric: "temp", LED: "blade-top", Warn: 60, Crit: 80}
+	if err := c.setConfig(api.LEDConfig{Profile: "blade", Enabled: true, Rules: []api.LEDRule{rule}}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // critical: red, blinking
+	seenRed := false
+	px.mu.Lock()
+	for _, w := range px.writes {
+		if w[0] == ([3]byte{255, 0, 0}) {
+			seenRed = true
+		}
+	}
+	px.mu.Unlock()
+	if !seenRed {
+		t.Fatal("a critical rule should show red on the blade LED")
+	}
+	if err := c.setConfig(api.LEDConfig{Profile: "blade", Enabled: true, Stealth: true, Rules: []api.LEDRule{rule}}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if got := px.last(); got[0] != ([3]byte{}) || got[1] != ([3]byte{}) {
+		t.Fatalf("stealth must keep both LEDs off: %v", got)
+	}
+}
+
+// --- PIO ---
+
+func TestPIORequestNumbers(t *testing.T) {
+	// _IOW(102, nr, size): the direction bit, the size of the argument struct, the magic and the number.
+	if reqAddProgram != 1<<30|68<<16|102<<8|11 || reqSMClaim != 1<<30|2<<16|102<<8|20 ||
+		reqSMInit != 1<<30|20<<16|102<<8|30 || reqSMPut != 1<<30|8<<16|102<<8|41 || reqGPIOFunction != 1<<30|4<<16|102<<8|51 {
+		t.Fatalf("request numbers: %#x %#x %#x %#x %#x", reqAddProgram, reqSMClaim, reqSMInit, reqSMPut, reqGPIOFunction)
+	}
+}
+
+func TestWS2812Setup(t *testing.T) {
+	cfg := ws2812Config(18, 0, 200_000_000)
+	if cfg.clkdiv != 25<<16 {
+		t.Fatalf("clock divider for 800 kHz at 200 MHz should be 25, got %#x", cfg.clkdiv)
+	}
+	if cfg.execctrl != 3<<12 || cfg.pinctrl != 1<<29|18<<10 || cfg.shiftctrl != 1<<17|24<<25|1<<30 {
+		t.Fatalf("config: %+v", cfg)
+	}
+	// FIFO word: green, red, blue in the top 24 bits.
+	if w := ws2812Word(0x11, 0x22, 0x33); w != 0x22113300 {
+		t.Fatalf("word: %#x", w)
 	}
 }

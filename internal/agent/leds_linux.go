@@ -35,12 +35,11 @@ type ledDriver interface {
 // ledProfiles is the hook for boards that need their own driver. A profile that is listed but has
 // no driver says so in the dashboard instead of silently doing nothing.
 var ledProfiles = map[string]func(root string) ledDriver{
-	api.LEDProfilePi:    func(root string) ledDriver { return newSysfsLEDs(root) },
-	api.LEDProfileBlade: func(string) ledDriver { return unsupportedLEDs{note: bladeNote} },
+	api.LEDProfilePi: func(root string) ledDriver { return newSysfsLEDs(root) },
+	api.LEDProfileBlade: func(string) ledDriver {
+		return newBladeLEDs(func() bool { _, err := os.Stat(bladePIODev); return err == nil }, rp1Opener)
+	},
 }
-
-const bladeNote = "Compute Blade LEDs (Digital LED 1 and 2, stealth mode) are not on the kernel LED class, so the agent cannot drive them yet. " +
-	"Add a driver for the blade's control method (GPIO, I2C or the blade agent's socket) to ledProfiles in internal/agent/leds_linux.go."
 
 type unsupportedLEDs struct{ note string }
 
@@ -168,12 +167,12 @@ func (s *sysfsLEDs) Set(name, pattern string) error {
 			v = max
 		}
 		return s.write(name, "brightness", strconv.Itoa(v))
-	case "slow", "fast":
+	case "slow", "fast", "identify":
 		if err := s.write(name, "trigger", "none"); err != nil {
 			return err
 		}
 		half := 600 * time.Millisecond
-		if pattern == "fast" {
+		if pattern == "fast" || pattern == "identify" {
 			half = 120 * time.Millisecond
 		}
 		ctx, cancel := context.WithCancel(context.Background())
@@ -333,12 +332,18 @@ func ledLevel(v float64, r api.LEDRule) string {
 	return "ok"
 }
 
-var ledPattern = map[string]string{"ok": "restore", "warn": "slow", "crit": "fast"}
+var ledPattern = map[string]string{"ok": "restore", "warn": "slow", "crit": "fast", "stealth": "off"}
 
 // applyLocked evaluates the rules and drives each LED to its worst state. Callers hold mu.
 func (c *ledCtl) applyLocked() {
 	want := map[string]string{}
-	if c.cfg.Enabled {
+	if c.cfg.Stealth {
+		if leds, note, err := c.drv.List(); err == nil && note == "" {
+			for _, l := range leds {
+				want[l.Name] = "stealth"
+			}
+		}
+	} else if c.cfg.Enabled {
 		if c.sample != nil {
 			c.values = c.sample()
 		}
@@ -431,7 +436,7 @@ func (c *ledCtl) identifyStart(seconds int, only []string) (secs int, stop func(
 	}
 	var ok []string
 	for _, n := range targets {
-		if c.drv.Set(n, "fast") == nil {
+		if c.drv.Set(n, "identify") == nil {
 			c.identify[n] = true
 			ok = append(ok, n)
 		}

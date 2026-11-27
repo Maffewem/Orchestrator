@@ -23,7 +23,7 @@ const (
 // LED is one LED the agent found.
 type LED struct {
 	Name       string   `json:"name"`
-	Role       string   `json:"role"` // activity, power or other
+	Role       string   `json:"role"` // activity, power, status (a blade LED) or other
 	Brightness int      `json:"brightness"`
 	Max        int      `json:"max"`
 	Trigger    string   `json:"trigger,omitempty"` // what normally drives it (for example mmc0, default-on)
@@ -43,8 +43,10 @@ type LEDRule struct {
 // LEDConfig is a device's LED behaviour. The agent keeps a copy and applies it by itself, so
 // it keeps working while the server is away.
 type LEDConfig struct {
-	Profile string    `json:"profile"`
-	Enabled bool      `json:"enabled"`
+	Profile string `json:"profile"`
+	Enabled bool   `json:"enabled"`
+	// Stealth keeps every LED of the profile off, whatever the rules say (identify still works).
+	Stealth bool      `json:"stealth,omitempty"`
 	Rules   []LEDRule `json:"rules,omitempty"`
 }
 

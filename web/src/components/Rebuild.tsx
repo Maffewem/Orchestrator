@@ -299,22 +299,36 @@ export function BootCard({ d }: { d: Device }) {
   );
 }
 
-/** Scoped enrolment tokens: expire, limited uses, revocable. For cards, disks and bundles that carry a credential. */
+function timeLeft(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "expired";
+  const h = Math.round(ms / 3600000);
+  if (h < 1) return `in ${Math.max(1, Math.round(ms / 60000))} min`;
+  if (h < 48) return `in ${h} h`;
+  return `in ${Math.round(h / 24)} days`;
+}
+
+const lifetimes: [string, number][] = [["1 hour", 1], ["1 day", 24], ["1 week", 168], ["30 days", 720]];
+
+/** Scoped enrolment tokens: they expire, have a use limit and can be revoked. For cards, disks and bundles that carry a credential. */
 export function EnrolTokens() {
   const list = usePoll(() => api.enrolTokens(), 30000, []);
   const [label, setLabel] = useState("");
-  const [hours, setHours] = useState("24");
-  const [uses, setUses] = useState("1");
+  const [hours, setHours] = useState(24);
+  const [uses, setUses] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [showEnded, setShowEnded] = useState(false);
 
   const create = async () => {
     setBusy(true);
     setError(null);
     try {
-      const t = await api.createEnrolToken({ label, ttl_hours: Number(hours), max_uses: Number(uses) });
+      const t = await api.createEnrolToken({ label, ttl_hours: hours, max_uses: uses });
       setCreated(t.token ?? null);
+      setCopied(false);
       setLabel("");
       list.reload();
     } catch (e) {
@@ -328,56 +342,96 @@ export function EnrolTokens() {
     await api.revokeEnrolToken(id);
     list.reload();
   };
-  const tone = (s: string) => (s === "active" ? "ok" : s === "revoked" ? "bad" : "neutral");
+  const copy = async () => {
+    if (!created) return;
+    try {
+      await navigator.clipboard.writeText(created);
+      setCopied(true);
+    } catch {
+      /* the token stays selectable below */
+    }
+  };
+
+  const active = list.data?.filter((t) => t.status === "active") ?? [];
+  const ended = list.data?.filter((t) => t.status !== "active") ?? [];
+  const row = (t: NonNullable<typeof list.data>[number]) => (
+    <li key={t.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2 font-medium">
+          {t.label}
+          {t.status !== "active" && <Badge tone={t.status === "revoked" ? "bad" : "neutral"}>{t.status}</Badge>}
+        </div>
+        <p className="text-xs text-neutral-500">
+          {t.uses} of {t.max_uses} {t.max_uses === 1 ? "device" : "devices"} enrolled · {t.status === "active" ? `expires ${timeLeft(t.expires_at)}` : `ended ${new Date(t.expires_at).toLocaleDateString()}`}
+          {t.devices?.length ? ` · ${t.devices.join(", ")}` : ""}
+        </p>
+      </div>
+      {t.status === "active" && (
+        <Button size="sm" onClick={() => revoke(t.id, t.label)}>
+          Revoke
+        </Button>
+      )}
+    </li>
+  );
 
   return (
-    <div className="space-y-4 p-5 text-sm">
+    <div className="space-y-5 p-5 text-sm">
       <WarnNote>
         An enrolment token lets a device join this server without the join token. Anyone holding a card, drive or disk that contains one can enrol a device until the token expires, runs out of uses or is revoked. Keep that media somewhere safe, allow only the time and number of devices you need, and revoke the token straight away if the media is lost.
       </WarnNote>
       {list.error && <ErrorNote>{list.error}</ErrorNote>}
-      {list.data?.length === 0 && <p className="text-neutral-500">No enrolment tokens yet.</p>}
-      <ul className="divide-y divide-neutral-100">
-        {list.data?.map((t) => (
-          <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 font-medium">
-                {t.label} <Badge tone={tone(t.status)}>{t.status}</Badge>
-              </div>
-              <p className="text-xs text-neutral-500">
-                {t.uses}/{t.max_uses} used · expires {new Date(t.expires_at).toLocaleString()}
-                {t.devices?.length ? ` · enrolled ${t.devices.join(", ")}` : ""}
-              </p>
+
+      <section>
+        <h3 className="mb-1 font-semibold">Active tokens</h3>
+        {active.length === 0 ? (
+          <p className="text-neutral-500">None. Tokens are temporary: each one stops working when it expires or runs out of uses. Rebuilds create their own, valid for 48 hours and one device.</p>
+        ) : (
+          <ul className="divide-y divide-neutral-100">{active.map(row)}</ul>
+        )}
+        {ended.length > 0 && (
+          <div className="mt-2">
+            <button className="text-xs text-neutral-500 underline" onClick={() => setShowEnded(!showEnded)}>
+              {showEnded ? "Hide" : "Show"} {ended.length} ended
+            </button>
+            {showEnded && <ul className="divide-y divide-neutral-100">{ended.map(row)}</ul>}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-lg border border-neutral-200 p-4">
+        <h3 className="mb-3 font-semibold">Create a token</h3>
+        <div className="space-y-4">
+          <Field label="Label" hint="Where this token will be kept, so you know what to revoke if it is lost.">
+            <input className={inputClass} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Master SD card, workshop shelf" />
+          </Field>
+          <Field label="Valid for" as="div">
+            <div className="flex flex-wrap gap-2">
+              {lifetimes.map(([name, h]) => (
+                <Button key={h} size="sm" variant={hours === h ? "primary" : "secondary"} onClick={() => setHours(h)}>
+                  {name}
+                </Button>
+              ))}
             </div>
-            {t.status === "active" && (
-              <Button size="sm" onClick={() => revoke(t.id, t.label)}>
-                Revoke
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
+          </Field>
+          <Field label="Number of devices" hint="How many devices can join with it (1 to 100). Use 1 unless one card must set up several.">
+            <input className={inputClass + " max-w-28"} type="number" min={1} max={100} value={uses} onChange={(e) => setUses(Math.min(100, Math.max(1, Number(e.target.value) || 1)))} />
+          </Field>
+          {error && <ErrorNote>{error}</ErrorNote>}
+          <Button variant="primary" loading={busy} disabled={!label.trim()} onClick={create}>
+            Create token
+          </Button>
+        </div>
+      </section>
+
       {created && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-          <p className="mb-1 font-medium">Copy this token now. It will not be shown again.</p>
-          <code className="break-all font-mono text-xs">{created}</code>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <p className="mb-2 font-medium">Copy this token now. It will not be shown again.</p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 break-all rounded bg-white/70 px-2 py-1.5 font-mono text-xs">{created}</code>
+            <Button size="sm" onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
+          </div>
         </div>
       )}
-      <div className="grid gap-3 border-t border-neutral-100 pt-4 sm:grid-cols-3">
-        <Field label="Label" hint="Where this token will be kept, so you know what to revoke if it is lost.">
-          <input className={inputClass} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Master SD card, workshop shelf" />
-        </Field>
-        <Field label="Valid for (hours)" hint="Up to 720 (30 days).">
-          <input className={inputClass} inputMode="numeric" value={hours} onChange={(e) => setHours(e.target.value)} />
-        </Field>
-        <Field label="Number of devices" hint="How many devices can join with it, 1 to 100.">
-          <input className={inputClass} inputMode="numeric" value={uses} onChange={(e) => setUses(e.target.value)} />
-        </Field>
-      </div>
-      {error && <ErrorNote>{error}</ErrorNote>}
-      <Button loading={busy} disabled={!label.trim()} onClick={create}>
-        Create token
-      </Button>
     </div>
   );
 }

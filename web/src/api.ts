@@ -126,6 +126,64 @@ export interface Device {
   maintenance_note?: string;
   maintenance_until?: string;
   agent_link: "https" | "http" | "unknown";
+  /** Set while the device flashes its LEDs (RFC 3339). */
+  identifying_until?: string;
+}
+
+export interface LED {
+  name: string;
+  role: "activity" | "power" | "other";
+  brightness: number;
+  max: number;
+  trigger?: string;
+  state?: "" | "ok" | "warn" | "crit" | "identify";
+}
+export type LEDMetric = "temp" | "memory" | "cpu" | "disk";
+export interface LEDRule {
+  metric: LEDMetric;
+  led: string;
+  warn: number;
+  crit: number;
+}
+export interface LEDConfig {
+  profile: "pi" | "blade";
+  enabled: boolean;
+  rules?: LEDRule[];
+}
+export interface LEDStatus {
+  profile: string;
+  supported: boolean;
+  note?: string;
+  leds: LED[];
+  config: LEDConfig;
+  values?: Partial<Record<LEDMetric, number>>;
+}
+
+export interface SSHSettings {
+  password_auth: boolean;
+  pubkey_auth: boolean;
+  root_login: "yes" | "no" | "prohibit-password" | "forced-commands-only";
+}
+export interface SSHKey {
+  user: string;
+  type: string;
+  fingerprint: string;
+  comment?: string;
+}
+export interface SSHStatus {
+  installed: boolean;
+  running: boolean;
+  service?: string;
+  effective: SSHSettings;
+  managed: boolean;
+  users?: { name: string; uid: number; home: string }[];
+  keys?: SSHKey[];
+  pending?: { revert_at: string };
+  error?: string;
+}
+export interface SSHCheck {
+  warnings: { level: "lockout" | "note"; message: string }[];
+  lockout: boolean;
 }
 
 export interface FleetContainer extends Container {
@@ -1253,8 +1311,19 @@ export const api = {
   setPreviewSettings: (id: string, s: { enabled: boolean; max: number }) =>
     request<PreviewsView>("PUT", `/api/projects/${id}/previews/settings`, s),
   deletePreview: (id: string, pid: string) => request<void>("DELETE", `/api/projects/${id}/previews/${pid}`),
-  openStream: (deviceId: string, s: { kind: "logs" | "shell"; container: string; tail?: number; cols?: number; rows?: number }) =>
+  openStream: (deviceId: string, s: { kind: "logs" | "shell" | "console"; container?: string; tail?: number; cols?: number; rows?: number }) =>
     request<{ id: string }>("POST", `/api/devices/${deviceId}/streams`, s),
+  leds: (id: string) => request<LEDStatus>("GET", `/api/devices/${id}/leds`),
+  identifyDevice: (id: string, seconds = 15) => request<{ until: string }>("POST", `/api/devices/${id}/leds/identify`, { seconds }),
+  setLEDConfig: (id: string, cfg: LEDConfig) => request<LEDStatus>("PUT", `/api/devices/${id}/leds/config`, cfg),
+  sshStatus: (id: string) => request<SSHStatus>("GET", `/api/devices/${id}/ssh`),
+  sshCheck: (id: string, s: SSHSettings) => request<SSHCheck>("POST", `/api/devices/${id}/ssh/check`, s),
+  sshSet: (id: string, s: SSHSettings & { confirm?: string; trial_seconds?: number }) =>
+    request<{ result: string }>("PUT", `/api/devices/${id}/ssh/config`, s),
+  sshConfirm: (id: string, revert: boolean) => request<{ result: string }>("POST", `/api/devices/${id}/ssh/confirm`, { revert }),
+  sshAddKey: (id: string, user: string, key: string) => request<{ fingerprint: string }>("POST", `/api/devices/${id}/ssh/keys`, { user, key }),
+  sshRemoveKey: (id: string, user: string, fingerprint: string, confirm?: string) =>
+    request<{ ok: boolean }>("POST", `/api/devices/${id}/ssh/keys/remove`, { user, fingerprint, confirm }),
   streamOutput: (id: string, from: number, signal: AbortSignal) =>
     fetchStreamOutput(id, from, signal),
   streamInput: (id: string, input: { data?: string; cols?: number; rows?: number }) =>

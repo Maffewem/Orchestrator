@@ -110,6 +110,7 @@ type Server struct {
 	// previewMu serialises preview syncs so a webhook and the poller can't race.
 	previewMu     sync.Mutex
 	streams       *streamHub
+	flashing      identifyHub // devices that are flashing their LEDs; see hardware.go
 	sso           ssoState
 	https         httpsState
 	ssoGitHubURL  string // overrides https://github.com in tests
@@ -371,6 +372,15 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/projects/{id}/previews/settings", s.handleSetPreviewSettings)
 	admin("DELETE /api/projects/{id}/previews/{pid}", s.handleDeletePreview)
 	admin("POST /api/devices/{id}/streams", s.handleOpenStream)
+	admin("GET /api/devices/{id}/leds", s.handleListLEDs)
+	admin("POST /api/devices/{id}/leds/identify", s.handleFlashLEDs)
+	admin("PUT /api/devices/{id}/leds/config", s.handleSetLEDConfig)
+	admin("GET /api/devices/{id}/ssh", s.handleSSHStatus)
+	admin("POST /api/devices/{id}/ssh/check", s.handleSSHCheck)
+	admin("PUT /api/devices/{id}/ssh/config", s.handleSSHConfig)
+	admin("POST /api/devices/{id}/ssh/confirm", s.handleSSHConfirm)
+	admin("POST /api/devices/{id}/ssh/keys", s.handleSSHAddKey)
+	admin("POST /api/devices/{id}/ssh/keys/remove", s.handleSSHRemoveKey)
 	admin("GET /api/streams/{id}/output", s.handleStreamOutput)
 	admin("POST /api/streams/{id}/input", s.handleStreamInput)
 	admin("DELETE /api/streams/{id}", s.handleCloseStream)

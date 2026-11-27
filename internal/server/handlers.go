@@ -27,10 +27,12 @@ type DeviceView struct {
 	// NetworkNotice is a change to the device's addresses or to the address it reaches the server
 	// at, shown until someone acknowledges it.
 	NetworkNotice *NetNotice `json:"network_notice,omitempty"`
+	// IdentifyingUntil is set while the device flashes its LEDs.
+	IdentifyingUntil *time.Time `json:"identifying_until,omitempty"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d), Link: s.agentLink(d.ID)}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d), Link: s.agentLink(d.ID), IdentifyingUntil: s.flashing.get(d.ID)}
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"

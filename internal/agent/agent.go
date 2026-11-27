@@ -90,6 +90,9 @@ type Agent struct {
 	stats statsState // per-container samples waiting for the next heartbeat
 
 	leases leaseTable // DHCP addresses held for workers with a dedicated address
+
+	hwOnce sync.Once
+	hw     *hardware // LED and SSH controllers (see hardware_linux.go)
 }
 
 var errUnauthorized = errors.New("control plane rejected the agent token")
@@ -137,6 +140,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.streamLoop(ctx)
 	go a.statsLoop(ctx)
 	go a.dedicatedLoop(ctx)
+	a.startHardware(ctx)
 
 	backoff := time.Second
 	for {
@@ -405,7 +409,13 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		}
 		bcancel()
 	default:
-		err = fmt.Errorf("unsupported action %q", c.Action)
+		hctx, hcancel := context.WithTimeout(ctx, 2*time.Minute)
+		var handled bool
+		handled, output, err = a.hardwareCommand(hctx, c)
+		hcancel()
+		if !handled {
+			err = fmt.Errorf("unsupported action %q", c.Action)
+		}
 	}
 	if err != nil {
 		return api.CommandResult{Output: output, Error: redact(err.Error())}

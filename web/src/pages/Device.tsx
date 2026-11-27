@@ -12,6 +12,7 @@ import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
+import { DeviceHardwareActions, HardwareTab, useIdentifying } from "../components/DeviceHardware";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -25,9 +26,14 @@ export default function DevicePage() {
   if (dev.error && !d) return <ErrorNote>{dev.error}</ErrorNote>;
   if (!d) return <Loading />;
   const base = `/devices/${d.id}`;
+  return <DeviceBody d={d} base={base} isAdmin={isAdmin} rows={rows} dev={dev} fleet={fleet} />;
+}
+
+function DeviceBody({ d, base, isAdmin, rows, dev, fleet }: { d: Device; base: string; isAdmin: boolean; rows: any; dev: { reload: () => void }; fleet: { reload: () => void } }) {
+  const flashing = useIdentifying(d);
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className={`mb-6 flex flex-wrap items-start justify-between gap-4 rounded-xl ${flashing ? "animate-pulse bg-amber-50 p-3 ring-2 ring-amber-400" : ""}`}>
         <div className="min-w-0">
           <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
             <StatusDot status={d.status} />
@@ -45,6 +51,7 @@ export default function DevicePage() {
             <DeviceSummary d={d} />
           </p>
         </div>
+        <DeviceHardwareActions d={d} onChanged={dev.reload} />
       </div>
       <div className="mb-6">
         <Tabs
@@ -53,6 +60,7 @@ export default function DevicePage() {
             { to: `${base}/containers`, label: `Containers (${d.containers.length})` },
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/activity`, label: "Activity" },
+            ...(isAdmin ? [{ to: `${base}/hardware`, label: "Hardware" }] : []),
             ...(isAdmin ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
@@ -76,6 +84,7 @@ export default function DevicePage() {
         />
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
         <Route path="activity" element={<DeviceActivity d={d} />} />
+        {isAdmin && <Route path="hardware" element={<HardwareTab d={d} />} />}
         {isAdmin && <Route path="settings" element={<DeviceSettings d={d} onSaved={dev.reload} />} />}
       </Routes>
     </>

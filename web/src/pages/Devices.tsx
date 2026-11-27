@@ -231,7 +231,7 @@ export default function DevicesPage() {
       ) : (
         <Card className="divide-y divide-neutral-100">
           {data.map((d) => (
-            <Link key={d.id} to={`/devices/${d.id}`} className="grid items-center gap-4 px-5 py-4 hover:bg-neutral-50 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_auto]">
+            <Link key={d.id} to={`/devices/${d.id}`} className={`grid items-center gap-4 px-5 py-4 hover:bg-neutral-50 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_auto] ${d.identifying_until && new Date(d.identifying_until) > new Date() ? "animate-pulse bg-amber-50 ring-2 ring-inset ring-amber-400" : ""}`}>
               <div className="min-w-0">
                 <p className="flex items-center gap-2 font-medium">
                   <StatusDot status={d.status} />

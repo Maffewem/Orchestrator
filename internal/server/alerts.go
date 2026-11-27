@@ -101,8 +101,7 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 
 	// A newer server version, for the people who can install it.
 	if id := identityFrom(r); id != nil && id.Role == store.RoleAdmin {
-		var chk updateCheck
-		if s.getJSON(ctx, settingUpdateCheck, &chk) && chk.Newer {
+		if chk, ok := s.storedCheck(ctx); ok && chk.Newer {
 			out = append(out, Alert{ID: "update:" + chk.Version, Severity: "info", Title: "Update available: " + chk.Version, Detail: "Open Updates to install it.", Link: "/updates", At: chk.CheckedAt})
 		}
 	}

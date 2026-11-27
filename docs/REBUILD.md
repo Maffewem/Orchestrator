@@ -32,3 +32,19 @@ Safety: every action is admin-only, needs the device path (or boot order) typed 
 ## Not tested on real hardware
 
 Only unit and API tests plus a build were run. Not run: real downloads/writes of multi-GiB images, xz/zst tools, `rpi-eeprom-config`, the first-boot job booting under systemd on Raspberry Pi OS, browser uploads of large files (the upload is a single streamed request; huge images are better copied onto the server directly).
+
+## Netboot flow and choosing the OS (design)
+
+**End to end**
+1. The board's boot order is network first (set by Boot order, or written over USB once). It sends a DHCP request.
+2. The existing DHCP server answers as normal. The netboot container (dnsmasq in proxy-DHCP mode, host networking, same L2 segment) adds only the boot server and file names, so no router change is needed.
+3. The board fetches a small recovery OS by TFTP/HTTP (kernel, initramfs) built by Orchestrator. It carries the board serial and MAC.
+4. The recovery OS calls the server with its serial and a short-lived enrolment token, asks "what should I become?", streams that gold image onto the target disk (same checksum and size checks as Write image), installs the first-boot job, switches the boot order back to local disk and reboots.
+5. The new OS registers with its enrolment token; the server reuses the identity of an offline device with the same name.
+
+**Choosing the OS**
+- Image assignment is resolved in this order: a per-device assignment (matched by board serial or MAC, set before or after the first sighting), a per-group/label assignment, then the default image. Unknown boards are listed as "waiting for approval" with the serial and MAC; nothing is written until an admin approves (setting an assignment and pressing Rebuild).
+- Safety: netboot rebuild never starts by itself on a device that already has a working OS. It runs only for a device an admin marked "rebuild on next network boot", or for an unknown board an admin approved. The image write has the same typed confirmation (the device serial) and audit entries.
+- Not yet built: the assignment tables, the approval list, the recovery OS build, and the container.
+
+**Limits**: the container must share the boards' broadcast domain; boards must have network in their boot order; Pi 4/CM4/Pi 5/CM5 only for network boot; the recovery OS and its drivers are untested.

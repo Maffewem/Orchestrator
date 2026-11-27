@@ -333,7 +333,7 @@ export function EnrolTokens() {
   return (
     <div className="space-y-4 p-5 text-sm">
       <WarnNote>
-        Anything that carries a token (an SD card, a USB drive, a disk image) leaves that credential on it. Keep it as secure as the token, give it the shortest life and fewest uses that work, and revoke it when the card is lost.
+        An enrolment token lets a device join this server without the join token. Anyone holding a card, drive or disk that contains one can enrol a device until the token expires, runs out of uses or is revoked. Keep that media somewhere safe, allow only the time and number of devices you need, and revoke the token straight away if the media is lost.
       </WarnNote>
       {list.error && <ErrorNote>{list.error}</ErrorNote>}
       {list.data?.length === 0 && <p className="text-neutral-500">No enrolment tokens yet.</p>}
@@ -359,18 +359,18 @@ export function EnrolTokens() {
       </ul>
       {created && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-          <p className="mb-1 font-medium">Copy this token now; it is shown only once.</p>
+          <p className="mb-1 font-medium">Copy this token now. It will not be shown again.</p>
           <code className="break-all font-mono text-xs">{created}</code>
         </div>
       )}
       <div className="grid gap-3 border-t border-neutral-100 pt-4 sm:grid-cols-3">
-        <Field label="Label">
-          <input className={inputClass} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Master SD card, shelf 2" />
+        <Field label="Label" hint="Where this token will be kept, so you know what to revoke if it is lost.">
+          <input className={inputClass} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Master SD card, workshop shelf" />
         </Field>
-        <Field label="Valid for (hours)" hint="Up to 720.">
+        <Field label="Valid for (hours)" hint="Up to 720 (30 days).">
           <input className={inputClass} inputMode="numeric" value={hours} onChange={(e) => setHours(e.target.value)} />
         </Field>
-        <Field label="Devices it can enrol" hint="1 to 100.">
+        <Field label="Number of devices" hint="How many devices can join with it, 1 to 100.">
           <input className={inputClass} inputMode="numeric" value={uses} onChange={(e) => setUses(e.target.value)} />
         </Field>
       </div>

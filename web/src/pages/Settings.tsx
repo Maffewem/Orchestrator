@@ -512,7 +512,7 @@ export default function SettingsPage() {
         </Collapsible>
         )}
 
-        <Collapsible id="enrol" defaultOpen={false} title={<span className="flex items-center gap-2"><KeyRound className="size-4" /> Enrolment tokens</span>} subtitle="Expiring, limited-use tokens for rebuilds, cards and disks. Safer than the shared join token.">
+        <Collapsible id="enrol" defaultOpen={false} title={<span className="flex items-center gap-2"><KeyRound className="size-4" /> Enrolment tokens</span>} subtitle="Tokens that expire, can be used only a set number of times and can be revoked. Use these instead of the join token for cards, drives and rebuilt disks.">
           <EnrolTokens />
         </Collapsible>
 

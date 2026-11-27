@@ -1165,6 +1165,20 @@ export interface GoldImage {
   created_at: string;
 }
 
+export interface EnrolToken {
+  id: string;
+  label: string;
+  created_at: string;
+  created_by?: string;
+  expires_at: string;
+  max_uses: number;
+  uses: number;
+  status: "active" | "expired" | "used up" | "revoked";
+  devices?: string[];
+  /** Only in the response that creates the token. */
+  token?: string;
+}
+
 export interface BootInfo {
   supported: boolean;
   reason?: string;
@@ -1277,6 +1291,9 @@ export const api = {
   disks: (deviceId: string) => request<DiskReport>("GET", `/api/devices/${deviceId}/disks`),
   diskAction: (deviceId: string, action: "format" | "partition" | "mount" | "unmount" | "share", args: Record<string, string>) =>
     request<Command>("POST", `/api/devices/${deviceId}/disks/${action}`, args),
+  enrolTokens: () => request<EnrolToken[]>("GET", "/api/enrol-tokens"),
+  createEnrolToken: (body: { label: string; ttl_hours: number; max_uses: number }) => request<EnrolToken>("POST", "/api/enrol-tokens", body),
+  revokeEnrolToken: (id: string) => request<void>("DELETE", `/api/enrol-tokens/${id}`),
   images: () => request<GoldImage[]>("GET", "/api/images"),
   uploadImage: async (file: File, meta: { name: string; arch: string; notes: string }) => {
     const q = new URLSearchParams(meta);

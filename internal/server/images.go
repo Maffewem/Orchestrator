@@ -227,10 +227,6 @@ func (s *Server) handleFlashImage(w http.ResponseWriter, r *http.Request) {
 	args["by"] = who
 	args["image_name"] = im.Name
 	if req.Enrol {
-		if join, err := s.store.GetSetting(r.Context(), settingJoinToken); err != nil || join == "" {
-			writeError(w, http.StatusConflict, "no join token is set")
-			return
-		}
 		srv := strings.TrimRight(strings.TrimSpace(req.Server), "/")
 		if srv == "" {
 			scheme := "http"
@@ -260,6 +256,17 @@ func (s *Server) handleFlashImage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.internal(w, err)
 		return
+	}
+	if req.Enrol {
+		// A token of its own: one use, 48 hours, revocable from Settings. Delivered once in the dispatch.
+		enrolMu.Lock()
+		_, _, err := s.mintEnrol(r, "Rebuild of "+req.Device+" on "+d.Name, 48*time.Hour, 1, who, cmd.ID, true)
+		enrolMu.Unlock()
+		if err != nil {
+			s.store.CancelCommand(r.Context(), cmd.ID)
+			s.internal(w, err)
+			return
+		}
 	}
 	s.event(r.Context(), d.ID, "warning", api.ActionImageFlash+".requested", imageSummary(who, args, d.Name, "requested"))
 	writeJSON(w, http.StatusAccepted, scrubCommand(cmd))

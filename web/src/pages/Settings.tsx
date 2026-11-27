@@ -14,6 +14,7 @@ import { AgentAddresses } from "../components/AgentAddresses";
 import { MoveServerPanel } from "./MoveServer";
 import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
+import { EnrolTokens } from "../components/Rebuild";
 import { CloudflareDeploy } from "../components/CloudflareDeploy";
 
 export default function SettingsPage() {
@@ -510,6 +511,10 @@ export default function SettingsPage() {
           </div>
         </Collapsible>
         )}
+
+        <Collapsible id="enrol" defaultOpen={false} title={<span className="flex items-center gap-2"><KeyRound className="size-4" /> Enrolment tokens</span>} subtitle="Expiring, limited-use tokens for rebuilds, cards and disks. Safer than the shared join token.">
+          <EnrolTokens />
+        </Collapsible>
 
         <Card>
           <CardHeader title="About" />

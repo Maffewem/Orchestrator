@@ -122,10 +122,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	enrolID := ""
 	if join == "" || subtle.ConstantTimeCompare([]byte(req.JoinToken), []byte(join)) != 1 {
-		s.logins.fail(key)
-		writeError(w, http.StatusUnauthorized, "invalid join token")
-		return
+		// Not the shared join token: it may be a scoped enrolment token (expiring, limited, revocable).
+		if enrolID = s.useEnrol(r, req.JoinToken); enrolID == "" {
+			s.logins.fail(key)
+			writeError(w, http.StatusUnauthorized, "invalid join token")
+			return
+		}
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -146,8 +150,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
+		if enrolID != "" {
+			s.releaseEnrol(r, enrolID)
+		}
 		s.internal(w, err)
 		return
+	}
+	if enrolID != "" {
+		s.noteEnrolDevice(r, enrolID, d.Name)
+		s.event(r.Context(), d.ID, "info", "enrol.used", d.Name+" registered with an enrolment token")
 	}
 	s.applyDeviceSetup(r.Context(), d, req.Setup)
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{DeviceID: d.ID, AgentToken: token, ServerKey: s.serverKey()})
@@ -189,13 +200,11 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withCredentials(cmds, s.githubToken(ctx))
-	// The join token for a rebuilt machine is added only here, in the response to the device that will
+	// A one-use enrolment token for a rebuilt machine is added only here, in the response to the device that will
 	// write the image, so it is never kept in the command history that dashboard users can read.
-	if join, _ := s.store.GetSetting(ctx, settingJoinToken); join != "" {
-		for i := range cmds {
-			if cmds[i].Action == api.ActionImageFlash && cmds[i].Args["enrol"] == "1" {
-				cmds[i].Args["join_token"] = join
-			}
+	for i := range cmds {
+		if cmds[i].Action == api.ActionImageFlash && cmds[i].Args["enrol"] == "1" {
+			cmds[i].Args["join_token"] = s.takePlain(r, cmds[i].ID)
 		}
 	}
 	cancel, _ := s.store.RecentlyCancelled(ctx, d.ID, time.Now().Add(-15*time.Minute))

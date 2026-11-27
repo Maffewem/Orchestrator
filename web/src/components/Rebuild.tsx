@@ -157,7 +157,7 @@ export function FlashDialog({ d, disk, onClose }: { d: Device; disk: Disk; onClo
             <input type="checkbox" className="mt-1" checked={enrol} onChange={(e) => setEnrol(e.target.checked)} />
             <span>
               Register the rebuilt machine automatically on first boot
-              <span className="block text-xs text-neutral-500">Adds a one-time job to the new system that installs the agent with this server’s join token (root-only file, deleted afterwards). Needs an ext4 root partition.</span>
+              <span className="block text-xs text-neutral-500">Adds a one-time job to the new system that installs the agent with a one-use enrolment token (48 hours, root-only file, deleted afterwards; revocable in Settings). Needs an ext4 root partition.</span>
             </span>
           </label>
           {enrol && (
@@ -253,5 +253,88 @@ export function BootCard({ d }: { d: Device }) {
         )}
       </div>
     </Card>
+  );
+}
+
+/** Scoped enrolment tokens: expire, limited uses, revocable. For cards, disks and bundles that carry a credential. */
+export function EnrolTokens() {
+  const list = usePoll(() => api.enrolTokens(), 30000, []);
+  const [label, setLabel] = useState("");
+  const [hours, setHours] = useState("24");
+  const [uses, setUses] = useState("1");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<string | null>(null);
+
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const t = await api.createEnrolToken({ label, ttl_hours: Number(hours), max_uses: Number(uses) });
+      setCreated(t.token ?? null);
+      setLabel("");
+      list.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (id: string, l: string) => {
+    if (!(await confirmDialog({ title: `Revoke "${l}"?`, message: "Devices that have not registered with it yet can no longer do so.", confirmLabel: "Revoke", danger: true }))) return;
+    await api.revokeEnrolToken(id);
+    list.reload();
+  };
+  const tone = (s: string) => (s === "active" ? "ok" : s === "revoked" ? "bad" : "neutral");
+
+  return (
+    <div className="space-y-4 p-5 text-sm">
+      <WarnNote>
+        Anything that carries a token (an SD card, a USB drive, a disk image) leaves that credential on it. Keep it as secure as the token, give it the shortest life and fewest uses that work, and revoke it when the card is lost.
+      </WarnNote>
+      {list.error && <ErrorNote>{list.error}</ErrorNote>}
+      {list.data?.length === 0 && <p className="text-neutral-500">No enrolment tokens yet.</p>}
+      <ul className="divide-y divide-neutral-100">
+        {list.data?.map((t) => (
+          <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 font-medium">
+                {t.label} <Badge tone={tone(t.status)}>{t.status}</Badge>
+              </div>
+              <p className="text-xs text-neutral-500">
+                {t.uses}/{t.max_uses} used · expires {new Date(t.expires_at).toLocaleString()}
+                {t.devices?.length ? ` · enrolled ${t.devices.join(", ")}` : ""}
+              </p>
+            </div>
+            {t.status === "active" && (
+              <Button size="sm" onClick={() => revoke(t.id, t.label)}>
+                Revoke
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {created && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <p className="mb-1 font-medium">Copy this token now; it is shown only once.</p>
+          <code className="break-all font-mono text-xs">{created}</code>
+        </div>
+      )}
+      <div className="grid gap-3 border-t border-neutral-100 pt-4 sm:grid-cols-3">
+        <Field label="Label">
+          <input className={inputClass} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Master SD card, shelf 2" />
+        </Field>
+        <Field label="Valid for (hours)" hint="Up to 720.">
+          <input className={inputClass} inputMode="numeric" value={hours} onChange={(e) => setHours(e.target.value)} />
+        </Field>
+        <Field label="Devices it can enrol" hint="1 to 100.">
+          <input className={inputClass} inputMode="numeric" value={uses} onChange={(e) => setUses(e.target.value)} />
+        </Field>
+      </div>
+      {error && <ErrorNote>{error}</ErrorNote>}
+      <Button loading={busy} disabled={!label.trim()} onClick={create}>
+        Create token
+      </Button>
+    </div>
   );
 }

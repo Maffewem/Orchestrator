@@ -105,6 +105,44 @@ export interface Container {
   networks?: { name: string; ip?: string; mac?: string }[];
 }
 
+export interface DiskVolume {
+  path: string;
+  size_bytes: number;
+  fstype?: string;
+  label?: string;
+  uuid?: string;
+  mountpoint?: string;
+  used_bytes?: number;
+  persistent?: boolean;
+  protected?: string;
+}
+export interface Disk {
+  path: string;
+  kind: "disk" | "loop";
+  size_bytes: number;
+  model?: string;
+  serial?: string;
+  transport?: string;
+  removable?: boolean;
+  rotational?: boolean;
+  volume: DiskVolume;
+  partitions?: DiskVolume[];
+  protected?: string;
+  system?: boolean;
+}
+export interface DiskShare {
+  source: string;
+  mountpoint: string;
+  fstype: string;
+  size_bytes?: number;
+  used_bytes?: number;
+  persistent?: boolean;
+}
+export interface DiskReport {
+  disks: Disk[];
+  shares: DiskShare[];
+}
+
 export type Health = "ok" | "warning" | "critical";
 
 export interface Device {
@@ -1216,6 +1254,9 @@ export const api = {
   containers: () => request<FleetContainer[]>("GET", "/api/containers"),
   command: (deviceId: string, action: string, target: string, args?: Record<string, string>) =>
     request<Command>("POST", `/api/devices/${deviceId}/commands`, { action, target, args }),
+  disks: (deviceId: string) => request<DiskReport>("GET", `/api/devices/${deviceId}/disks`),
+  diskAction: (deviceId: string, action: "format" | "partition" | "mount" | "unmount" | "share", args: Record<string, string>) =>
+    request<Command>("POST", `/api/devices/${deviceId}/disks/${action}`, args),
   getCommand: (id: string) => request<Command>("GET", `/api/commands/${id}`),
   events: (device?: string, limit = 100) =>
     request<Event[]>("GET", `/api/events?limit=${limit}${device ? `&device=${device}` : ""}`),

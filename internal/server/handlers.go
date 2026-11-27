@@ -279,6 +279,18 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.event(r.Context(), d.ID, "error", c.Action, fmt.Sprintf("Stack %s: %s failed: %s", c.Target, verb, res.Error))
 		}
+	case api.ActionDiskList:
+		// A refresh is not worth an activity entry unless it fails.
+		if !res.OK {
+			s.event(r.Context(), d.ID, "error", "disk.list", fmt.Sprintf("Listing disks on %s failed: %s", d.Name, res.Error))
+		}
+	case api.ActionDiskFormat, api.ActionDiskPartition, api.ActionDiskMount, api.ActionDiskUnmount, api.ActionShareMount:
+		// The audit trail records the outcome next to the request, with who asked.
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, diskSummary(c.Args["by"], c.Action, c.Args, d.Name, state))
 	case api.ActionRemove:
 		if !res.OK {
 			s.event(r.Context(), d.ID, "error", "container.remove", fmt.Sprintf("Removing %s failed: %s", c.Target, res.Error))
@@ -574,7 +586,7 @@ func (s *Server) handleGetCommand(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	writeJSON(w, http.StatusOK, scrubCommand(c))
 }
 
 type fleetContainer struct {

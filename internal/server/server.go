@@ -349,6 +349,8 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/projects/{id}/deployments", s.handleDeployProject)
 	admin("POST /api/projects/{id}/migrate", s.handleMigrateProject)
 	admin("POST /api/devices/{id}/dedicated/check", s.handleCheckDedicated)
+	admin("GET /api/devices/{id}/disks", s.handleListDisks)
+	admin("POST /api/devices/{id}/disks/{action}", s.handleDiskAction)
 	admin("GET /api/projects/{id}/migration", s.handleGetMigration)
 	admin("GET /api/cluster", s.handleGetCluster)
 	admin("PUT /api/cluster", s.handleSetCluster)

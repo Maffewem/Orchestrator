@@ -136,6 +136,7 @@ const (
 	CapDedicatedRelease = "dedicated-release"  // stopping or removing a worker also removes the device's access address
 	CapDedicatedVLAN    = "dedicated-vlan"     // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
 	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
+	CapDisks            = "disks"              // disk.list/format/partition/mount/unmount and share.mount/unmount
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
 )
@@ -350,7 +351,70 @@ const (
 	// ActionTunnelSync runs (or, with an empty Args["token"], removes) the device's cloudflared container.
 	// With Args["update"] == "1" it also pulls the newest image and recreates the container if that changed it.
 	ActionTunnelSync = "tunnel.sync"
+	// Disk management (admin only, always sent by the server's disk API, never by the generic commands API).
+	// ActionDiskList reports a DiskReport as JSON. It never changes anything.
+	ActionDiskList = "disk.list"
+	// ActionDiskFormat creates a filesystem on Args["device"] (fstype, label) once Args["confirm"] equals the device path.
+	ActionDiskFormat = "disk.format"
+	// ActionDiskPartition replaces the partition table of Args["device"] with GPT and Args["layout"] (MiB sizes, "rest").
+	ActionDiskPartition = "disk.partition"
+	// ActionDiskMount mounts Args["device"] at Args["mountpoint"]; Args["persist"] == "1" adds an fstab entry by UUID.
+	ActionDiskMount = "disk.mount"
+	// ActionDiskUnmount unmounts Args["mountpoint"] and drops its Orchestrator-written fstab entry.
+	ActionDiskUnmount = "disk.unmount"
+	// ActionShareMount mounts an SMB or NFS share (Args: kind, source, mountpoint, options, username, password, persist).
+	ActionShareMount = "share.mount"
 )
+
+// DiskReport is what a device reports for disk.list.
+type DiskReport struct {
+	Disks  []Disk      `json:"disks"`
+	Shares []DiskShare `json:"shares"`
+}
+
+// Disk is a block device (a whole disk or loop device) with its partitions.
+type Disk struct {
+	Path        string   `json:"path"`
+	Kind        string   `json:"kind"` // disk, loop
+	SizeBytes   int64    `json:"size_bytes"`
+	Model       string   `json:"model,omitempty"`
+	Serial      string   `json:"serial,omitempty"`
+	Transport   string   `json:"transport,omitempty"`
+	Removable   bool     `json:"removable,omitempty"`
+	Rotational  bool     `json:"rotational,omitempty"`
+	BackingFile string   `json:"backing_file,omitempty"`
+	Volume      Volume   `json:"volume"`
+	Partitions  []Volume `json:"partitions,omitempty"`
+	// Protected is why Orchestrator will not format, partition or unmount this disk (the system disk, or
+	// something is mounted or otherwise using it). Empty means it is free to use.
+	Protected string `json:"protected,omitempty"`
+	// System is set when the device holds the operating system, Docker or the agent.
+	System bool `json:"system,omitempty"`
+}
+
+// Volume is a filesystem (or the lack of one) on a disk or partition.
+type Volume struct {
+	Path       string `json:"path"`
+	SizeBytes  int64  `json:"size_bytes"`
+	FSType     string `json:"fstype,omitempty"`
+	Label      string `json:"label,omitempty"`
+	UUID       string `json:"uuid,omitempty"`
+	Mountpoint string `json:"mountpoint,omitempty"`
+	UsedBytes  int64  `json:"used_bytes,omitempty"`
+	Persistent bool   `json:"persistent,omitempty"` // has an Orchestrator-written fstab entry
+	// Protected is why this volume can't be formatted or unmounted from here.
+	Protected string `json:"protected,omitempty"`
+}
+
+// DiskShare is a mounted SMB or NFS share.
+type DiskShare struct {
+	Source     string `json:"source"`
+	Mountpoint string `json:"mountpoint"`
+	FSType     string `json:"fstype"`
+	SizeBytes  int64  `json:"size_bytes,omitempty"`
+	UsedBytes  int64  `json:"used_bytes,omitempty"`
+	Persistent bool   `json:"persistent,omitempty"`
+}
 
 // ContainerSpec is a running container's configuration, translated into what a DeploySpec can
 // express. Anything the translation cannot carry over is named in Unsupported.

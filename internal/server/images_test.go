@@ -148,14 +148,14 @@ func TestGoldImagesAndRebuild(t *testing.T) {
 
 	// Boot order needs the value typed back and a sane value.
 	for _, order := range []string{"f41", "0xz", "0x1f4; reboot"} {
-		if code := h.do("POST", base+"/boot", adminToken, map[string]string{"order": order, "confirm": order}, nil); code != http.StatusBadRequest {
+		if code := h.do("POST", base+"/boot", adminToken, map[string]string{"order": order, "confirm": "pi"}, nil); code != http.StatusBadRequest {
 			t.Errorf("order %q: %d", order, code)
 		}
 	}
-	if code := h.do("POST", base+"/boot", adminToken, map[string]string{"order": "0xf41", "confirm": "0xf14"}, nil); code != http.StatusBadRequest {
+	if code := h.do("POST", base+"/boot", adminToken, map[string]string{"order": "0xf41", "confirm": "0xf41"}, nil); code != http.StatusBadRequest {
 		t.Errorf("mismatched confirm: %d", code)
 	}
-	if code := h.do("POST", base+"/boot", adminToken, map[string]string{"order": "0xf41", "confirm": "0xf41"}, nil); code != http.StatusAccepted {
+	if code := h.do("POST", base+"/boot", adminToken, map[string]string{"order": "0xf41", "confirm": "pi"}, nil); code != http.StatusAccepted {
 		t.Errorf("boot set: %d", code)
 	}
 	// The generic commands API can't reach any of this.

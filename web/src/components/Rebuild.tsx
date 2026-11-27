@@ -285,11 +285,11 @@ export function BootCard({ d }: { d: Device }) {
                 </select>
               )}
             </Field>
-            <Field label={`Type ${order} to confirm`} hint="The bootloader's own code for this order.">
-              <input className={inputClass + " font-mono"} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={order} autoComplete="off" spellCheck={false} />
+            <Field label={`Type ${d.name} to confirm`} hint={`Sets the boot order to ${list.join(" → ")}.`}>
+              <input className={inputClass + " font-mono"} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={d.name} autoComplete="off" spellCheck={false} />
             </Field>
             {done && <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-ok">{done}</div>}
-            <Button variant="danger" loading={busy} disabled={confirm.toLowerCase() !== order} onClick={apply}>
+            <Button variant="danger" loading={busy} disabled={confirm !== d.name} onClick={apply}>
               Stage boot order
             </Button>
           </>

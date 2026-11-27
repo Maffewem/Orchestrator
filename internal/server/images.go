@@ -308,7 +308,7 @@ func (s *Server) handleGetBoot(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(done.Output))
 }
 
-// handleSetBoot stages a new boot order. The order must be typed back.
+// handleSetBoot stages a new boot order. The device name must be typed back.
 func (s *Server) handleSetBoot(w http.ResponseWriter, r *http.Request) {
 	d, ok := s.lookupDevice(w, r)
 	if !ok {
@@ -326,8 +326,8 @@ func (s *Server) handleSetBoot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "enter a boot order such as 0xf41 (1 SD, 2 network, 4 USB, 6 NVMe, e eMMC, f restart; read right to left)")
 		return
 	}
-	if strings.ToLower(strings.TrimSpace(req.Confirm)) != order {
-		writeError(w, http.StatusBadRequest, "type the boot order ("+order+") to confirm")
+	if strings.TrimSpace(req.Confirm) != d.Name {
+		writeError(w, http.StatusBadRequest, "type the device name ("+d.Name+") to confirm")
 		return
 	}
 	if !hasCap(d, api.CapImages) || d.Offline {

@@ -81,6 +81,9 @@ func (s *Server) pollProject(ctx context.Context, p *store.Project, head *store.
 		return // no watched path changed
 	}
 	d, err := s.deploy(ctx, p, head, store.TriggerPoll)
+	if err == nil {
+		s.supersedeQueued(ctx, d)
+	}
 	s.pollMu.Lock()
 	s.polled[p.ID] = head.SHA // don't hammer a failing deploy; the next new commit tries again
 	s.pollMu.Unlock()

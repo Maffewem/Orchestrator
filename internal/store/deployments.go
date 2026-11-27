@@ -358,3 +358,24 @@ func (s *Store) UnfinishedLocal(ctx context.Context) ([]string, error) {
 	}
 	return ids, rows.Err()
 }
+
+// QueuedPushDeployments lists a project's production deployments that came from a push or a
+// poll and have not started yet, oldest first.
+func (s *Store) QueuedPushDeployments(ctx context.Context, projectID string) ([]*Deployment, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+deploymentCols+` FROM deployments
+		WHERE project_id = ? AND preview_id = '' AND status = ? AND trigger IN (?, ?)
+		ORDER BY created_at, rowid`, projectID, DeploymentQueued, TriggerPush, TriggerPoll)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Deployment{}
+	for rows.Next() {
+		d, err := scanDeployment(s.box, rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}

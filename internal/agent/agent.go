@@ -395,6 +395,11 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		err = a.syncTunnel(cctx, c.Args["token"], c.Args["update"] == "1")
 	case api.ActionProxySync:
 		err = a.syncProxy(cctx, c.Args["caddyfile"], c.Args["cloudflare_token"])
+	case api.ActionDiskList, api.ActionDiskFormat, api.ActionDiskPartition, api.ActionDiskMount, api.ActionDiskUnmount, api.ActionShareMount:
+		// Formatting a large disk can take a long time; the other disk actions are quick.
+		dctx, dcancel := context.WithTimeout(ctx, 30*time.Minute)
+		output, err = a.diskAction(dctx, c)
+		dcancel()
 	case api.ActionBackup, api.ActionRestore:
 		// Large volumes over a slow link can take a while.
 		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)

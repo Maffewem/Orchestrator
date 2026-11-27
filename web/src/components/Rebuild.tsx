@@ -112,6 +112,14 @@ export function FlashDialog({ d, disk, onClose }: { d: Device; disk: Disk; onClo
 
   const go = async () => {
     if (!chosen) return;
+    // A second, separate prompt that restates exactly what is about to be destroyed.
+    const ok = await confirmDialog({
+      title: `Erase ${disk.path} on ${d.name}?`,
+      message: `This permanently erases ${bytes(disk.size_bytes)}${disk.model ? ` (${disk.model})` : ""} and writes "${chosen.name}" to it.${enrol ? " The new system will register itself on first boot." : ""} There is no undo.`,
+      confirmLabel: "Yes, erase it",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -181,11 +189,22 @@ export function FlashDialog({ d, disk, onClose }: { d: Device; disk: Disk; onClo
   );
 }
 
-const presets: [string, string][] = [
-  ["SD card, then USB, then network (Pi default)", "0xf241"],
-  ["NVMe, then SD card, then USB", "0xf416"],
-  ["Network first, then SD card (for rebuilds)", "0xf12"],
-  ["USB first, then SD card", "0xf14"],
+const sources: Record<string, string> = { "1": "SD card", "2": "Network", "4": "USB drive", "6": "NVMe", "7": "HTTP boot", e: "eMMC" };
+
+/** "0xf41" -> ["SD card", "USB drive"]: digits are tried right to left; f means start over. */
+export function describeOrder(hex?: string): string[] {
+  if (!hex) return [];
+  return hex.replace(/^0x/i, "").split("").reverse().filter((c) => c !== "f" && c !== "0").map((c) => sources[c.toLowerCase()] ?? `source ${c}`);
+}
+
+const keyOf = (name: string) => Object.entries(sources).find(([, v]) => v === name)?.[0] ?? "1";
+/** Ordered source names -> BOOT_ORDER, always ending in "restart" (f) so a failed list retries. */
+const toHex = (names: string[]) => "0xf" + [...names].reverse().map(keyOf).join("");
+
+const quick: [string, string[]][] = [
+  ["SD card, then USB, then network", ["SD card", "USB drive", "Network"]],
+  ["NVMe, then SD card, then USB", ["NVMe", "SD card", "USB drive"]],
+  ["Network first, then SD card (for rebuilds)", ["Network", "SD card"]],
 ];
 
 /** Raspberry Pi boot order, staged with rpi-eeprom-config and applied on the next reboot. */
@@ -193,7 +212,8 @@ export function BootCard({ d }: { d: Device }) {
   const [info, setInfo] = useState<Awaited<ReturnType<typeof api.bootInfo>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [order, setOrder] = useState(presets[0][1]);
+  const [list, setList] = useState<string[]>(quick[0][1]);
+  const order = toHex(list);
   const [confirm, setConfirm] = useState("");
   const [done, setDone] = useState<string | null>(null);
 
@@ -233,16 +253,39 @@ export function BootCard({ d }: { d: Device }) {
         {info?.supported && (
           <>
             <p>
-              {info.model} · current <span className="font-mono">BOOT_ORDER={info.order ?? "default"}</span>
+              {info.model} · current setting <span className="font-mono">{info.order ?? "default"}</span>
             </p>
-            <Field label="New boot order" hint="Each digit is a source tried right to left: 1 SD, 2 network, 4 USB, 6 NVMe, f restart. A wrong order can leave the Pi unable to boot; keep a way to recover it (rpiboot or a spare SD card).">
-              <select className={inputClass} value={order} onChange={(e) => { setOrder(e.target.value); setConfirm(""); }}>
-                {presets.map(([label, v]) => (
-                  <option key={v} value={v}>{label} ({v})</option>
+            <p className="text-neutral-500">Tried in this order: {describeOrder(info.order).join(" → ") || "default"} (then starts over).</p>
+            <Field label="Start from a common setup">
+              <select className={inputClass} value="" onChange={(e) => { if (e.target.value) { setList(quick[Number(e.target.value)][1]); setConfirm(""); } }}>
+                <option value="">Choose…</option>
+                {quick.map(([label], i) => (
+                  <option key={label} value={i}>{label}</option>
                 ))}
               </select>
             </Field>
-            <Field label={`Type ${order} to confirm`}>
+            <Field label="New boot order" hint="The Pi tries each in turn and boots the first that works. A wrong order can leave it unable to boot; keep a way to recover it (rpiboot or a spare SD card).">
+              <ol className="space-y-1.5">
+                {list.map((n, i) => (
+                  <li key={n} className="flex items-center gap-2">
+                    <span className="w-5 text-neutral-500">{i + 1}.</span>
+                    <span className="flex-1">{n}</span>
+                    <Button size="sm" disabled={i === 0} onClick={() => { const l = [...list]; [l[i - 1], l[i]] = [l[i], l[i - 1]]; setList(l); setConfirm(""); }}>↑</Button>
+                    <Button size="sm" disabled={i === list.length - 1} onClick={() => { const l = [...list]; [l[i + 1], l[i]] = [l[i], l[i + 1]]; setList(l); setConfirm(""); }}>↓</Button>
+                    <Button size="sm" disabled={list.length === 1} onClick={() => { setList(list.filter((x) => x !== n)); setConfirm(""); }}>Remove</Button>
+                  </li>
+                ))}
+              </ol>
+              {Object.values(sources).filter((n) => !list.includes(n)).length > 0 && (
+                <select className={inputClass + " mt-2"} value="" onChange={(e) => { if (e.target.value) { setList([...list, e.target.value]); setConfirm(""); } }}>
+                  <option value="">Add a boot source…</option>
+                  {Object.values(sources).filter((n) => !list.includes(n)).map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            <Field label={`Type ${order} to confirm`} hint="The bootloader's own code for this order.">
               <input className={inputClass + " font-mono"} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={order} autoComplete="off" spellCheck={false} />
             </Field>
             {done && <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-ok">{done}</div>}

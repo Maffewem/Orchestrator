@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -646,26 +645,49 @@ func (s *Store) GetCommand(ctx context.Context, id string) (*api.Command, error)
 
 // DispatchCommands moves a device's pending commands to dispatched and returns them, oldest first.
 func (s *Store) DispatchCommands(ctx context.Context, deviceID string) ([]api.Command, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`UPDATE commands SET status = ?, updated_at = ? WHERE device_id = ? AND status = ? RETURNING `+commandCols,
-		api.CommandDispatched, time.Now().Unix(), deviceID, api.CommandPending)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer tx.Rollback()
+	// Commands leave in the order they were queued. created_at only has one-second resolution,
+	// so two pushes a moment apart would otherwise tie and could run newest-first, leaving the
+	// older commit deployed last; rowid is the insertion order.
+	idRows, err := tx.QueryContext(ctx,
+		`SELECT id FROM commands WHERE device_id = ? AND status = ? ORDER BY created_at, rowid`,
+		deviceID, api.CommandPending)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for idRows.Next() {
+		var id string
+		if err := idRows.Scan(&id); err != nil {
+			idRows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	idRows.Close()
+	if err := idRows.Err(); err != nil {
+		return nil, err
+	}
 	out := []api.Command{}
-	for rows.Next() {
-		c, err := scanCommand(s.box, rows)
-		if err != nil {
+	for _, id := range ids {
+		row := tx.QueryRowContext(ctx,
+			`UPDATE commands SET status = ?, updated_at = ? WHERE id = ? AND status = ? RETURNING `+commandCols,
+			api.CommandDispatched, time.Now().Unix(), id, api.CommandPending)
+		c, err := scanCommand(s.box, row)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		} else if err != nil {
 			return nil, err
 		}
 		out = append(out, *c)
 	}
-	if err := rows.Err(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	// RETURNING order is unspecified.
-	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
 }
 

@@ -152,6 +152,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("Push to %s could not deploy %s: %v", branch, p.Name, err))
 			continue
 		}
+		s.supersedeQueued(r.Context(), d)
 		ids = append(ids, d.ID)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"deployments": ids})

@@ -115,7 +115,7 @@ export function FlashDialog({ d, disk, onClose }: { d: Device; disk: Disk; onClo
     // A second, separate prompt that restates exactly what is about to be destroyed.
     const ok = await confirmDialog({
       title: `Erase ${disk.path} on ${d.name}?`,
-      message: `This permanently erases ${bytes(disk.size_bytes)}${disk.model ? ` (${disk.model})` : ""} and writes "${chosen.name}" to it.${enrol ? " The new system will register itself on first boot." : ""} There is no undo.`,
+      message: `This permanently erases ${bytes(disk.size_bytes)}${disk.model ? ` (${disk.model})` : ""} and writes "${chosen.name}" to it.${enrol ? " The new system will register itself on first boot." : ""} This is irreversible.`,
       confirmLabel: "Yes, erase it",
       danger: true,
     });
@@ -173,7 +173,7 @@ export function FlashDialog({ d, disk, onClose }: { d: Device; disk: Disk; onClo
               <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
           )}
-          <Field label={`Type ${disk.path} to confirm`} hint="This cannot be undone.">
+          <Field label={`Type ${disk.path} to confirm`} hint="This is irreversible.">
             <input className={inputClass + " font-mono"} value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder={disk.path} autoComplete="off" spellCheck={false} />
           </Field>
           {error && <ErrorNote>{error}</ErrorNote>}
@@ -253,7 +253,7 @@ export function BootCard({ d }: { d: Device }) {
         {info?.supported && (
           <>
             <p>
-              {info.model} · current setting <span className="font-mono">{info.order ?? "default"}</span>
+              {info.model}
             </p>
             <p className="text-neutral-500">Tried in this order: {describeOrder(info.order).join(" → ") || "default"} (then starts over).</p>
             <Field label="Start from a common setup">

@@ -299,11 +299,23 @@ export interface LEDConfig {
   /** Keep every LED of the profile off. */
   stealth?: boolean;
   rules?: LEDRule[];
+  /** Colours and brightness, for LEDs that can show them (the Compute Blade's). */
+  colours?: LEDColours;
+}
+export interface LEDColours {
+  normal?: string;
+  warn?: string;
+  crit?: string;
+  identify?: string;
+  /** 1 to 100; absent means full. */
+  brightness?: number;
 }
 export interface LEDStatus {
   profile: string;
   supported: boolean;
   note?: string;
+  /** The LEDs can show colours and brightness. */
+  colours?: boolean;
   leds: LED[];
   config: LEDConfig;
   values?: Partial<Record<LEDMetric, number>>;

@@ -102,6 +102,41 @@ const METRICS: { id: LEDMetric; label: string; unit: string; warn: number; crit:
 ];
 
 const STATE_TONE = { ok: "ok", warn: "warn", crit: "bad", identify: "info" } as const;
+const STATE_TEXT: Record<string, string> = { ok: "Normal", warn: "Warning", crit: "Critical", identify: "Flashing to find the device" };
+
+/** What each LED does when nothing is asked of it, in words. */
+function defaultBehaviour(trigger?: string): string {
+  switch (trigger) {
+    case undefined:
+    case "":
+      return "";
+    case "none":
+      return "off";
+    case "default-on":
+      return "always on";
+    case "heartbeat":
+      return "heartbeat pattern";
+    case "timer":
+      return "regular blink";
+    default:
+      return trigger.startsWith("mmc") ? "SD card activity" : trigger;
+  }
+}
+
+const DEFAULT_COLOURS = { normal: "#000000", warn: "#ff8c00", crit: "#ff0000", identify: "#0000ff" };
+
+/** A colour picker that remembers "use the default" as an empty value. */
+function ColourField({ label, value, fallback, onChange, hint, offIsDefault }: { label: string; value?: string; fallback: string; onChange: (v: string) => void; hint?: string; offIsDefault?: boolean }) {
+  return (
+    <Field label={label} hint={hint}>
+      <div className="flex items-center gap-2">
+        <input type="color" aria-label={label} className="h-9 w-12 cursor-pointer rounded border border-neutral-300 bg-white p-1" value={value || fallback} onChange={(e) => onChange(e.target.value)} />
+        <span className="text-xs text-neutral-500">{value ? value : offIsDefault ? "Off (default)" : "Default"}</span>
+        {value && <Button variant="ghost" onClick={() => onChange("")}>Reset</Button>}
+      </div>
+    </Field>
+  );
+}
 
 function LEDCard({ d }: { d: Device }) {
   // Each read is a command to the agent, so these load once and again after a change, not on a timer.
@@ -117,12 +152,21 @@ function LEDCard({ d }: { d: Device }) {
   if (st.error && !status) return <ErrorNote>{st.error}</ErrorNote>;
   if (!status || !cfg) return <Loading />;
   const rules = cfg.rules ?? [];
+  const blade = cfg.profile === "blade";
+  const canColour = blade || (!!status.colours && cfg.profile === status.profile);
+  const colours = cfg.colours ?? {};
+  const setColour = (patch: Partial<NonNullable<LEDConfig["colours"]>>) => setCfg({ ...cfg, colours: { ...colours, ...patch } });
   const setRule = (i: number, patch: Partial<LEDRule>) => setCfg({ ...cfg, rules: rules.map((r, j) => (j === i ? { ...r, ...patch } : r)) });
-  const ledNames = status.leds.map((l) => l.name);
+  // Only the lights that are really on the board: the kernel also lists internal triggers such as
+  // "default-on" and "mmc0" as LEDs. Lights belong to the saved type of device, so after switching the
+  // type they show up once it is saved.
+  const profileSaved = cfg.profile === status.profile;
+  const shown = profileSaved ? status.leds.filter((l) => l.role !== "other") : [];
+  const ledNames = shown.map((l) => l.name);
   const addRule = () => {
     const used = new Set(rules.map((r) => r.metric));
     const m = METRICS.find((x) => !used.has(x.id)) ?? METRICS[0];
-    const led = status.leds.find((l) => l.role === "activity")?.name ?? ledNames[0] ?? "";
+    const led = shown.find((l) => l.role === "activity")?.name ?? ledNames[0] ?? "";
     setCfg({ ...cfg, rules: [...rules, { metric: m.id, led, warn: m.warn, crit: m.crit }] });
   };
   const save = async () => {
@@ -132,7 +176,7 @@ function LEDCard({ d }: { d: Device }) {
       const next = await api.setLEDConfig(d.id, cfg);
       setCfg({ ...next.config, rules: next.config.rules ?? [] });
       st.reload();
-      notify("LED behaviour saved", "success");
+      notify("LED settings saved", "success");
     } catch (e) {
       setError(errText(e));
     } finally {
@@ -141,73 +185,112 @@ function LEDCard({ d }: { d: Device }) {
   };
   return (
     <Card>
-      <CardHeader title="LEDs" subtitle="Flash a device to find it, or show a threshold on its LEDs." />
-      <div className="space-y-5 p-5">
+      <CardHeader title="LEDs" subtitle="Choose which lights this device has, and turn a high temperature, CPU, memory or disk reading into a visible warning." />
+      <div className="space-y-6 p-5">
         {!status.supported && status.note && <ErrorNote>{status.note}</ErrorNote>}
-        {status.leds.length > 0 && (
-          <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 text-sm">
-            {status.leds.map((l) => (
-              <li key={l.name} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                <span className="font-medium">{l.name} <span className="font-normal text-neutral-500">{l.role === "other" ? "" : l.role + " LED"}</span></span>
-                <span className="flex items-center gap-2 text-xs text-neutral-500">
-                  {l.trigger && <span>normally: {l.trigger}</span>}
-                  {l.state ? <Badge tone={STATE_TONE[l.state as keyof typeof STATE_TONE] ?? "neutral"}>{l.state === "identify" ? "flashing" : l.state}</Badge> : <Badge>untouched</Badge>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Profile" hint="Pi: the LEDs the kernel lists (activity and power). Compute Blade: the blade's top and edge LEDs.">
+
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">1. The lights on this device</h3>
+          {!profileSaved ? (
+            <p className="text-sm text-neutral-500">Save to list the lights of the type of device you chose.</p>
+          ) : shown.length === 0 ? (
+            <p className="text-sm text-neutral-500">No lights found for this type of device.</p>
+          ) : (
+            <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 text-sm">
+              {shown.map((l) => (
+                <li key={l.name} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                  <span className="font-medium">{l.name} <span className="font-normal text-neutral-500">{l.role === "other" ? "" : l.role + " light"}</span></span>
+                  <span className="flex items-center gap-2 text-xs text-neutral-500">
+                    {defaultBehaviour(l.trigger) && !l.state && <span>Default: {defaultBehaviour(l.trigger)}</span>}
+                    {l.state ? <Badge tone={STATE_TONE[l.state as keyof typeof STATE_TONE] ?? "neutral"}>{STATE_TEXT[l.state] ?? l.state}</Badge> : <Badge>System default</Badge>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Field label="Type of device" hint="Raspberry Pi: the green activity and red power lights. Compute Blade: the two coloured lights on the blade (a Pi 5 or CM5 is needed).">
             <select className={inputClass} value={cfg.profile} onChange={(e) => setCfg({ ...cfg, profile: e.target.value as LEDConfig["profile"] })}>
-              <option value="pi">Raspberry Pi (kernel LEDs)</option>
-              <option value="blade">Compute Blade LEDs (CM5, experimental)</option>
+              <option value="pi">Raspberry Pi (activity and power lights)</option>
+              <option value="blade">Compute Blade lights (CM5, experimental)</option>
             </select>
           </Field>
-          <Field label="Show thresholds on the LEDs" as="div" hint="Normal: the LED does what it always does. Warning: slow blink. Critical: fast blink.">
-            <Toggle label="Show thresholds on the LEDs" checked={cfg.enabled} onChange={(v) => setCfg({ ...cfg, enabled: v })} />
-          </Field>
-        </div>
-        {cfg.profile === "blade" && (
-          <p className="rounded-lg bg-neutral-50 p-3 text-xs text-neutral-600">
-            Experimental: drives the blade's two LEDs (blade-top, blade-edge) through the Pi 5 / CM5 PIO block, on GPIO18. It needs <code>/dev/pio0</code> and has not been checked on real hardware yet. CM4 blades are not supported. Warning is amber, critical red, identify blue.
-          </p>
-        )}
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-sm"><b>Stealth mode</b><br /><span className="text-neutral-500">Keep every LED of this profile off, whatever the rules say. Identify still flashes.</span></span>
-          <Toggle label="Stealth mode" checked={!!cfg.stealth} onChange={(v) => setCfg({ ...cfg, stealth: v })} />
-        </div>
-        <div className="space-y-2">
-          {rules.length === 0 && <p className="text-sm text-neutral-500">No rules yet. Add one to turn a threshold into a blink.</p>}
+          {blade && (
+            <p className="rounded-lg bg-neutral-50 p-3 text-xs text-neutral-600">
+              Experimental. The blade's two lights (blade-top, blade-edge) are driven through the Pi 5 / CM5's PIO block on GPIO18, which needs <code>/dev/pio0</code>. CM4 blades are not supported yet.
+            </p>
+          )}
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-sm">
+              <b>2. Show warnings on the lights</b>
+              <br />
+              <span className="text-neutral-500">
+                {blade
+                  ? "A light changes colour when a reading passes a limit below. Normal readings leave it as set under Colours."
+                  : "A light blinks slowly at the warning level and quickly at the critical level. At normal readings it goes back to its system default."}
+              </span>
+            </span>
+            <Toggle label="Show warnings on the lights" checked={cfg.enabled} onChange={(v) => setCfg({ ...cfg, enabled: v })} />
+          </div>
+          {rules.length === 0 && <p className="text-sm text-neutral-500">No rules yet. A rule links one reading to one light, for example "Temperature on blade-top".</p>}
           {rules.map((r, i) => {
             const m = METRICS.find((x) => x.id === r.metric)!;
             const now = status.values?.[r.metric];
             return (
-              <div key={i} className="grid items-start gap-2 rounded-lg border border-neutral-200 p-3 sm:grid-cols-[1fr_1fr_5.5rem_5.5rem_auto]">
-                <Field label="Metric" hint={now === undefined ? undefined : `now ${now.toFixed(0)}${m.unit}`}>
-                  <select className={inputClass} value={r.metric} onChange={(e) => { const nm = METRICS.find((x) => x.id === e.target.value)!; setRule(i, { metric: nm.id, warn: nm.warn, crit: nm.crit }); }}>
-                    {METRICS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="LED">
-                  <select className={inputClass} value={r.led} onChange={(e) => setRule(i, { led: e.target.value })}>
-                    {!ledNames.includes(r.led) && <option value={r.led}>{r.led}</option>}
-                    {ledNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </Field>
-                <Field label={`Warn ${m.unit}`}><input type="number" className={inputClass} value={r.warn} onChange={(e) => setRule(i, { warn: Number(e.target.value) })} /></Field>
-                <Field label={`Critical ${m.unit}`}><input type="number" className={inputClass} value={r.crit} onChange={(e) => setRule(i, { crit: Number(e.target.value) })} /></Field>
-                <Button variant="ghost" aria-label="Remove rule" onClick={() => setCfg({ ...cfg, rules: rules.filter((_, j) => j !== i) })}><Trash2 className="size-4" /></Button>
+              <div key={i} className="space-y-2 rounded-lg border border-neutral-200 p-3">
+                <div className="grid items-start gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                  <Field label="Reading to watch" hint={now === undefined ? "No reading on this device" : `Right now: ${now.toFixed(0)}${m.unit}`}>
+                    <select className={inputClass} value={r.metric} onChange={(e) => { const nm = METRICS.find((x) => x.id === e.target.value)!; setRule(i, { metric: nm.id, warn: nm.warn, crit: nm.crit }); }}>
+                      {METRICS.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Show it on this light">
+                    <select className={inputClass} value={r.led} onChange={(e) => setRule(i, { led: e.target.value })}>
+                      {!ledNames.includes(r.led) && <option value={r.led}>{r.led}</option>}
+                      {ledNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </Field>
+                  <Button variant="ghost" aria-label="Remove rule" onClick={() => setCfg({ ...cfg, rules: rules.filter((_, j) => j !== i) })}><Trash2 className="size-4" /></Button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Field label={`Warning from (${m.unit})`}><input type="number" className={inputClass} value={r.warn} onChange={(e) => setRule(i, { warn: Number(e.target.value) })} /></Field>
+                  <Field label={`Critical from (${m.unit})`}><input type="number" className={inputClass} value={r.crit} onChange={(e) => setRule(i, { crit: Number(e.target.value) })} /></Field>
+                </div>
+                <p className="text-xs text-neutral-500">
+                  {m.label} below {r.warn}{m.unit} is normal, from {r.warn}{m.unit} it is a warning, from {r.crit}{m.unit} it is critical.
+                </p>
               </div>
             );
           })}
-          <p className="text-xs text-neutral-500">If several rules use the same LED, the worst state wins.</p>
-        </div>
+          {rules.length > 1 && <p className="text-xs text-neutral-500">If several rules use the same light, the most serious one wins.</p>}
+          <Button icon={<Plus className="size-4" />} onClick={addRule} disabled={ledNames.length === 0}>Add rule</Button>
+        </section>
+
+        {canColour && (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">3. Colours and brightness</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ColourField label="Normal" value={colours.normal} fallback={DEFAULT_COLOURS.normal} offIsDefault hint="What the light shows when everything is fine." onChange={(v) => setColour({ normal: v })} />
+              <ColourField label="Warning" value={colours.warn} fallback={DEFAULT_COLOURS.warn} hint="Blinks slowly." onChange={(v) => setColour({ warn: v })} />
+              <ColourField label="Critical" value={colours.crit} fallback={DEFAULT_COLOURS.crit} hint="Blinks quickly." onChange={(v) => setColour({ crit: v })} />
+              <ColourField label="Find this device" value={colours.identify} fallback={DEFAULT_COLOURS.identify} hint="Pulses slowly while Identify is on." onChange={(v) => setColour({ identify: v })} />
+            </div>
+            <Field label={`Brightness: ${colours.brightness ?? 100}%`} hint="Applies to every colour above.">
+              <input type="range" min={1} max={100} className="w-full" value={colours.brightness ?? 100} onChange={(e) => setColour({ brightness: Number(e.target.value) >= 100 ? 0 : Number(e.target.value) })} />
+            </Field>
+          </section>
+        )}
+        {!canColour && <p className="text-xs text-neutral-500">These lights are on or off only, so there is no colour or brightness to set.</p>}
+
+        <section className="flex items-center justify-between gap-4">
+          <span className="text-sm"><b>Lights off</b><br /><span className="text-neutral-500">Keep every light of this device switched off, whatever the rules say, for example in a bedroom or a dark cabinet. Identify can still flash it.</span></span>
+          <Toggle label="Lights off" checked={!!cfg.stealth} onChange={(v) => setCfg({ ...cfg, stealth: v })} />
+        </section>
+
         {error && <ErrorNote>{error}</ErrorNote>}
-        <div className="flex flex-wrap gap-2">
-          <Button icon={<Plus className="size-4" />} onClick={addRule} disabled={ledNames.length === 0 && cfg.profile === "pi"}>Add rule</Button>
-          <Button variant="primary" loading={saving} onClick={save}>Save</Button>
-        </div>
+        <div><Button variant="primary" loading={saving} onClick={save}>Save</Button></div>
       </div>
     </Card>
   );

@@ -32,6 +32,11 @@ type ledDriver interface {
 	Restore()                         // put everything back
 }
 
+// colourDriver is implemented by drivers whose LEDs can show colours and brightness.
+type colourDriver interface {
+	SetColours(api.LEDColours)
+}
+
 // ledProfiles is the hook for boards that need their own driver. A profile that is listed but has
 // no driver says so in the dashboard instead of silently doing nothing.
 var ledProfiles = map[string]func(root string) ledDriver{
@@ -252,6 +257,45 @@ func (c *ledCtl) useProfile() {
 	}
 	c.drv = mk(c.root)
 	c.state = map[string]string{}
+	c.applyColours()
+}
+
+// applyColours hands the configured colours to a driver that has them.
+func (c *ledCtl) applyColours() {
+	if cd, ok := c.drv.(colourDriver); ok {
+		var col api.LEDColours
+		if c.cfg.Colours != nil {
+			col = *c.cfg.Colours
+		}
+		cd.SetColours(col)
+	}
+}
+
+func sameColours(a, b *api.LEDColours) bool {
+	var x, y api.LEDColours
+	if a != nil {
+		x = *a
+	}
+	if b != nil {
+		y = *b
+	}
+	return x == y
+}
+
+// parseHexColour reads "#rrggbb".
+func parseHexColour(s string) ([3]byte, bool) {
+	var c [3]byte
+	if len(s) != 7 || s[0] != '#' {
+		return c, false
+	}
+	for i := 0; i < 3; i++ {
+		v, err := strconv.ParseUint(s[1+2*i:3+2*i], 16, 8)
+		if err != nil {
+			return c, false
+		}
+		c[i] = byte(v)
+	}
+	return c, true
 }
 
 func validLEDConfig(cfg *api.LEDConfig) error {
@@ -260,6 +304,18 @@ func validLEDConfig(cfg *api.LEDConfig) error {
 	}
 	if ledProfiles[cfg.Profile] == nil {
 		return fmt.Errorf("unknown LED profile %q", cfg.Profile)
+	}
+	if c := cfg.Colours; c != nil {
+		for _, v := range []string{c.Normal, c.Warn, c.Crit, c.Identify} {
+			if v != "" {
+				if _, ok := parseHexColour(v); !ok {
+					return fmt.Errorf("invalid colour %q (use #rrggbb)", v)
+				}
+			}
+		}
+		if c.Brightness < 0 || c.Brightness > 100 {
+			return errors.New("brightness must be between 1 and 100 percent")
+		}
 	}
 	if len(cfg.Rules) > 32 {
 		return errors.New("too many LED rules (32 at most)")
@@ -289,6 +345,7 @@ func (c *ledCtl) list() api.LEDStatus {
 	defer c.mu.Unlock()
 	leds, note, err := c.drv.List()
 	st := api.LEDStatus{Profile: c.cfg.Profile, Supported: note == "" && err == nil, Note: note, Config: c.cfg, LEDs: leds, Values: c.values}
+	_, st.Colours = c.drv.(colourDriver)
 	if err != nil {
 		st.Note = err.Error()
 	}
@@ -318,9 +375,13 @@ func (c *ledCtl) setConfig(cfg api.LEDConfig) error {
 		return err
 	}
 	profileChanged := cfg.Profile != c.cfg.Profile
+	coloursChanged := !sameColours(cfg.Colours, c.cfg.Colours)
 	c.cfg = cfg
 	if profileChanged {
 		c.useProfile()
+	} else if coloursChanged {
+		c.applyColours()
+		c.state = map[string]string{} // show every LED again in its new colour
 	}
 	c.applyLocked()
 	return nil

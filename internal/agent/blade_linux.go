@@ -25,28 +25,54 @@ var bladeNames = [2]string{"blade-top", "blade-edge"}
 
 type rgb = [3]byte
 
-// bladeColour is what each pattern shows on a blade LED, and whether it blinks.
-func bladeColour(pattern string) (c rgb, blink time.Duration) {
+// bladeColour is what each pattern shows on a blade LED, and whether it blinks. User colours replace the
+// defaults: warning amber, critical red, identify blue, normal off.
+func (b *bladeLEDs) bladeColour(pattern string) (c rgb, blink time.Duration) {
+	pick := func(user string, def rgb) rgb {
+		if v, ok := parseHexColour(user); ok {
+			return v
+		}
+		return def
+	}
 	switch pattern {
 	case "slow":
-		return rgb{255, 140, 0}, 600 * time.Millisecond // warning: amber
+		return pick(b.colours.Warn, rgb{255, 140, 0}), 600 * time.Millisecond
 	case "fast":
-		return rgb{255, 0, 0}, 120 * time.Millisecond // critical: red
+		return pick(b.colours.Crit, rgb{255, 0, 0}), 120 * time.Millisecond
 	case "identify":
-		return rgb{0, 0, 255}, 0 // blue, so it is not mistaken for a warning; it pulses (see pulse)
+		return pick(b.colours.Identify, rgb{0, 0, 255}), 0 // it pulses (see pulse)
 	case "on":
 		return rgb{0, 160, 0}, 0
+	case "restore": // normal: steady in the chosen colour, or dark
+		return pick(b.colours.Normal, rgb{}), 0
 	}
-	return rgb{}, 0 // restore, off, stealth
+	return rgb{}, 0 // off, stealth
+}
+
+// SetColours takes the colours and brightness from the LED configuration.
+func (b *bladeLEDs) SetColours(c api.LEDColours) {
+	b.mu.Lock()
+	b.colours = c
+	b.mu.Unlock()
+}
+
+// scaled applies the configured brightness.
+func (b *bladeLEDs) scaled(c rgb) rgb {
+	p := b.colours.Brightness
+	if p <= 0 || p >= 100 {
+		return c
+	}
+	return rgb{byte(int(c[0]) * p / 100), byte(int(c[1]) * p / 100), byte(int(c[2]) * p / 100)}
 }
 
 type bladeLEDs struct {
-	open func() (pixelWriter, error)
-	mu   sync.Mutex
-	w    pixelWriter
-	cur  [2]rgb
-	stop [2]context.CancelFunc
-	err  error
+	colours api.LEDColours
+	open    func() (pixelWriter, error)
+	mu      sync.Mutex
+	w       pixelWriter
+	cur     [2]rgb
+	stop    [2]context.CancelFunc
+	err     error
 }
 
 func newBladeLEDs(devExists func() bool, open func() (pixelWriter, error)) ledDriver {
@@ -82,7 +108,7 @@ func (b *bladeLEDs) push() error {
 		}
 		b.w = w
 	}
-	return b.w.Write([][3]byte{b.cur[0], b.cur[1]})
+	return b.w.Write([][3]byte{b.scaled(b.cur[0]), b.scaled(b.cur[1])})
 }
 
 func (b *bladeLEDs) Set(name, pattern string) error {
@@ -101,7 +127,7 @@ func (b *bladeLEDs) Set(name, pattern string) error {
 		c()
 		b.stop[i] = nil
 	}
-	col, blink := bladeColour(pattern)
+	col, blink := b.bladeColour(pattern)
 	b.cur[i] = col
 	if pattern == "identify" {
 		b.cur[i] = rgb{}

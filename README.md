@@ -372,6 +372,14 @@ Google Drive, Dropbox and OneDrive can also be connected with a sign-in button: 
 OAuth app with the provider, enter its client ID and secret under Settings > Server backups, and
 add `<dashboard URL>/api/backup-oauth/callback` as the redirect URI (providers require HTTPS, or
 localhost). The dashboard writes the rclone configuration itself.
+
+Copies are mirrors: the schedule picks which destinations receive each backup (none ticked means
+all enabled ones), they are written in parallel, a failed copy is retried twice, and every copy is
+read back and compared with the SHA-256 of the local file. Each backup shows one row per
+destination (verified, failed, missing), and the activity feed reports a partial mirror as an
+error. From there you can re-sync a missing copy, re-verify all copies, or restore from the copy
+on any destination, even after the local file is gone. Each destination can keep its own number
+of backups, S3 included. Devices need the current agent to report checksums.
 Folders, devices and cloud storage keep the same number of copies as the local retention; expire
 S3 objects with a bucket lifecycle rule.
 
@@ -420,3 +428,7 @@ this change still include it; update them. The server also refuses to queue a ba
 - Multiple users with roles, and an audit log
 - Alerts (email, webhook, push) on top of the stored metrics
 - Agent self-update from the dashboard
+
+### Shutting down or restarting a device
+
+On a device's **Settings** tab, once the device is in maintenance mode, admins can **Restart** or **Shut down** the whole machine. Type the device name to confirm. The agent stops Docker (every container gets its stop signal and grace period, and keeps its restart policy), flushes the disks, then asks systemd to reboot or power off. The device shows as *Restarting* until the agent reconnects after boot; maintenance mode is kept unless you tick *Leave maintenance mode automatically once the device is back*. A shut-down device cannot be started again from the dashboard: it needs power, or its blade or BMC. Workers on the device stay down meanwhile, because failover skips devices in maintenance mode. If the Orchestrator server runs on the device, the dashboard goes offline too; a restart brings it back by itself (the container has a restart policy), a standby server must be promoted by hand. Agents need the `power` capability: re-run the install command or update the agent first. The agent must run on the host under systemd (not as a container).

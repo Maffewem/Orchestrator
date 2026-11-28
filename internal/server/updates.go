@@ -512,7 +512,7 @@ func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool, switchT
 		}
 		s.setStage("handover")
 		s.event(ctx, "", "info", "update.started", fmt.Sprintf("Moving the server to the %s channel (%s); the dashboard restarts shortly. Database snapshot kept at %s", channelLabel(switchTo), orUnknown(latest.Version), snap))
-		if err := selfupdate.StartHelper(ctx, s.docker, &moved, latest.ImageID); err != nil {
+		if err := selfupdate.StartHelper(ctx, s.docker, &moved, latest.ImageID, nil, nil); err != nil {
 			s.store.SetSetting(ctx, settingUpdatePending, "")
 			s.store.SetSetting(ctx, settingUpdateAgents, "")
 			s.setResult(ctx, false, "Channel change not started: "+err.Error())
@@ -535,7 +535,7 @@ func (s *Server) applyServerUpdate(ctx context.Context, withAgents bool, switchT
 	}
 	s.setStage("handover")
 	s.event(ctx, "", "info", "update.started", fmt.Sprintf("Updating the server to %s; the dashboard restarts shortly", orUnknown(latest.Version)))
-	if err := selfupdate.StartHelper(ctx, s.docker, self, latest.ImageID); err != nil {
+	if err := selfupdate.StartHelper(ctx, s.docker, self, latest.ImageID, nil, nil); err != nil {
 		s.store.SetSetting(ctx, settingUpdatePending, "")
 		s.store.SetSetting(ctx, settingUpdateAgents, "")
 		s.setResult(ctx, false, "Update not started: "+err.Error())

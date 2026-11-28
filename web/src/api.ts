@@ -23,6 +23,8 @@ export interface HostInfo {
   docker?: DockerInfo;
   in_container?: boolean;
   capabilities?: string[];
+  /** A Compute Blade's supply, from GPIO23 (only while its LED profile is "blade"). */
+  power?: { source: "poe-plus" | "5v"; max_watts: number };
   /** Each address with its interface, subnet, gateway and whether it is on Wi-Fi. */
   network?: NetAddr[];
 }
@@ -239,6 +241,8 @@ export interface ContainerIssue {
   swap_used?: number;
   /** A memory limit (MiB) worth trying in the project settings. */
   suggest_mb?: number;
+  /** Which setting the suggestion is, its current value and why this number. */
+  suggest_why?: string;
   acked?: boolean;
   acked_by?: string;
   restarts?: number;
@@ -264,6 +268,70 @@ export interface Device {
   maintenance_note?: string;
   maintenance_until?: string;
   agent_link: "https" | "http" | "unknown";
+  /** Set while the device flashes its LEDs (RFC 3339). */
+  identifying_until?: string;
+  /** A shutdown or restart that was asked for and has not finished. */
+  power?: { mode: "shutdown" | "restart"; by: string; at: string; exit_maintenance?: boolean };
+  /** Only on the single-device endpoint: what taking the device down affects. */
+  power_impact?: { hosts_server: boolean; running_workers: number; failover_workers: number; cluster_enabled: boolean; ha_paired: boolean };
+}
+
+export interface LED {
+  name: string;
+  role: "activity" | "power" | "status" | "other";
+  brightness: number;
+  max: number;
+  trigger?: string;
+  state?: "" | "ok" | "warn" | "crit" | "identify";
+}
+export type LEDMetric = "temp" | "memory" | "cpu" | "disk";
+export interface LEDRule {
+  metric: LEDMetric;
+  led: string;
+  warn: number;
+  crit: number;
+}
+export interface LEDConfig {
+  profile: "pi" | "blade";
+  enabled: boolean;
+  /** Keep every LED of the profile off. */
+  stealth?: boolean;
+  rules?: LEDRule[];
+}
+export interface LEDStatus {
+  profile: string;
+  supported: boolean;
+  note?: string;
+  leds: LED[];
+  config: LEDConfig;
+  values?: Partial<Record<LEDMetric, number>>;
+}
+
+export interface SSHSettings {
+  password_auth: boolean;
+  pubkey_auth: boolean;
+  root_login: "yes" | "no" | "prohibit-password" | "forced-commands-only";
+}
+export interface SSHKey {
+  user: string;
+  type: string;
+  fingerprint: string;
+  comment?: string;
+}
+export interface SSHStatus {
+  installed: boolean;
+  running: boolean;
+  service?: string;
+  effective: SSHSettings;
+  managed: boolean;
+  users?: { name: string; uid: number; home: string }[];
+  keys?: SSHKey[];
+  pending?: { revert_at: string };
+  error?: string;
+}
+export interface SSHCheck {
+  warnings: { level: "lockout" | "note"; message: string }[];
+  lockout: boolean;
 }
 
 export interface FleetContainer extends Container {
@@ -595,6 +663,18 @@ export interface Overview {
   containers: { total: number; running: number; stopped: number };
   cloudflare: { projects: number; live: number; failing: number; requests: number; errors: number };
   recent_events: Event[];
+}
+
+/** How far back a device graph looks. 1h is live (every heartbeat); longer ranges are stored averages. */
+export type DeviceRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d";
+
+export interface DeviceMetricsSettings {
+  retention_days: number;
+  choices: number[];
+  rows: number;
+  bytes: number;
+  /** Estimated bytes per device at each choice. */
+  per_device_bytes: number[];
 }
 
 export interface MetricSample {
@@ -1041,12 +1121,32 @@ export interface ServerBackupPolicy {
   weekday: number;
   tz: string;
   keep: number;
+  /** Destination ids to copy to; empty means every enabled destination. */
+  destinations?: string[];
+}
+export interface BackupCopy {
+  dest_id: string;
+  dest: string;
+  kind: string;
+  status: "ok" | "failed" | "pending" | "missing";
+  verified: boolean;
+  size?: number;
+  at?: string;
+  verified_at?: string;
+  error?: string;
+  note?: string;
 }
 export interface ServerBackup {
   name: string;
   size: number;
   encrypted: boolean;
   created_at: string;
+  /** False when the file is gone from this server but copies remain on destinations. */
+  local: boolean;
+  sha256?: string;
+  wanted: number;
+  mirrored: number;
+  copies?: BackupCopy[];
 }
 export interface SSOConfig {
   github: { enabled: boolean; client_id: string; client_secret?: string; orgs: string[]; default_role: string };
@@ -1066,6 +1166,35 @@ export interface HTTPSView {
   subject?: string;
   expires?: string;
   challenge?: "dns";
+  issuer?: string;
+  sans?: string[];
+  self_signed?: boolean;
+  not_before?: string;
+  container_port?: string;
+  port_known: boolean;
+  published_host?: string;
+  can_publish: boolean;
+  publish_note?: string;
+  hsts_blocked?: string;
+}
+
+export interface HTTPSTest {
+  listening: boolean;
+  handshake: boolean;
+  error?: string;
+  subject?: string;
+  issuer?: string;
+  sans?: string[];
+  self_signed: boolean;
+  expires?: string;
+  expired: boolean;
+  tested_name: string;
+  name_matches: boolean;
+  trusted: boolean;
+  trust_error?: string;
+  port_published: boolean;
+  port_known: boolean;
+  advice: string[];
 }
 
 export interface BackupDest {
@@ -1084,6 +1213,8 @@ export interface BackupDest {
   device_id?: string;
   rclone_conf?: string;
   remote?: string;
+  /** Backups kept on this destination; 0 or unset follows the schedule. */
+  keep?: number;
   last_at?: string;
   last_size?: number;
   last_error?: string;
@@ -1334,11 +1465,15 @@ export const api = {
   ssoExchange: (code: string) => request<LoginResult>("POST", "/api/auth/sso/exchange", { code }, null),
   setSSO: (c: SSOConfig) => request<SSOView>("PUT", "/api/settings/sso", c),
   setHTTPS: (b: { mode: string; host: string; addr: string; hsts: boolean; cert_pem?: string; key_pem?: string }) => request<HTTPSView>("PUT", "/api/settings/https", b),
+  testHTTPS: () => request<HTTPSTest>("POST", "/api/settings/https/test"),
+  publishHTTPSPort: () => request<{ status: string; port: string }>("POST", "/api/settings/https/publish-port"),
   serverBackups: () => request<ServerBackups>("GET", "/api/server-backups"),
   createServerBackup: () => request<ServerBackup>("POST", "/api/server-backups"),
   setServerBackupPolicy: (p: ServerBackupPolicy) => request<ServerBackups>("PUT", "/api/server-backups/policy", p),
   deleteServerBackup: (name: string) => request<void>("DELETE", `/api/server-backups/${encodeURIComponent(name)}`),
-  restoreServerBackup: (name: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/restore`),
+  restoreServerBackup: (name: string, from?: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/restore${from ? `?from=${encodeURIComponent(from)}` : ""}`),
+  syncServerBackup: (name: string, destId?: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/sync`, destId ? { dest_id: destId } : undefined),
+  verifyServerBackup: (name: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/verify`),
   downloadServerBackup,
   restoreServerUpload,
   backupPolicy: (deviceId: string, name: string) =>
@@ -1376,7 +1511,9 @@ export const api = {
   alerts: () => request<Alert[]>("GET", "/api/alerts"),
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),
-  deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
+  deviceMetrics: (id: string, range: DeviceRange = "1h") => request<MetricSample[]>("GET", `/api/devices/${id}/metrics${range === "1h" ? "" : `?range=${range}`}`),
+  deviceMetricsSettings: () => request<DeviceMetricsSettings>("GET", "/api/settings/device-metrics"),
+  setDeviceMetricsSettings: (retention_days: number) => request<DeviceMetricsSettings>("PUT", "/api/settings/device-metrics", { retention_days }),
   workerMetrics: (deviceId: string, name: string, range: MetricsRange) =>
     request<WorkerMetrics>("GET", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/metrics?range=${range}`),
   workerMetricPrefs: (deviceId: string, name: string) =>
@@ -1429,6 +1566,8 @@ export const api = {
     request<Command>("POST", `/api/devices/${deviceId}/images/flash`, body),
   bootInfo: (deviceId: string) => request<BootInfo>("GET", `/api/devices/${deviceId}/boot`),
   setBootOrder: (deviceId: string, order: string, confirm: string) => request<Command>("POST", `/api/devices/${deviceId}/boot`, { order, confirm }),
+  powerDevice: (deviceId: string, mode: "shutdown" | "restart", confirm: string, exitMaintenance: boolean) =>
+    request<Command>("POST", `/api/devices/${deviceId}/power`, { mode, confirm, exit_maintenance: exitMaintenance }),
   getCommand: (id: string) => request<Command>("GET", `/api/commands/${id}`),
   events: (device?: string, limit = 100) =>
     request<Event[]>("GET", `/api/events?limit=${limit}${device ? `&device=${device}` : ""}`),
@@ -1466,8 +1605,21 @@ export const api = {
   setPreviewSettings: (id: string, s: { enabled: boolean; max: number }) =>
     request<PreviewsView>("PUT", `/api/projects/${id}/previews/settings`, s),
   deletePreview: (id: string, pid: string) => request<void>("DELETE", `/api/projects/${id}/previews/${pid}`),
-  openStream: (deviceId: string, s: { kind: "logs" | "shell"; container: string; tail?: number; cols?: number; rows?: number }) =>
+  openStream: (deviceId: string, s: { kind: "logs" | "shell" | "console"; container?: string; tail?: number; cols?: number; rows?: number }) =>
     request<{ id: string }>("POST", `/api/devices/${deviceId}/streams`, s),
+  leds: (id: string) => request<LEDStatus>("GET", `/api/devices/${id}/leds`),
+  /** Flash the device's LEDs. 0 seconds means until switched off (the agent still stops it after half an hour). */
+  identifyDevice: (id: string, seconds = 0) => request<{ until: string }>("POST", `/api/devices/${id}/leds/identify`, { seconds }),
+  stopIdentify: (id: string) => request<{ ok: boolean }>("POST", `/api/devices/${id}/leds/identify`, { stop: true }),
+  setLEDConfig: (id: string, cfg: LEDConfig) => request<LEDStatus>("PUT", `/api/devices/${id}/leds/config`, cfg),
+  sshStatus: (id: string) => request<SSHStatus>("GET", `/api/devices/${id}/ssh`),
+  sshCheck: (id: string, s: SSHSettings) => request<SSHCheck>("POST", `/api/devices/${id}/ssh/check`, s),
+  sshSet: (id: string, s: SSHSettings & { confirm?: string; trial_seconds?: number }) =>
+    request<{ result: string }>("PUT", `/api/devices/${id}/ssh/config`, s),
+  sshConfirm: (id: string, revert: boolean) => request<{ result: string }>("POST", `/api/devices/${id}/ssh/confirm`, { revert }),
+  sshAddKey: (id: string, user: string, key: string) => request<{ fingerprint: string }>("POST", `/api/devices/${id}/ssh/keys`, { user, key }),
+  sshRemoveKey: (id: string, user: string, fingerprint: string, confirm?: string) =>
+    request<{ ok: boolean }>("POST", `/api/devices/${id}/ssh/keys/remove`, { user, fingerprint, confirm }),
   streamOutput: (id: string, from: number, signal: AbortSignal) =>
     fetchStreamOutput(id, from, signal),
   streamInput: (id: string, input: { data?: string; cols?: number; rows?: number }) =>

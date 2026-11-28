@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS proxy_samples (
 	hist      TEXT,
 	PRIMARY KEY (device_id, host, ts)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS device_samples (
+	device_id TEXT NOT NULL,
+	res       INTEGER NOT NULL,
+	ts        INTEGER NOT NULL,
+	data      TEXT NOT NULL,
+	PRIMARY KEY (device_id, res, ts)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS cf_samples (
 	project_id  TEXT NOT NULL,
 	ts          INTEGER NOT NULL,

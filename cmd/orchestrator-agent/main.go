@@ -32,11 +32,19 @@ func main() {
 	flag.StringVar(&cfg.StatePath, "state", env("ORCH_STATE", "/var/lib/orchestrator-agent/state.json"), "where the agent keeps its identity")
 	flag.StringVar(&cfg.DockerHost, "docker-host", env("DOCKER_HOST", "unix:///var/run/docker.sock"), "Docker engine address")
 	flag.StringVar(&cfg.HostRoot, "host-root", env("ORCH_HOST_ROOT", ""), "host filesystem mount when running in a container, e.g. /host")
+	bladeTest := flag.Bool("blade-led-test", false, "light a Compute Blade's two LEDs for a few seconds (top red, edge blue), then switch them off, and exit")
 	version := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
 	if *version {
 		os.Stdout.WriteString(agent.Version + "\n")
+		return
+	}
+	if *bladeTest {
+		if err := agent.BladeLEDTest(os.Stdout); err != nil {
+			os.Stderr.WriteString("blade LED test failed: " + err.Error() + "\n")
+			os.Exit(1)
+		}
 		return
 	}
 	for _, l := range strings.Split(labels, ",") {

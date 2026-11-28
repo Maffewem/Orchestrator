@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Route, Routes, useNavigate, useParams } from "react-router";
 import { Trash2 } from "lucide-react";
-import { api, type Device, type Migration, type Project, type TunnelRoute, type TunnelView } from "../api";
+import { api, type Device, type DeviceRange, type Migration, type Project, type TunnelRoute, type TunnelView } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
@@ -12,9 +12,20 @@ import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
+import { DeviceHardwareActions, HardwareTab, useIdentifying } from "../components/DeviceHardware";
 import Disks from "../components/Disks";
+import DevicePower from "../components/DevicePower";
 import ContainerIssues, { isContainerIssueText } from "../components/ContainerIssues";
 import HardwareMetrics, { CompareCard, PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
+
+const ranges: { key: DeviceRange; long: string }[] = [
+  { key: "1h", long: "the last hour" },
+  { key: "6h", long: "the last 6 hours (1-minute averages)" },
+  { key: "24h", long: "the last 24 hours (1-minute averages)" },
+  { key: "7d", long: "the last 7 days (5-minute averages)" },
+  { key: "30d", long: "the last 30 days (hourly averages)" },
+  { key: "90d", long: "the last 90 days (hourly averages)" },
+];
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -28,15 +39,21 @@ export default function DevicePage() {
   if (dev.error && !d) return <ErrorNote>{dev.error}</ErrorNote>;
   if (!d) return <Loading />;
   const base = `/devices/${d.id}`;
+  return <DeviceBody d={d} base={base} isAdmin={isAdmin} rows={rows} dev={dev} fleet={fleet} />;
+}
+
+function DeviceBody({ d, base, isAdmin, rows, dev, fleet }: { d: Device; base: string; isAdmin: boolean; rows: any; dev: { reload: () => void }; fleet: { reload: () => void } }) {
+  const flashing = useIdentifying(d);
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className={`mb-6 flex flex-wrap items-start justify-between gap-4 rounded-xl ${flashing ? "animate-pulse bg-amber-50 p-3 ring-2 ring-amber-400" : ""}`}>
         <div className="min-w-0">
           <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
             <StatusDot status={d.status} />
             {d.name}
             <HealthBadge health={d.health} status={d.status} />
             {d.maintenance && <Badge tone="warn">Maintenance</Badge>}
+            {d.power && <Badge tone="warn">{d.power.mode === "restart" ? (d.status === "offline" ? "Restarting" : "Restart pending") : "Shutting down"}</Badge>}
           </h1>
           {d.maintenance && (
             <p className="mt-1 text-sm text-neutral-500">
@@ -48,6 +65,7 @@ export default function DevicePage() {
             <DeviceSummary d={d} />
           </p>
         </div>
+        <DeviceHardwareActions d={d} onChanged={dev.reload} />
       </div>
       <div className="mb-6">
         <Tabs
@@ -57,6 +75,7 @@ export default function DevicePage() {
             ...(isAdmin ? [{ to: `${base}/disks`, label: "Disks" }] : []),
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/activity`, label: "Activity" },
+            ...(isAdmin ? [{ to: `${base}/hardware`, label: "Hardware" }] : []),
             ...(isAdmin ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
@@ -81,6 +100,7 @@ export default function DevicePage() {
         {isAdmin && <Route path="disks" element={<Disks d={d} />} />}
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
         <Route path="activity" element={<DeviceActivity d={d} />} />
+        {isAdmin && <Route path="hardware" element={<HardwareTab d={d} />} />}
         {isAdmin && <Route path="settings" element={<DeviceSettings d={d} onSaved={dev.reload} />} />}
       </Routes>
     </>
@@ -326,7 +346,24 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
       setAcking(false);
     }
   };
-  const samples = usePoll(() => api.deviceMetrics(d.id), 5000, [d.id]);
+  const [range, setRange] = useState<DeviceRange>(() => {
+    try {
+      const r = localStorage.getItem("orch.deviceRange");
+      return ranges.some((x) => x.key === r) ? (r as DeviceRange) : "1h";
+    } catch {
+      return "1h";
+    }
+  });
+  const pickRange = (r: DeviceRange) => {
+    setRange(r);
+    try {
+      localStorage.setItem("orch.deviceRange", r);
+    } catch {
+      /* remembering the choice is optional */
+    }
+  };
+  const rangeText = ranges.find((x) => x.key === range)!.long;
+  const samples = usePoll(() => api.deviceMetrics(d.id, range), range === "1h" ? 5000 : 60000, [d.id, range]);
   const thresholds = usePoll(async () => (await api.settings()).temperature, 60000);
   const s = samples.data ?? [];
   const m = d.metrics;
@@ -383,6 +420,21 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             {ackError && <div className="px-5 pb-3"><ErrorNote>{ackError}</ErrorNote></div>}
           </Card>
         )}
+        <div role="radiogroup" aria-label="Time range" className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 text-sm">
+          <span className="shrink-0 text-neutral-500">Range</span>
+          {ranges.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              role="radio"
+              aria-checked={range === r.key}
+              onClick={() => pickRange(r.key)}
+              className={`min-h-8 shrink-0 rounded-md border px-2.5 ${range === r.key ? "border-neutral-900 bg-neutral-100 font-medium" : "border-neutral-200 bg-white text-neutral-600"}`}
+            >
+              {r.key}
+            </button>
+          ))}
+        </div>
         <div role="tablist" aria-label="Graphs" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
           {graphs.map((g) => (
             <button
@@ -400,7 +452,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
         {graph === "perf" && (
           <>
         <Card>
-          <CardHeader title="Performance" subtitle="Live samples from the agent (last hour)." />
+          <CardHeader title="Performance" subtitle={range === "1h" ? "Live samples from the agent (last hour)." : `Averages over ${rangeText}.`} />
           <div className="space-y-6 p-5">
             <div className="grid grid-cols-3 gap-6">
               <Meter label={`CPU · ${d.host.cpus ? `${d.host.cpus} ${d.host.cpus === 1 ? "core" : "cores"}` : "—"}`} value={m.cpu_percent} />
@@ -422,7 +474,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
         )}
         {graph === "temp" && s.some((x) => x.temp > 0) && (
           <Card>
-            <CardHeader title="Temperature" subtitle={thresholds.data ? `Hottest sensor, last hour. Alerts at ${thresholds.data.warn_c}°C (warning) and ${thresholds.data.crit_c}°C (critical).` : "Hottest sensor, last hour."} />
+            <CardHeader title="Temperature" subtitle={thresholds.data ? `Hottest sensor in each point, ${rangeText}. Alerts at ${thresholds.data.warn_c}°C (warning) and ${thresholds.data.crit_c}°C (critical).` : `Hottest sensor in each point, ${rangeText}.`} />
             <div className="p-5">
               <LineChart
                 max={Math.max(100, Math.ceil(((thresholds.data?.crit_c ?? 85) + 5) / 10) * 10)}
@@ -465,6 +517,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             <Prop k="Uptime" v={uptime(m.uptime_seconds)} />
             <Prop k="Load average" v={`${m.load1.toFixed(2)} ${m.load5.toFixed(2)} ${m.load15.toFixed(2)}`} />
             <Prop k="Temperature" v={m.temp_c ? `${m.temp_c.toFixed(0)}°C` : "Not reported (no sensor, or the agent needs updating)"} />
+            {d.host.power && <Prop k="Power source" v={d.host.power.source === "poe-plus" ? `PoE+ / PoE++ (up to ${d.host.power.max_watts} W)` : `5 V only: PoE or USB-C (up to ${d.host.power.max_watts} W)`} />}
             <Prop k="Last seen" v={ago(d.last_seen)} />
             <Prop k="Agent" v={d.host.agent_version} />
           </dl>
@@ -562,6 +615,7 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
         </form>
       </Card>
       <MaintenanceCard d={d} onSaved={onSaved} />
+      <DevicePower d={d} onChanged={onSaved} />
       <Card className="border-red-200">
         <CardHeader title="Remove device" subtitle="The agent will be disconnected. Its containers keep running. It can rejoin with the join token." />
         <div className="p-5">

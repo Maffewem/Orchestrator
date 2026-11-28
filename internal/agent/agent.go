@@ -82,6 +82,8 @@ type Agent struct {
 	interval time.Duration
 	work     chan api.Command
 	restart  bool // set by an update: exit after reporting
+	// afterReport runs once the result of the current command has been reported (used by device.power).
+	afterReport func()
 
 	cancelMu  sync.Mutex
 	cancelled map[string]bool // command ids the user gave up on
@@ -95,6 +97,9 @@ type Agent struct {
 	stats statsState // per-container samples waiting for the next heartbeat
 
 	leases leaseTable // DHCP addresses held for workers with a dedicated address
+
+	devhwOnce sync.Once
+	devhw     *hardware // LED and SSH controllers (see hardware_linux.go)
 }
 
 var errUnauthorized = errors.New("control plane rejected the agent token")
@@ -142,6 +147,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.streamLoop(ctx)
 	go a.statsLoop(ctx)
 	go a.dedicatedLoop(ctx)
+	a.startHardware(ctx)
 
 	backoff := time.Second
 	for {
@@ -309,6 +315,10 @@ func (a *Agent) worker(ctx context.Context) {
 			res := a.execute(rctx, c)
 			a.end()
 			a.report(ctx, c.ID, res)
+			if f := a.afterReport; f != nil {
+				a.afterReport = nil
+				f()
+			}
 			if a.restart {
 				// The new binary is in place; systemd (Restart=always) starts it.
 				a.log.Info("restarting to finish the update")
@@ -407,7 +417,11 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		output, err = a.installServer(ictx, c.Args)
 		icancel()
 	case api.ActionFileStore:
-		err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
+		output, err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
+	case api.ActionFileFetch:
+		fctx, fcancel := context.WithTimeout(ctx, 30*time.Minute)
+		output, err = a.fetchServerBackup(fctx, c.Args["name"], c.Args["dir"], c.Args["mode"])
+		fcancel()
 	case api.ActionStackStart, api.ActionStackStop, api.ActionStackDown:
 		sctx, scancel := context.WithTimeout(ctx, 10*time.Minute)
 		output, err = a.stackAction(sctx, c.Action, c.Target, c.Args["volumes"])
@@ -425,6 +439,8 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		gctx, gcancel := context.WithTimeout(ctx, 30*time.Minute)
 		output, err = a.dockerGC(gctx, c)
 		gcancel()
+	case api.ActionDevicePower:
+		output, err = a.powerAction(c)
 	case api.ActionImageFlash, api.ActionBootGet, api.ActionBootSet:
 		ictx, icancel := context.WithTimeout(ctx, 6*time.Hour) // large images over a slow link
 		output, err = a.imageAction(ictx, c)
@@ -439,7 +455,13 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		}
 		bcancel()
 	default:
-		err = fmt.Errorf("unsupported action %q", c.Action)
+		hctx, hcancel := context.WithTimeout(ctx, 2*time.Minute)
+		var handled bool
+		handled, output, err = a.hardwareCommand(hctx, c)
+		hcancel()
+		if !handled {
+			err = fmt.Errorf("unsupported action %q", c.Action)
+		}
 	}
 	if err != nil {
 		return api.CommandResult{Output: output, Error: redact(err.Error())}

@@ -36,6 +36,8 @@ type HostInfo struct {
 	Network []NetAddr `json:"network,omitempty"`
 	// Tunnel describes the cloudflared container the agent runs, when there is one.
 	Tunnel *TunnelInfo `json:"tunnel,omitempty"`
+	// Power is the supply a Compute Blade reports (only sent while its LED profile is "blade").
+	Power *PowerSource `json:"power,omitempty"`
 }
 
 // TunnelInfo is what the agent knows about its cloudflared container.
@@ -128,6 +130,7 @@ const (
 	CapStream           = "stream"             // live log following and container shells
 	CapInspect          = "inspect"            // container.inspect, used to adopt existing containers
 	CapFileStore        = "filestore"          // file.store, receives server backups
+	CapFileFetch        = "filefetch"          // file.fetch, checksum or upload of a stored server backup; file.store reports the checksum
 	CapCompose          = "compose"            // deploy of a Compose stack, and stack.start/stop/down
 	CapTunnel           = "tunnel"             // tunnel.sync, runs cloudflared
 	CapTunnelUpdate     = "tunnel-update"      // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
@@ -142,7 +145,11 @@ const (
 	CapImages           = "images"             // image.flash, boot.get and boot.set (gold images, Raspberry Pi boot order)
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
+	CapLED              = "led"                // led.list, led.identify and led.config
+	CapConsole          = "console"            // a host terminal (stream kind "console")
+	CapSSH              = "ssh"                // ssh.status, ssh.check, ssh.config, ssh.confirm and ssh.key
 	CapHWMetrics        = "hw-metrics"         // heartbeats carry disk and network rates, load, swap, clock and Raspberry Pi power flags
+	CapPower            = "power"              // device.power: graceful shutdown or restart of the whole machine
 	CapDockerGC         = "docker-gc"          // docker.report and docker.prune, and DeploySpec.KeepImages (old worker images trimmed after a deploy)
 )
 
@@ -258,6 +265,14 @@ type Container struct {
 	// Unstable is set by the server (never the agent) when Docker has restarted the container
 	// repeatedly in the last few minutes, even if it is "running" at this instant.
 	Unstable bool `json:"unstable,omitempty"`
+	// Exit details, set by the agent for stopped containers that exited with 137 or 143. OOMKilled is
+	// Docker's own record that the kernel killed it for running out of memory. StopRequested is set
+	// when Docker logged a stop or kill request just before it died (docker stop, docker kill, a
+	// compose down), which is what a person doing it by hand looks like. A real out-of-memory kill
+	// logs neither.
+	ExitInspected bool `json:"exit_inspected,omitempty"`
+	OOMKilled     bool `json:"oom_killed,omitempty"`
+	StopRequested bool `json:"stop_requested,omitempty"`
 }
 
 // ContainerNet is a container's attachment to one Docker network.
@@ -421,6 +436,9 @@ const (
 	ActionNetworkCheck = "network.check"
 	// ActionFileStore downloads the server backup Args["name"] into the folder Args["dir"], keeping the newest Args["keep"].
 	ActionFileStore = "file.store"
+	// ActionFileFetch reads a stored server backup (Args["name"] in folder Args["dir"]) and returns
+	// its SHA-256 as the output; Args["mode"] == "send" also uploads it to the server.
+	ActionFileFetch = "file.fetch"
 	// ActionServerInstall sets up a new Orchestrator server on this device from the transfer
 	// bundle the current server offers (Args: name, image, port, bundle, password).
 	ActionServerInstall = "server.install"
@@ -432,6 +450,16 @@ const (
 	// ActionTunnelSync runs (or, with an empty Args["token"], removes) the device's cloudflared container.
 	// With Args["update"] == "1" it also pulls the newest image and recreates the container if that changed it.
 	ActionTunnelSync = "tunnel.sync"
+
+	// LED, SSH: see internal/agent/leds.go and sshctl.go. Not part of the generic commands API.
+	ActionLEDList     = "led.list"
+	ActionLEDIdentify = "led.identify"
+	ActionLEDConfig   = "led.config"
+	ActionSSHStatus   = "ssh.status"
+	ActionSSHCheck    = "ssh.check"
+	ActionSSHConfig   = "ssh.config"
+	ActionSSHConfirm  = "ssh.confirm"
+	ActionSSHKey      = "ssh.key"
 	// Disk management (admin only, always sent by the server's disk API, never by the generic commands API).
 	// ActionDiskList reports a DiskReport as JSON. It never changes anything.
 	ActionDiskList = "disk.list"
@@ -455,6 +483,12 @@ const (
 	ActionBootGet = "boot.get"
 	// ActionBootSet stages a new BOOT_ORDER (Args["order"], e.g. "0xf14") once Args["confirm"] equals it. It applies on the next reboot.
 	ActionBootSet = "boot.set"
+	// ActionDevicePower shuts the machine down (Args["mode"] == "poweroff") or restarts it ("reboot") once
+	// Args["confirm"] equals the mode. Admin only, sent by the server's power API, never by the generic commands API.
+	// The agent stops Docker (which stops every container gracefully and keeps their restart policies), syncs the
+	// disks and then asks systemd. The result is reported before any of that starts, because the machine may be
+	// the one the server runs on.
+	ActionDevicePower = "device.power"
 )
 
 // Image is a gold image stored on the server: a raw disk image, optionally compressed.
@@ -768,6 +802,8 @@ type LogLine struct {
 const (
 	StreamLogs  = "logs"
 	StreamShell = "shell"
+	// StreamConsole is a terminal on the device itself, not inside a container.
+	StreamConsole = "console"
 )
 
 // StreamRequest is a stream the control plane wants the agent to open.

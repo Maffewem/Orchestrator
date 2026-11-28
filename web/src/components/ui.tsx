@@ -454,10 +454,20 @@ export function LineChart({
   );
 }
 
+/** Rows become stacked cards below the `sm` breakpoint: each cell shows its column heading as a label (see `.stack-table` in index.css). */
 export function Table({ head, children, compact }: { head: ReactNode[]; children: ReactNode; compact?: boolean }) {
+  const ref = useRef<HTMLTableElement>(null);
+  useEffect(() => {
+    ref.current?.querySelectorAll("tbody tr").forEach((tr) => {
+      Array.from(tr.children).forEach((td, i) => {
+        const h = head[i];
+        (td as HTMLElement).dataset.label = typeof h === "string" ? h : "";
+      });
+    });
+  });
   return (
     <div className="overflow-x-auto">
-      <table className={cx("w-full text-left text-sm", compact && "[&_td]:!py-1.5")}>
+      <table ref={ref} className={cx("stack-table w-full text-left text-sm", compact && "[&_td]:!py-1.5")}>
         <thead>
           <tr className="border-b border-neutral-200 text-xs text-neutral-500">
             {head.map((h, i) => (
@@ -486,7 +496,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={cx("relative h-6 w-11 shrink-0 rounded-full transition-colors", checked ? "bg-primary" : "bg-neutral-300")}
+      className={cx("relative h-6 w-11 shrink-0 rounded-full transition-colors before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] sm:before:hidden", checked ? "bg-primary" : "bg-neutral-300")}
     >
       <span className={cx("absolute top-0.5 size-5 rounded-full bg-white shadow transition-all", checked ? "left-[22px]" : "left-0.5")} />
     </button>

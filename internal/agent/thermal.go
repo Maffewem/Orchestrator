@@ -497,11 +497,11 @@ func detectFan(root string) fanDriver {
 	if bin, err := exec.LookPath("bladectl"); err == nil {
 		set := os.Getenv("ORCH_BLADE_FAN_SET")
 		if set == "" {
-			set = bin + " set fan --percent {percent}"
+			set = bin + " fan set-percent {percent}"
 		}
 		rel := os.Getenv("ORCH_BLADE_FAN_RELEASE")
 		if rel == "" {
-			rel = bin + " unset fan"
+			rel = "systemctl restart computeblade-agent.service" // no documented way to clear an override; a restart returns to its own curve
 		}
 		return &bladeFan{bin: bin, set: set, release: rel, last: -1}
 	}

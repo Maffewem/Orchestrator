@@ -222,6 +222,8 @@ type ledCtl struct {
 	state    map[string]string // what the rules want per LED: ok, warn, crit; identify while flashing
 	values   map[string]float64
 	identify map[string]bool // LEDs held by an identify run
+	idStop   func()          // ends the current identify run
+	idTimer  *time.Timer     // its safety timeout
 	sample   func() map[string]float64
 }
 
@@ -401,14 +403,47 @@ func (c *ledCtl) run(ctx context.Context) {
 	}
 }
 
+// maxIdentifySeconds is the safety timeout for an identify run the dashboard leaves on. The agent stops it
+// itself, so a lost server connection cannot leave a device flashing for ever.
+const maxIdentifySeconds = 3600
+
+// identifyRun starts (or restarts) a flashing run that the agent ends itself after the timeout, and that
+// identifyOff ends sooner. It returns the seconds it will run.
+func (c *ledCtl) identifyRun(seconds int, only []string) (int, error) {
+	c.identifyOff()
+	secs, stop, err := c.identifyStart(seconds, only)
+	if err != nil {
+		return 0, err
+	}
+	c.mu.Lock()
+	c.idStop = stop
+	c.idTimer = time.AfterFunc(time.Duration(secs)*time.Second, c.identifyOff)
+	c.mu.Unlock()
+	return secs, nil
+}
+
+// identifyOff ends a running identify, if any.
+func (c *ledCtl) identifyOff() {
+	c.mu.Lock()
+	stop, t := c.idStop, c.idTimer
+	c.idStop, c.idTimer = nil, nil
+	c.mu.Unlock()
+	if t != nil {
+		t.Stop()
+	}
+	if stop != nil {
+		stop()
+	}
+}
+
 // identifyStart starts flashing the activity and power LEDs (or the named ones) fast and
 // returns how long it will go on; stop puts them back and lets the rules take over again.
 func (c *ledCtl) identifyStart(seconds int, only []string) (secs int, stop func(), err error) {
 	if seconds < 3 {
 		seconds = 3
 	}
-	if seconds > 60 {
-		seconds = 60
+	if seconds > maxIdentifySeconds {
+		seconds = maxIdentifySeconds
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

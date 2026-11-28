@@ -23,34 +23,46 @@ export function useIdentifying(d: Device): boolean {
   return until > Date.now();
 }
 
+/** Starts or stops flashing a device's LEDs (blue on a blade). Without a controllable LED the dashboard
+ * highlight is all there is, so the button is only shown where the agent can drive one. */
+export function IdentifyToggle({ d, onChanged, compact }: { d: Device; onChanged: () => void; compact?: boolean }) {
+  const isAdmin = useCan("admin");
+  const [busy, setBusy] = useState(false);
+  const identifying = useIdentifying(d);
+  if (!isAdmin || d.status !== "online" || !hasCap(d, "led")) return null;
+  return (
+    <Button
+      icon={<Lightbulb className="size-4" />}
+      loading={busy}
+      title={identifying ? "Stop flashing the LEDs" : "Flash the LEDs until switched off (stops by itself after 30 minutes)"}
+      onClick={async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setBusy(true);
+        try {
+          if (identifying) await api.stopIdentify(d.id);
+          else await api.identifyDevice(d.id);
+          onChanged();
+        } catch (err) {
+          notify(errText(err));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {identifying ? (compact ? "Stop" : "Stop flashing") : "Identify"}
+    </Button>
+  );
+}
+
 /** Header buttons: find the device by its LEDs, and open a console on it. Administrators only. */
 export function DeviceHardwareActions({ d, onChanged }: { d: Device; onChanged: () => void }) {
   const isAdmin = useCan("admin");
   const [console, setConsole] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const identifying = useIdentifying(d);
   if (!isAdmin || d.status !== "online") return null;
   return (
     <div className="flex flex-wrap gap-2">
-      {hasCap(d, "led") && (
-        <Button
-          icon={<Lightbulb className="size-4" />}
-          loading={busy}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await api.identifyDevice(d.id);
-              onChanged();
-            } catch (e) {
-              notify(errText(e));
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {identifying ? "Flashing…" : "Identify"}
-        </Button>
-      )}
+      <IdentifyToggle d={d} onChanged={onChanged} />
       <Button
         icon={<TerminalIcon className="size-4" />}
         onClick={async () => {

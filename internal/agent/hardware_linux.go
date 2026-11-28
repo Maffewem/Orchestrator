@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
 )
@@ -84,15 +83,17 @@ func (a *Agent) hardwareCommand(ctx context.Context, c api.Command) (handled boo
 	case api.ActionLEDList:
 		out, err = jsonOut(hw.leds.list())
 	case api.ActionLEDIdentify:
+		if c.Args["stop"] == "1" {
+			hw.leds.identifyOff()
+			break
+		}
 		secs, _ := strconv.Atoi(c.Args["seconds"])
 		var only []string
 		if l := c.Args["led"]; l != "" {
 			only = []string{l}
 		}
-		var stop func()
-		if secs, stop, err = hw.leds.identifyStart(secs, only); err == nil {
-			// The LEDs flash in the background so the command queue is not held up.
-			time.AfterFunc(time.Duration(secs)*time.Second, stop)
+		// The LEDs flash in the background so the command queue is not held up.
+		if secs, err = hw.leds.identifyRun(secs, only); err == nil {
 			out = strconv.Itoa(secs)
 		}
 	case api.ActionLEDConfig:

@@ -127,15 +127,22 @@ func (s *Server) handleFlashLEDs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Stop {
+		// Tell the agent first, so the LEDs really stop; if it is unreachable they stop by themselves at
+		// the safety timeout anyway.
+		if _, ok := s.hwCommand(w, r, d, api.CapLED, "LED control", api.ActionLEDIdentify, map[string]string{"stop": "1"}); !ok {
+			return
+		}
 		s.flashing.clear(d.ID)
+		s.event(r.Context(), d.ID, "info", "led.identify", fmt.Sprintf("%s stopped flashing the LEDs on %s", actorName(r), d.Name))
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 		return
 	}
+	// 0 means "until switched off", which the agent still ends itself after half an hour.
 	if req.Seconds <= 0 {
-		req.Seconds = 15
+		req.Seconds = 1800
 	}
-	if req.Seconds > 60 {
-		req.Seconds = 60
+	if req.Seconds > 3600 {
+		req.Seconds = 3600
 	}
 	args := map[string]string{"seconds": strconv.Itoa(req.Seconds)}
 	if req.LED != "" {

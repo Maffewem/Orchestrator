@@ -503,3 +503,26 @@ func TestPowerSource(t *testing.T) {
 		t.Fatal("an unreadable pin must report nothing, not a guess")
 	}
 }
+
+func TestIdentifyRunsUntilStopped(t *testing.T) {
+	root := fakeLEDs(t)
+	c := newLEDCtl(t.TempDir(), root, nil)
+	if _, err := c.identifyRun(maxIdentifySeconds*10, nil); err != nil {
+		t.Fatal(err)
+	}
+	if c.idTimer == nil {
+		t.Fatal("no safety timeout was set")
+	}
+	// A second start replaces the first rather than stacking.
+	if _, err := c.identifyRun(600, nil); err != nil {
+		t.Fatal(err)
+	}
+	if st := c.list(); st.LEDs[0].State != "identify" {
+		t.Fatalf("not flashing: %+v", st.LEDs[0])
+	}
+	c.identifyOff()
+	if st := c.list(); st.LEDs[0].State == "identify" || c.idStop != nil || c.idTimer != nil {
+		t.Fatalf("still flashing after stopping: %+v", st.LEDs[0])
+	}
+	c.identifyOff() // stopping twice is harmless
+}

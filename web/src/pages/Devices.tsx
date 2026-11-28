@@ -1,4 +1,5 @@
 import { useCan } from "../components/auth";
+import { IdentifyToggle } from "../components/DeviceHardware";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Plus, Server } from "lucide-react";
@@ -197,7 +198,7 @@ export function DeviceSummary({ d }: { d: Device }) {
 
 export default function DevicesPage() {
   useCrumbs([{ label: "Devices" }]);
-  const { data } = usePoll(api.devices, 5000);
+  const { data, reload } = usePoll(api.devices, 5000);
   const [adding, setAdding] = useState(false);
   const isAdmin = useCan("admin");
 
@@ -259,6 +260,9 @@ export default function DevicesPage() {
                 <p>{d.containers.filter((c) => c.state === "running").length}/{d.containers.length} containers</p>
                 <p className="mt-0.5">{d.metrics.temp_c ? `${d.metrics.temp_c.toFixed(0)}°C · ` : ""}Load {d.metrics.load5.toFixed(2)}</p>
                 <p className="mt-0.5">Seen {ago(d.last_seen)}</p>
+                <div className="mt-2 md:flex md:justify-end">
+                  <IdentifyToggle d={d} onChanged={reload} compact />
+                </div>
               </div>
             </Link>
           ))}

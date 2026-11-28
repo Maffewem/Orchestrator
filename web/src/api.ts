@@ -1531,7 +1531,9 @@ export const api = {
   openStream: (deviceId: string, s: { kind: "logs" | "shell" | "console"; container?: string; tail?: number; cols?: number; rows?: number }) =>
     request<{ id: string }>("POST", `/api/devices/${deviceId}/streams`, s),
   leds: (id: string) => request<LEDStatus>("GET", `/api/devices/${id}/leds`),
-  identifyDevice: (id: string, seconds = 15) => request<{ until: string }>("POST", `/api/devices/${id}/leds/identify`, { seconds }),
+  /** Flash the device's LEDs. 0 seconds means until switched off (the agent still stops it after half an hour). */
+  identifyDevice: (id: string, seconds = 0) => request<{ until: string }>("POST", `/api/devices/${id}/leds/identify`, { seconds }),
+  stopIdentify: (id: string) => request<{ ok: boolean }>("POST", `/api/devices/${id}/leds/identify`, { stop: true }),
   setLEDConfig: (id: string, cfg: LEDConfig) => request<LEDStatus>("PUT", `/api/devices/${id}/leds/config`, cfg),
   sshStatus: (id: string) => request<SSHStatus>("GET", `/api/devices/${id}/ssh`),
   sshCheck: (id: string, s: SSHSettings) => request<SSHCheck>("POST", `/api/devices/${id}/ssh/check`, s),

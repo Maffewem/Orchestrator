@@ -68,6 +68,13 @@ type pioPut struct {
 	data     uint32
 }
 type pioClearFifos struct{ sm uint16 }
+type pioFifoState struct {
+	sm       uint16
+	tx, rsvd uint8
+	level    uint16
+	empty    uint8
+	full     uint8
+}
 type pioGPIOInit struct{ gpio uint16 }
 type pioGPIOFunc struct{ gpio, fn uint16 }
 
@@ -84,6 +91,7 @@ var (
 	reqSMSetPindirs  = ioW(36, unsafe.Sizeof(pioSetPindirs{}))
 	reqSMSetEnabled  = ioW(37, unsafe.Sizeof(pioSetEnabled{}))
 	reqSMPut         = ioW(41, unsafe.Sizeof(pioPut{}))
+	reqSMFifoState   = ioW(44, unsafe.Sizeof(pioFifoState{}))
 	reqGPIOInit      = ioW(50, unsafe.Sizeof(pioGPIOInit{}))
 	reqGPIOFunction  = ioW(51, unsafe.Sizeof(pioGPIOFunc{}))
 )
@@ -123,7 +131,10 @@ func ioctl2(fd uintptr, req uintptr, arg unsafe.Pointer) (int, error) {
 }
 
 // openRP1PIO sets up a state machine that drives pin as a WS2812 chain.
-func openRP1PIO(dev string, pin int) (_ *rp1PIO, err error) {
+func openRP1PIO(dev string, pin int) (*rp1PIO, error) { return openRP1PIOClock(dev, pin, pioClockHz) }
+
+// openRP1PIOClock is openRP1PIO for a PIO clock other than the assumed 200 MHz (used by the test sweep).
+func openRP1PIOClock(dev string, pin, clockHz int) (_ *rp1PIO, err error) {
 	f, err := os.OpenFile(dev, os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open %s (needs a Pi 5 or CM5 with the RP1 PIO driver, and root): %w", dev, err)
@@ -158,7 +169,7 @@ func openRP1PIO(dev string, pin int) (_ *rp1PIO, err error) {
 	if _, e := ioctl2(fd, reqGPIOFunction, unsafe.Pointer(&gf)); e != nil {
 		return nil, fmt.Errorf("gpio function: %w", e)
 	}
-	init := pioSMInit{sm: p.sm, initialPC: p.origin, config: ws2812Config(uint32(pin), uint32(p.origin), pioClockHz)}
+	init := pioSMInit{sm: p.sm, initialPC: p.origin, config: ws2812Config(uint32(pin), uint32(p.origin), clockHz)}
 	if _, e := ioctl2(fd, reqSMInit, unsafe.Pointer(&init)); e != nil {
 		return nil, fmt.Errorf("state machine init: %w", e)
 	}
@@ -197,4 +208,14 @@ func (p *rp1PIO) Close() error {
 		ioctl2(fd, reqSMUnclaim, unsafe.Pointer(&c))
 	}
 	return p.f.Close()
+}
+
+// txEmpty reports whether the state machine has taken every word we gave it. A machine that is not
+// running leaves them in the FIFO.
+func (p *rp1PIO) txEmpty() (bool, error) {
+	st := pioFifoState{sm: p.sm, tx: 1}
+	if _, e := ioctl2(p.f.Fd(), reqSMFifoState, unsafe.Pointer(&st)); e != nil {
+		return false, e
+	}
+	return st.empty != 0, nil
 }

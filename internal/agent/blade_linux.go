@@ -159,21 +159,42 @@ func rp1Opener() (pixelWriter, error) {
 	return w, nil
 }
 
-// BladeLEDTest lights the top LED red and the edge LED blue for three seconds, then switches them off.
-// It is the quick check that the PIO method works on a blade: run `sudo orchestrator-agent -blade-led-test`.
+// BladeLEDTest is the quick hardware check: run `sudo orchestrator-agent -blade-led-test`. It tries the
+// PIO setup with several assumed PIO clock speeds (the one thing about the setup that is only a guess),
+// each for a few seconds, and says which attempt is running, so the one that lights the LEDs can be named.
 func BladeLEDTest(out interface{ Write([]byte) (int, error) }) error {
-	say := func(s string) { out.Write([]byte(s + "\n")) }
-	say("Opening " + bladePIODev + " and driving GPIO18 ...")
-	w, err := openRP1PIO(bladePIODev, bladePin)
-	if err != nil {
-		return err
-	}
-	if err := w.Write([][3]byte{{60, 0, 0}, {0, 0, 60}}); err != nil {
+	say := func(f string, a ...any) { fmt.Fprintf(out, f+"\n", a...) }
+	say("Compute Blade LED test. Watch the top and edge LEDs. Each attempt shows the top LED red and the edge LED blue (dimmed) for 3 seconds, then off.")
+	var firstErr error
+	for i, hz := range []int{200_000_000, 150_000_000, 125_000_000, 100_000_000} {
+		say("")
+		say("Attempt %d: assuming a %d MHz PIO clock ...", i+1, hz/1_000_000)
+		w, err := openRP1PIOClock(bladePIODev, bladePin, hz)
+		if err != nil {
+			say("  failed: %v", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if err := w.Write([][3]byte{{60, 0, 0}, {0, 0, 60}}); err != nil {
+			say("  write failed: %v", err)
+			w.Close()
+			continue
+		}
+		time.Sleep(20 * time.Millisecond)
+		if empty, err := w.txEmpty(); err != nil {
+			say("  FIFO check failed: %v", err)
+		} else {
+			say("  state machine took the data: %v", empty)
+		}
+		say("  NOW: top LED red? edge LED blue?")
+		time.Sleep(3 * time.Second)
 		w.Close()
-		return err
+		say("  off.")
+		time.Sleep(time.Second)
 	}
-	say("Top LED should be red and edge LED blue for 3 seconds (dimmed to about a quarter).")
-	time.Sleep(3 * time.Second)
-	say("Switching off.")
-	return w.Close()
+	say("")
+	say("Done. Tell me which attempt (if any) showed red on top and blue on the edge.")
+	return firstErr
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -151,12 +152,29 @@ func (b *bladeLEDs) Restore() {
 	}
 }
 
-func rp1Opener() (pixelWriter, error) {
-	w, err := openRP1PIO(bladePIODev, bladePin)
+// framePIO sets the PIO up afresh for every frame. On the hardware tried so far only the first frame after
+// a setup reached the LEDs, so a long-lived state machine does not work.
+type framePIO struct{ clockHz int }
+
+func (f framePIO) Write(px [][3]byte) error {
+	w, err := openRP1PIOClock(bladePIODev, bladePin, f.clockHz)
 	if err != nil {
-		return nil, errors.New(err.Error())
+		return err
 	}
-	return w, nil
+	err = w.Write(px)
+	time.Sleep(10 * time.Millisecond)
+	w.closeKeep()
+	time.Sleep(20 * time.Millisecond)
+	return err
+}
+
+func (f framePIO) Close() error { return nil }
+
+func rp1Opener() (pixelWriter, error) {
+	if _, err := os.Stat(bladePIODev); err != nil {
+		return nil, errors.New("cannot open " + bladePIODev + ": " + err.Error())
+	}
+	return framePIO{clockHz: pioClockHz}, nil
 }
 
 // BladeLEDTest is the quick hardware check: run `sudo orchestrator-agent -blade-led-test`. It sets up the

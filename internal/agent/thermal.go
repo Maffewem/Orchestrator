@@ -404,7 +404,14 @@ func (f *bladeFan) run(line string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("no command configured")
 	}
-	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
+	cmd := exec.Command(args[0], args[1:]...)
+	// bladectl finds the blade agent through ~/.config/bladectl/config.yaml, which the blade
+	// agent writes for root. Under systemd (or sudo that keeps the caller's HOME) it would
+	// otherwise look in the wrong place and fail with "produced zero addresses".
+	if os.Geteuid() == 0 {
+		cmd.Env = append(os.Environ(), "HOME=/root")
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %v: %s", args[0], err, strings.TrimSpace(string(out)))
 	}

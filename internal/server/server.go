@@ -461,6 +461,7 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/server-backups/{name}/sync", s.handleSyncServerBackup)
 	admin("POST /api/server-backups/{name}/verify", s.handleVerifyServerBackup)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
+	admin("PUT /api/settings/backup-plain-key", s.handleSetBackupPlainKey)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)

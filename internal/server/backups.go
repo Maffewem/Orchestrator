@@ -385,3 +385,33 @@ func (s *Server) handleSetBackupPassword(w http.ResponseWriter, r *http.Request)
 	s.event(r.Context(), "", "info", "backup.password", fmt.Sprintf("%s (%s)", msg, identityFrom(r).Name))
 	writeJSON(w, http.StatusOK, map[string]bool{"backup_password_set": req.Password != ""})
 }
+
+const settingBackupPlainKey = "backup_plain_key"
+
+// backupPlainKey reports whether unprotected server backups also carry the secret key.
+func (s *Server) backupPlainKey(ctx context.Context) bool {
+	v, _ := s.store.GetSetting(ctx, settingBackupPlainKey)
+	return v == "1"
+}
+
+// handleSetBackupPlainKey lets an admin opt in to unprotected backups that include the secret
+// key, so a restore on a new server can read sealed values without the key file. The file then
+// exposes every secret, so the dashboard asks for confirmation first.
+func (s *Server) handleSetBackupPlainKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	v, msg, lvl := "", "Unprotected backups no longer include the secret key", "info"
+	if req.Enabled {
+		v, msg, lvl = "1", "Unprotected backups now include the secret key: anyone holding a backup file can read every secret", "warn"
+	}
+	if err := s.store.SetSetting(r.Context(), settingBackupPlainKey, v); err != nil {
+		s.internal(w, err)
+		return
+	}
+	s.event(r.Context(), "", lvl, "backup.plainkey", fmt.Sprintf("%s (%s)", msg, identityFrom(r).Name))
+	writeJSON(w, http.StatusOK, map[string]bool{"backup_plain_key": req.Enabled})
+}

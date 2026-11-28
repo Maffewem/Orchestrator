@@ -810,6 +810,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"agent_urls":                 s.manualAgentURLs(r.Context()),
 		"agent_urls_auto":            s.autoAgentURLs(r.Context()),
 		"backup_password_set":        s.backupPassword(r.Context()) != "",
+		"backup_plain_key":           s.backupPlainKey(r.Context()),
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),
 		"security":                   s.securityView(r.Context()),

@@ -276,3 +276,45 @@ func TestMirrorVerifyResyncAndRestore(t *testing.T) {
 	h.do("POST", "/api/server-backups/"+b.Name+"/sync", adminToken, nil, nil)
 	waitFor("local file back and mirrors whole", func(x serverBackup) bool { return x.Local && x.Mirrored == 2 })
 }
+
+func TestPlainBackupKeyOptIn(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "orch.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv, _, err := New(context.Background(), st, Config{AdminToken: adminToken, HeartbeatInterval: time.Second, BackupDir: dir, DBPath: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{t: t, srv: srv, st: st}
+	h.ts = newTestServer(t, srv)
+	hasKey := func(b serverBackup) bool {
+		c, err := store.Open(filepath.Join(dir, "probe.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Close()
+		raw, err := os.ReadFile(filepath.Join(srv.serverBackupDir(), b.Name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return bytes.Contains(raw, []byte("backup_secret_key"))
+	}
+	var b serverBackup
+	h.do("POST", "/api/server-backups", adminToken, nil, &b)
+	if hasKey(b) {
+		t.Fatal("an unprotected backup carries the key by default")
+	}
+	if code := h.do("PUT", "/api/settings/backup-plain-key", adminToken, map[string]bool{"enabled": true}, nil); code >= 300 {
+		t.Fatalf("opt in: %d", code)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	var b2 serverBackup
+	h.do("POST", "/api/server-backups", adminToken, nil, &b2)
+	if !hasKey(b2) {
+		t.Fatal("opted-in backup should carry the key")
+	}
+}

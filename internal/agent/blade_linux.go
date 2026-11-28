@@ -190,6 +190,13 @@ func BladeLEDTest(out interface{ Write([]byte) (int, error) }) error {
 		}
 		say("  NOW: top LED red? edge LED blue?")
 		time.Sleep(3 * time.Second)
+		err = w.Write([][3]byte{{}, {}})
+		time.Sleep(20 * time.Millisecond)
+		empty, e2 := w.txEmpty()
+		say("  sent the off frame: write error=%v, taken=%v (%v)", err, empty, e2)
+		time.Sleep(2 * time.Second)
+		say("  are both LEDs dark NOW, before the program is closed?")
+		time.Sleep(2 * time.Second)
 		w.Close()
 		say("  off. (3 second pause, both LEDs should be dark)")
 		time.Sleep(3 * time.Second)

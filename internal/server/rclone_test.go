@@ -64,7 +64,7 @@ func TestRcloneSend(t *testing.T) {
 	}
 	src := filepath.Join(dir, serverBackupPrefix+"20260103-000000.db")
 	os.WriteFile(src, []byte("x"), 0o600)
-	if err := srv.sendToDest(context.Background(), d, filepath.Base(src), src, 2); err != nil {
+	if _, err := srv.sendToDest(context.Background(), d, filepath.Base(src), src, 2); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(log)

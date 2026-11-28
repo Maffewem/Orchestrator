@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Download, RotateCcw, Trash2, Upload } from "lucide-react";
-import { api, type BackupDest, type BackupOAuthProvider, type ServerBackupPolicy } from "../api";
+import { Download, RefreshCw, RotateCcw, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { api, type BackupCopy, type BackupDest, type BackupOAuthProvider, type ServerBackup, type ServerBackupPolicy } from "../api";
 import { Badge, Button, ErrorNote, Field, Loading, inputClass, SecretInput } from "./ui";
 import { confirmDialog } from "./dialogs";
 import { ago, bytes, usePoll } from "../lib";
@@ -8,7 +8,7 @@ import { ago, bytes, usePoll } from "../lib";
 const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function ServerBackupsPanel() {
-  const list = usePoll(api.serverBackups, 0);
+  const list = usePoll(api.serverBackups, 4000);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState("");
   const file = useRef<HTMLInputElement>(null);
@@ -56,49 +56,90 @@ export function ServerBackupsPanel() {
       </div>
       {msg && (msg.ok ? <p role="status" className="text-sm text-ok">{msg.text}</p> : <ErrorNote>{msg.text}</ErrorNote>)}
 
-      <Schedule saved={v.policy} nextRun={v.next_run} dir={v.dir} place={place} onSaved={() => list.reload()} />
+      <Schedule saved={v.policy} nextRun={v.next_run} dir={v.dir} place={place} dests={v.destinations ?? []} onSaved={() => list.reload()} />
 
       <Destinations dests={v.destinations ?? []} onChanged={() => list.reload()} />
 
-      <div className="overflow-x-auto border-t border-neutral-200 pt-4">
+      <div className="space-y-3 border-t border-neutral-200 pt-4">
         {(v.backups ?? []).length === 0 ? (
           <p className="text-sm text-neutral-500">No server backups yet.</p>
         ) : (
-          <table className="w-full text-sm">
-            <tbody>
-              {(v.backups ?? []).map((b) => (
-                <tr key={b.name} className="border-b border-neutral-100 last:border-0">
-                  <td className="py-2 pr-3 font-mono text-xs">{b.name}</td>
-                  <td className="whitespace-nowrap pr-3 text-neutral-500">{bytes(b.size)} · {ago(b.created_at)}</td>
-                  <td className="pr-3">{b.encrypted ? <Badge tone="ok">Protected</Badge> : <Badge>Plain</Badge>}</td>
-                  <td className="whitespace-nowrap text-right">
-                    <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} aria-label={`Download ${b.name}`} onClick={() => run("dl", () => api.downloadServerBackup(b.name), "Downloaded.")} />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<RotateCcw className="size-3.5" />}
-                      aria-label={`Restore ${b.name}`}
-                      onClick={async () => (await confirmDialog({ title: `Restore ${b.name}?`, message: restoreWarning, confirmLabel: "Restore", danger: true })) && run("restore", () => api.restoreServerBackup(b.name), "Restoring. The server is restarting; reload in a moment.")}
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<Trash2 className="size-3.5" />}
-                      aria-label={`Delete ${b.name}`}
-                      onClick={async () => (await confirmDialog({ title: "Delete this backup?", message: b.name, confirmLabel: "Delete", danger: true })) && run("del", () => api.deleteServerBackup(b.name), "Deleted.")}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          (v.backups ?? []).map((b) => <BackupRow key={b.name} b={b} run={run} restoreWarning={restoreWarning} />)
         )}
       </div>
     </div>
   );
 }
 
-function Schedule({ saved, nextRun, dir, place, onSaved }: { saved: ServerBackupPolicy; nextRun?: string; dir: string; place: string; onSaved: () => void }) {
+function copyBadge(c: BackupCopy) {
+  if (c.status === "pending") return <Badge>Copying…</Badge>;
+  if (c.status === "failed") return <Badge tone="bad">Failed</Badge>;
+  if (c.status === "missing") return <Badge tone="bad">Missing</Badge>;
+  return c.verified ? <Badge tone="ok">Verified</Badge> : <Badge>Copied, not verified</Badge>;
+}
+
+function BackupRow({ b, run, restoreWarning }: { b: ServerBackup; run: (key: string, fn: () => Promise<unknown>, done: string) => Promise<void>; restoreWarning: string }) {
+  const copies = b.copies ?? [];
+  const pending = copies.some((c) => c.status === "pending");
+  const lacking = copies.some((c) => c.status === "failed" || c.status === "missing");
+  const restore = async (title: string, from?: string) =>
+    (await confirmDialog({ title, message: restoreWarning, confirmLabel: "Restore", danger: true })) && run("restore", () => api.restoreServerBackup(b.name, from), "Restoring. The server is restarting; reload in a moment.");
+  return (
+    <div className="rounded-lg border border-neutral-200 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="break-all font-mono text-xs">{b.name}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+            <span>{b.size ? `${bytes(b.size)} · ` : ""}{ago(b.created_at)}</span>
+            {b.encrypted ? <Badge tone="ok">Protected</Badge> : <Badge>Plain</Badge>}
+            {!b.local && <Badge tone="bad">Not on this server</Badge>}
+            {b.wanted > 0 && <Badge tone={b.mirrored === b.wanted ? "ok" : "bad"}>{pending ? "Copying…" : `${b.mirrored} of ${b.wanted} copies`}</Badge>}
+          </div>
+        </div>
+        {b.local && (
+          <div className="flex items-center">
+            <Button size="sm" variant="ghost" icon={<Download className="size-3.5" />} aria-label={`Download ${b.name}`} onClick={() => run("dl", () => api.downloadServerBackup(b.name), "Downloaded.")} />
+            <Button size="sm" variant="ghost" icon={<RotateCcw className="size-3.5" />} aria-label={`Restore ${b.name}`} onClick={() => restore(`Restore ${b.name}?`)} />
+            <Button size="sm" variant="ghost" icon={<Trash2 className="size-3.5" />} aria-label={`Delete ${b.name}`} onClick={async () => (await confirmDialog({ title: "Delete the local file?", message: `${b.name}. Copies on destinations are kept.`, confirmLabel: "Delete", danger: true })) && run("del", () => api.deleteServerBackup(b.name), "Deleted.")} />
+          </div>
+        )}
+      </div>
+      {copies.length > 0 && (
+        <div className="mt-3 space-y-2 border-t border-neutral-100 pt-3">
+          {copies.map((c) => (
+            <div key={c.dest_id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{c.dest}</span>
+                  {copyBadge(c)}
+                </div>
+                <div className="text-xs text-neutral-500">
+                  {c.at ? `Copied ${ago(c.at)}` : ""}{c.size ? ` · ${bytes(c.size)}` : ""}{c.verified_at ? ` · checked ${ago(c.verified_at)}` : ""}
+                </div>
+                {c.error && <div className="break-words text-xs text-bad">{c.error}</div>}
+                {c.note && <div className="text-xs text-neutral-500">{c.note}</div>}
+              </div>
+              <div className="flex items-center">
+                {(c.status === "failed" || c.status === "missing") && (
+                  <Button size="sm" icon={<RefreshCw className="size-3.5" />} onClick={() => run("sync", () => api.syncServerBackup(b.name, c.dest_id), "Copying again. Check back in a moment.")}>Re-sync</Button>
+                )}
+                {c.status === "ok" && (
+                  <Button size="sm" variant="ghost" icon={<RotateCcw className="size-3.5" />} aria-label={`Restore from ${c.dest}`} onClick={() => restore(`Restore from the copy on ${c.dest}?`, c.dest_id)}>Restore</Button>
+                )}
+              </div>
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-2 pt-1">
+            {lacking && <Button size="sm" variant="primary" icon={<RefreshCw className="size-3.5" />} onClick={() => run("sync", () => api.syncServerBackup(b.name), "Copying to the missing destinations. Check back in a moment.")}>Re-sync missing copies</Button>}
+            <Button size="sm" icon={<ShieldCheck className="size-3.5" />} onClick={() => run("verify", () => api.verifyServerBackup(b.name), "Checking every copy. Check back in a moment.")}>Verify copies</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Schedule({ saved, nextRun, dir, place, dests, onSaved }: { saved: ServerBackupPolicy; nextRun?: string; dir: string; place: string; dests: BackupDest[]; onSaved: () => void }) {
   const [draft, setDraft] = useState<ServerBackupPolicy | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -151,6 +192,22 @@ function Schedule({ saved, nextRun, dir, place, onSaved }: { saved: ServerBackup
           <input className={inputClass} type="number" min={1} max={365} value={policy.keep} onChange={(e) => edit({ keep: Number(e.target.value) })} />
         </Field>
       </div>
+      {dests.some((d) => d.enabled) && (
+        <fieldset className="space-y-1">
+          <legend className="text-sm font-medium">Copy to</legend>
+          <p className="text-sm text-neutral-500">Each backup is mirrored to every ticked destination and checked against its checksum. Tick none to use all enabled ones.</p>
+          {dests.filter((d) => d.enabled).map((d) => (
+            <label key={d.id} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={(policy.destinations ?? []).includes(d.id)}
+                onChange={(e) => edit({ destinations: e.target.checked ? [...(policy.destinations ?? []), d.id] : (policy.destinations ?? []).filter((x) => x !== d.id) })}
+              />
+              {d.name}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="primary" loading={busy} disabled={!dirty} onClick={save}>Save schedule</Button>
         <Button variant="ghost" disabled={!dirty || busy} onClick={() => { setDraft(null); setMsg(null); }}>Discard</Button>
@@ -253,7 +310,7 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
   return (
     <div className="space-y-3 border-t border-neutral-200 pt-4">
       <h3 className="text-sm font-medium">Send copies elsewhere</h3>
-      <p className="text-sm text-neutral-500">A backup on the same disk does not survive the disk. Every new backup is copied to each enabled destination. Folders, devices and cloud storage keep the same number of copies; expire S3 objects with a bucket lifecycle rule.</p>
+      <p className="text-sm text-neutral-500">A backup on the same disk does not survive the disk. Every new backup is mirrored to the destinations chosen in the schedule, retried if a copy fails, and checked against its checksum. Each destination keeps the number of backups set below, or the schedule's number.</p>
       {list.map((d, i) => (
         <div key={d.id || i} className="space-y-3 rounded-lg border border-neutral-200 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -275,6 +332,9 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
             </p>
           )}
           {d.last_error && <ErrorNote>{d.last_error}</ErrorNote>}
+          <Field label="Keep last" hint="Backups on this destination. Blank follows the schedule.">
+            <input className={`${inputClass} w-32`} type="number" min={1} max={365} value={d.keep ?? ""} onChange={(e) => set(i, { keep: e.target.value ? Number(e.target.value) : undefined })} />
+          </Field>
           {d.kind === "s3" && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Endpoint" hint="For R2: https://<account>.r2.cloudflarestorage.com"><input className={inputClass} value={d.endpoint ?? ""} onChange={(e) => set(i, { endpoint: e.target.value })} placeholder="https://s3.amazonaws.com" /></Field>

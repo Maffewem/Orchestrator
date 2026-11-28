@@ -13,6 +13,7 @@ import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 import Disks from "../components/Disks";
+import HardwareMetrics from "../components/HardwareMetrics";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -390,6 +391,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             </div>
           </Card>
         )}
+        <HardwareMetrics s={s} m={m} cores={d.host.cpus} />
         <FoldCard title="Recent activity">
           <DeviceActivity d={d} limit={8} bare />
         </FoldCard>

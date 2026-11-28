@@ -94,6 +94,7 @@ func (a *Agent) metrics() api.Metrics {
 		m.DiskTotal = st.Blocks * bs
 		m.DiskUsed = (st.Blocks - st.Bfree) * bs
 	}
+	a.hardwareMetrics(&m)
 	return m
 }
 

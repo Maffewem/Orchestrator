@@ -168,6 +168,67 @@ type Metrics struct {
 	TempC float64 `json:"temp_c,omitempty"`
 	// Sensors lists every temperature sensor the device exposes (SoC, NVMe, and so on).
 	Sensors []TempSensor `json:"sensors,omitempty"`
+
+	// IOWaitPercent is the share of CPU time spent waiting for disk or network I/O since the last report.
+	IOWaitPercent float64 `json:"iowait_percent,omitempty"`
+	// SwapUsed and SwapTotal are in bytes; SwapTotal is 0 when the device has no swap.
+	SwapUsed  uint64 `json:"swap_used,omitempty"`
+	SwapTotal uint64 `json:"swap_total,omitempty"`
+	// OOMKills counts processes the kernel killed for running out of memory since boot.
+	OOMKills uint64 `json:"oom_kills,omitempty"`
+	// ClockMHz is the current CPU clock, and MaxClockMHz the highest the kernel allows.
+	ClockMHz    float64 `json:"clock_mhz,omitempty"`
+	MaxClockMHz float64 `json:"max_clock_mhz,omitempty"`
+	// Disks and Nets are per-device rates since the previous report. They are empty on the first report.
+	Disks []DiskIO `json:"disks,omitempty"`
+	Nets  []NetIO  `json:"nets,omitempty"`
+	// Power is the Raspberry Pi firmware's power and throttling state; nil on other hardware.
+	Power *PowerInfo `json:"power,omitempty"`
+}
+
+// DiskIO is the activity of one physical disk (for example mmcblk0 or nvme0n1).
+type DiskIO struct {
+	Name      string  `json:"name"`
+	ReadBps   float64 `json:"read_bps"`
+	WriteBps  float64 `json:"write_bps"`
+	ReadIOPS  float64 `json:"read_iops"`
+	WriteIOPS float64 `json:"write_iops"`
+	// Busy is the share of time the disk had requests in flight (0-100).
+	Busy float64 `json:"busy"`
+}
+
+// NetIO is the traffic of one network interface.
+type NetIO struct {
+	Name  string  `json:"name"`
+	RxBps float64 `json:"rx_bps"`
+	TxBps float64 `json:"tx_bps"`
+	// Errors counts receive and transmit errors and dropped packets per second.
+	Errors float64 `json:"errors,omitempty"`
+	// Wireless interfaces carry the signal level in dBm (negative; closer to 0 is stronger).
+	Wireless  bool `json:"wireless,omitempty"`
+	SignalDBm int  `json:"signal_dbm,omitempty"`
+}
+
+// PowerInfo is the decoded Raspberry Pi get_throttled word. The Now flags describe the present;
+// the Since flags stay set from the moment the condition first happened until the next reboot.
+type PowerInfo struct {
+	Raw               uint32 `json:"raw"`
+	UnderVoltage      bool   `json:"under_voltage,omitempty"`
+	FreqCapped        bool   `json:"freq_capped,omitempty"`
+	Throttled         bool   `json:"throttled,omitempty"`
+	TempLimit         bool   `json:"temp_limit,omitempty"`
+	SinceUnderVoltage bool   `json:"since_under_voltage,omitempty"`
+	SinceFreqCapped   bool   `json:"since_freq_capped,omitempty"`
+	SinceThrottled    bool   `json:"since_throttled,omitempty"`
+	SinceTempLimit    bool   `json:"since_temp_limit,omitempty"`
+}
+
+// DecodePower splits a get_throttled word into its flags.
+func DecodePower(raw uint32) *PowerInfo {
+	b := func(n uint) bool { return raw&(1<<n) != 0 }
+	return &PowerInfo{Raw: raw,
+		UnderVoltage: b(0), FreqCapped: b(1), Throttled: b(2), TempLimit: b(3),
+		SinceUnderVoltage: b(16), SinceFreqCapped: b(17), SinceThrottled: b(18), SinceTempLimit: b(19)}
 }
 
 // TempSensor is one temperature reading.

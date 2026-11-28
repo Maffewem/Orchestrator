@@ -87,6 +87,8 @@ type Agent struct {
 
 	lastCPUTotal, lastCPUIdle uint64
 
+	hw hwState // previous disk, network and CPU counters for the device graphs
+
 	stats statsState // per-container samples waiting for the next heartbeat
 
 	leases leaseTable // DHCP addresses held for workers with a dedicated address

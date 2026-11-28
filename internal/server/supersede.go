@@ -19,12 +19,18 @@ func (s *Server) supersedeQueued(ctx context.Context, newer *store.Deployment) {
 		s.log.Warn("supersede: list queued", "err", err)
 		return
 	}
-	for _, old := range queued {
-		if old.ID == newer.ID {
-			// The list is in queue order: everything after this was queued later, possibly by a
-			// push handled at the same moment, and must survive.
+	// Only deployments queued before newer are superseded. If newer is no longer in the queue,
+	// an even newer push has already superseded it, and this call must not touch anything:
+	// without this check, every deployment queued after it (including the newest) would be
+	// treated as older and cancelled.
+	self := -1
+	for i, d := range queued {
+		if d.ID == newer.ID {
+			self = i
 			break
 		}
+	}
+	for _, old := range queued[:max(self, 0)] {
 		if old.Spec.Cloudflare != nil || old.DeviceID != newer.DeviceID {
 			continue
 		}

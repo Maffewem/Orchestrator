@@ -165,12 +165,6 @@ func rp1Opener() (pixelWriter, error) {
 func BladeLEDTest(out interface{ Write([]byte) (int, error) }) error {
 	say := func(f string, a ...any) { fmt.Fprintf(out, f+"\n", a...) }
 	say("Compute Blade LED test. Watch the top and edge LEDs and note what each step shows.")
-	w, err := openRP1PIOClock(bladePIODev, bladePin, 200_000_000)
-	if err != nil {
-		say("failed: %v", err)
-		return err
-	}
-	defer w.Close()
 	steps := []struct {
 		name string
 		px   [][3]byte
@@ -192,10 +186,19 @@ func BladeLEDTest(out interface{ Write([]byte) (int, error) }) error {
 			n = 3
 		}
 		for k := 0; k < n; k++ {
+			// A fresh PIO setup for every frame: the earlier test showed only the first frame after a
+			// setup reaching the LEDs.
+			w, err := openRP1PIOClock(bladePIODev, bladePin, 200_000_000)
+			if err != nil {
+				say("  failed: %v", err)
+				return err
+			}
 			if err := w.Write(st.px); err != nil {
 				say("  write failed: %v", err)
 			}
 			time.Sleep(10 * time.Millisecond)
+			w.closeKeep()
+			time.Sleep(50 * time.Millisecond)
 		}
 		time.Sleep(4 * time.Second)
 	}

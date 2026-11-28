@@ -195,12 +195,20 @@ func (p *rp1PIO) Write(px [][3]byte) error {
 }
 
 // Close switches the LEDs off and gives everything back.
-func (p *rp1PIO) Close() error {
+func (p *rp1PIO) Close() error { return p.close(true) }
+
+// closeKeep gives everything back but leaves the LEDs as the last frame set them.
+func (p *rp1PIO) closeKeep() error { return p.close(false) }
+
+func (p *rp1PIO) close(off bool) error {
 	fd := p.f.Fd()
 	if p.sm != 0xffff {
+		if !off {
+			time.Sleep(5 * time.Millisecond) // let the last frame leave
+		}
 		// Send the "off" frame twice with a latch gap between, so a frame that raced the previous
 		// one is not lost.
-		for i := 0; i < 2; i++ {
+		for i := 0; off && i < 2; i++ {
 			p.Write([][3]byte{{}, {}})
 			time.Sleep(5 * time.Millisecond) // let the last bits leave and the LEDs latch
 		}

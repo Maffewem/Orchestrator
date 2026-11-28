@@ -313,7 +313,7 @@ func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 }
 
 func (s *Store) openSetting(key, v string) string {
-	if sensitiveSettings[key] {
+	if isSensitive(key) {
 		if p, ok := s.box.open(v); ok {
 			return p
 		}
@@ -322,7 +322,7 @@ func (s *Store) openSetting(key, v string) string {
 }
 
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
-	if sensitiveSettings[key] && value != "" {
+	if isSensitive(key) && value != "" {
 		value = s.box.seal(value)
 	}
 	_, err := s.db.ExecContext(ctx,
@@ -798,6 +798,15 @@ func (s *Store) AddEvent(ctx context.Context, deviceID, level, kind, message str
 		`INSERT INTO events(device_id, level, kind, message, created_at) VALUES(?, ?, ?, ?, ?)`,
 		deviceID, level, kind, message, time.Now().Unix())
 	return err
+}
+
+// PruneEvents keeps the newest keep events and deletes the rest.
+func (s *Store) PruneEvents(ctx context.Context, keep int) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM events WHERE id <= (SELECT COALESCE(MAX(id), 0) FROM events) - ?`, keep)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // ListEvents returns the newest events, optionally for one device.

@@ -38,6 +38,9 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "this server is being moved or has handed over; GitHub should deliver to the main server")
 		return
 	}
+	// The body is read before the signature can be checked, so a stalled sender must not hold
+	// the connection (and up to 25 MB of buffer) open.
+	http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 25<<20))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "could not read body")

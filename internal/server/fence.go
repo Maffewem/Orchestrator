@@ -32,6 +32,9 @@ type staleReport struct {
 // noteStale records what a device's heartbeat said about stale servers, and logs an event the
 // first time a given stale server is reported for the device.
 func (s *Server) noteStale(ctx context.Context, deviceName, deviceID string, stale []api.StaleServer) {
+	if len(stale) > 10 { // an agent can't flood the activity log with invented servers
+		stale = stale[:10]
+	}
 	s.stale.mu.Lock()
 	if s.stale.m == nil {
 		s.stale.m = map[string]staleReport{}

@@ -29,6 +29,25 @@ var sensitiveSettings = map[string]bool{
 	"backup_password": true, "sso_config": true, "server_backup_destinations": true,
 	"https_config": true, "join_token": true, "enrol_tokens": true, "server_identity_key": true,
 	"server_move": true, "server_moved_from": true,
+	// Credentials that were stored in the clear before 2026-11: the Cloudflare Pages/Workers token,
+	// cloud-storage OAuth client secrets and the shared secret between the two servers of a pair.
+	"cloudflare_deploy_token": true, "backup_oauth_clients": true, "ha:state": true,
+}
+
+// sensitivePrefixes are families of settings that hold secrets: each device's Cloudflare Tunnel
+// token lives in "tunnel:<device id>".
+var sensitivePrefixes = []string{"tunnel:"}
+
+func isSensitive(key string) bool {
+	if sensitiveSettings[key] {
+		return true
+	}
+	for _, p := range sensitivePrefixes {
+		if strings.HasPrefix(key, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // settingBackupKey carries the secret key inside a password-protected server backup so that
@@ -268,7 +287,26 @@ func (s *Store) migrateSecrets() error {
 			}
 		}
 	}
+	keys := make([]string, 0, len(sensitiveSettings))
 	for k := range sensitiveSettings {
+		keys = append(keys, k)
+	}
+	for _, p := range sensitivePrefixes {
+		rows, err := s.db.Query(`SELECT key FROM settings WHERE substr(key, 1, ?) = ?`, len(p), p)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err != nil {
+				rows.Close()
+				return err
+			}
+			keys = append(keys, k)
+		}
+		rows.Close()
+	}
+	for _, k := range keys {
 		var v string
 		err := s.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, k).Scan(&v)
 		if errors.Is(err, sql.ErrNoRows) || v == "" || strings.HasPrefix(v, sealPrefix) {

@@ -70,39 +70,40 @@ type Config struct {
 }
 
 type Server struct {
-	identity      ed25519.PrivateKey // proves to agents that this is their server; see discover.go
-	netNotes      netNotices         // recent network changes per device; see connectivity.go
-	dismissed     dismissals         // acknowledged or expected container failures; see containerissues.go
-	store         *store.Store
-	cfg           Config
-	log           *slog.Logger
-	adminHash     string
-	githubAPI     string
-	cloudflareAPI string
-	metrics       *metricsHistory
-	wstats        *workerStats
-	logins        limiter
-	gateOK        gateCache // recently verified worker-login credentials; see auth.go
-	trusted       []*net.IPNet
-	sums          sync.Map // agent binary name -> [stamp, sha256]
-	cfdMu         sync.Mutex
-	cfdLatest     string    // newest cloudflared release, see tunnel_update.go
-	cfdTried      time.Time // last lookup, successful or not
-	cfdURL        string    // release lookup URL; tests point it elsewhere
-	mig           migrations
-	links         sync.Map      // device id -> whether its last heartbeat used HTTPS
-	migratePoll   time.Duration // test hook; 2s when zero
-	cluster       clusterState
-	moveTick      time.Duration // test hook: how often a server move polls; 2s when zero
-	moveFrozen    atomic.Bool   // a server move is under way: dashboard changes are paused
-	standbyTo     atomic.Pointer[string]
-	haRole        atomic.Pointer[string] // see ha.go
-	haEpoch       atomic.Int64
-	haPeer        atomic.Pointer[string] // the paired standby's address, on an active server
-	stale         staleServers           // stale servers agents reported, see fence.go
-	haLastPull    atomic.Int64           // unix time the standby last fetched a copy
-	haTick        time.Duration          // test hook; 15s when zero
-	haRestartIn   time.Duration          // test hook: overrides the delay before an HA restart
+	identity         ed25519.PrivateKey // proves to agents that this is their server; see discover.go
+	netNotes         netNotices         // recent network changes per device; see connectivity.go
+	dismissed        dismissals         // acknowledged or expected container failures; see containerissues.go
+	store            *store.Store
+	cfg              Config
+	log              *slog.Logger
+	adminHash        string
+	githubAPI        string
+	cloudflareAPI    string
+	metrics          *metricsHistory
+	wstats           *workerStats
+	logins           limiter
+	gateOK           gateCache // recently verified worker-login credentials; see auth.go
+	trusted          []*net.IPNet
+	sums             sync.Map // agent binary name -> [stamp, sha256]
+	cfdMu            sync.Mutex
+	cfdLatest        string    // newest cloudflared release, see tunnel_update.go
+	cfdTried         time.Time // last lookup, successful or not
+	cfdURL           string    // release lookup URL; tests point it elsewhere
+	mig              migrations
+	links            sync.Map      // device id -> whether its last heartbeat used HTTPS
+	migratePoll      time.Duration // test hook; 2s when zero
+	cluster          clusterState
+	moveTick         time.Duration // test hook: how often a server move polls; 2s when zero
+	moveFrozen       atomic.Bool   // a server move is under way: dashboard changes are paused
+	standbyTo        atomic.Pointer[string]
+	haRole           atomic.Pointer[string] // see ha.go
+	haEpoch          atomic.Int64
+	haPeer           atomic.Pointer[string] // the paired standby's address, on an active server
+	stale            staleServers           // stale servers agents reported, see fence.go
+	haLastPull       atomic.Int64           // unix time the standby last fetched a copy
+	lastHousekeeping atomic.Int64           // unix time of the last hourly cleanup
+	haTick           time.Duration          // test hook; 15s when zero
+	haRestartIn      time.Duration          // test hook: overrides the delay before an HA restart
 
 	docker *agent.Docker // nil when no Docker client could be configured
 	up     *updateState
@@ -244,8 +245,29 @@ func (s *Server) sweep(ctx context.Context) {
 		}
 	}
 	s.clusterSweep(ctx)
+	s.housekeeping(ctx)
 	if _, err := s.store.ExpireCommands(ctx, time.Now().Add(-2*time.Minute), time.Now().Add(-30*time.Minute)); err != nil {
 		s.log.Error("expire commands", "err", err)
+	}
+}
+
+// maxEvents is how many activity entries are kept; older ones are deleted (about 30 MB at most).
+const maxEvents = 200_000
+
+// housekeeping runs hourly: it removes expired sign-in sessions and trims the activity log, so
+// neither grows for ever.
+func (s *Server) housekeeping(ctx context.Context) {
+	last := s.lastHousekeeping.Load()
+	if now := time.Now().Unix(); now-last < 3600 || !s.lastHousekeeping.CompareAndSwap(last, now) {
+		return
+	}
+	if err := s.store.PurgeSessions(ctx); err != nil {
+		s.log.Error("purge sessions", "err", err)
+	}
+	if n, err := s.store.PruneEvents(ctx, maxEvents); err != nil {
+		s.log.Error("prune events", "err", err)
+	} else if n > 0 {
+		s.log.Info("trimmed the activity log", "deleted", n)
 	}
 }
 
@@ -588,6 +610,9 @@ func (s *Server) agentChecksums() string {
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+	// The server sets no overall read timeout (uploads and streams are long), so a JSON body
+	// gets its own: a client that stalls mid-body must not hold the connection open.
+	http.NewResponseController(w).SetReadDeadline(time.Now().Add(time.Minute))
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return false

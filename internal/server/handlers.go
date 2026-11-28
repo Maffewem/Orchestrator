@@ -186,7 +186,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	name := strings.TrimSpace(req.Name)
+	clampHost(&req.Host)
+	name := clampText(req.Name, 100)
 	if name == "" {
 		name = req.Host.Hostname
 	}
@@ -199,7 +200,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if err == nil && d != nil {
 		s.event(r.Context(), d.ID, "info", "device.reenrolled", fmt.Sprintf("%s re-registered and kept its existing record", d.Name))
 	} else if err == nil {
-		d, token, err = s.store.CreateDevice(r.Context(), name, cleanLabels(req.Labels), req.Host)
+		d, token, err = s.store.CreateDevice(r.Context(), name, clampLabels(req.Labels), req.Host)
 		if err == nil {
 			s.event(r.Context(), d.ID, "info", "device.registered", fmt.Sprintf("%s was added", d.Name))
 		}
@@ -227,6 +228,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	s.noteAgentLink(d.ID, r)
 	ctx := r.Context()
+	clampHost(&req.Host)
 	if err := s.store.UpdateDeviceState(ctx, d.ID, req.Host, req.Metrics, req.Containers); err != nil {
 		s.internal(w, err)
 		return
@@ -521,7 +523,7 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name != nil {
-		name := strings.TrimSpace(*req.Name)
+		name := clampText(*req.Name, 100)
 		if name == "" {
 			writeError(w, http.StatusBadRequest, "name cannot be empty")
 			return
@@ -529,7 +531,7 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		d.Name = name
 	}
 	if req.Labels != nil {
-		d.Labels = cleanLabels(*req.Labels)
+		d.Labels = clampLabels(*req.Labels)
 	}
 	if err := s.store.UpdateDeviceMeta(r.Context(), d.ID, d.Name, d.Labels); err != nil {
 		s.internal(w, err)
@@ -842,6 +844,48 @@ func (s *Server) handleRotateJoinToken(w http.ResponseWriter, r *http.Request) {
 	}
 	s.event(r.Context(), "", "info", "settings.join_token", "Join token was rotated")
 	writeJSON(w, http.StatusOK, map[string]string{"join_token": tok})
+}
+
+// clampText trims s, drops control characters and cuts it to at most n runes. Names that come from
+// a device or a dashboard form are shown on every page and end up in events, so they stay short.
+func clampText(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(s))
+	if r := []rune(s); len(r) > n {
+		return strings.TrimSpace(string(r[:n]))
+	}
+	return s
+}
+
+// clampHost bounds what a registering or heartbeating agent can make the server store and serve.
+func clampHost(h *api.HostInfo) {
+	h.Hostname, h.OS, h.Platform, h.Arch = clampText(h.Hostname, 253), clampText(h.OS, 40), clampText(h.Platform, 120), clampText(h.Arch, 40)
+	h.Kernel, h.Model, h.AgentVersion = clampText(h.Kernel, 120), clampText(h.Model, 120), clampText(h.AgentVersion, 60)
+	if len(h.Addresses) > 64 {
+		h.Addresses = h.Addresses[:64]
+	}
+	for i, a := range h.Addresses {
+		h.Addresses[i] = clampText(a, 64)
+	}
+	if len(h.Capabilities) > 256 {
+		h.Capabilities = h.Capabilities[:256]
+	}
+}
+
+// clampLabels keeps a device's labels few and short.
+func clampLabels(in []string) []string {
+	out := cleanLabels(in)
+	if len(out) > 20 {
+		out = out[:20]
+	}
+	for i, l := range out {
+		out[i] = clampText(l, 40)
+	}
+	return out
 }
 
 func cleanLabels(in []string) []string {

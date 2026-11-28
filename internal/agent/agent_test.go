@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"encoding/binary"
+	"path/filepath"
 	"testing"
 )
 
@@ -45,4 +46,21 @@ func TestRedact(t *testing.T) {
 	if got := redact(in); got != "failed to clone https://***@github.com/o/r.git" {
 		t.Fatalf("redact = %q", got)
 	}
+}
+
+func TestLockStateAllowsOneAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "state.json")
+	release, err := LockState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LockState(path); err == nil {
+		t.Fatal("a second agent got the lock")
+	}
+	release()
+	again, err := LockState(path)
+	if err != nil {
+		t.Fatalf("lock not released: %v", err)
+	}
+	again()
 }

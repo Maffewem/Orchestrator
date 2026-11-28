@@ -21,7 +21,7 @@ import (
 // take over the device, so changing them needs an administrator. Operators keep deploying,
 // restarting, rolling back and editing environment variables.
 
-const errHostAccessAdmin = "only administrators can change host-level options (host folder mounts, host or shared networking, Compose files) or a worker's own network address: the first give a container control of the device, and an own address can place a worker on another VLAN or on an address the network trusts. Operators can still deploy, restart, roll back and edit environment variables"
+const errHostAccessAdmin = "only administrators can change host-level options (host folder mounts, host or shared networking, reserved labels, Compose files) or a worker's own network address: the first give a container control of the device, and an own address can place a worker on another VLAN or on an address the network trusts. Operators can still deploy, restart, roll back and edit environment variables"
 
 // dedicatedAccessPrefix starts the host-access strings that describe own network addresses.
 const dedicatedAccessPrefix = "Dedicated network address"
@@ -44,6 +44,13 @@ func hostAccessOf(src store.Source, rt store.Runtime) []string {
 	}
 	if n := strings.TrimSpace(rt.Network); n == "host" || strings.HasPrefix(n, "container:") {
 		out = append(out, "Network mode "+n)
+	}
+	// Labels in these namespaces tell Orchestrator and Docker Compose which containers are theirs
+	// (projects, the proxy, the tunnel, build sandboxes). A worker must not claim them.
+	for k := range rt.Labels {
+		if lk := strings.ToLower(k); strings.HasPrefix(lk, "orchestrator.") || strings.HasPrefix(lk, "com.docker.") {
+			out = append(out, "Reserved container label "+k)
+		}
 	}
 	if d := rt.Dedicated; d != nil {
 		out = append(out, dedicatedAccessPrefix+" ("+d.Mode+" "+d.IP+" "+d.HostIP+")")

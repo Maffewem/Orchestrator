@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Metrics, MetricSample } from "../api";
 import { Badge, Card, CardHeader, LineChart, Table } from "./ui";
 import { bytes } from "../lib";
@@ -31,7 +32,7 @@ function names(s: MetricSample[], pick: (x: MetricSample) => { name: string }[] 
   return out;
 }
 
-export type GraphKey = "disk" | "net" | "power";
+export type GraphKey = "disk" | "net" | "power" | "compare";
 
 /** The extra graph groups this device has data for, in display order. */
 export function availableGraphs(s: MetricSample[], m: Metrics): { key: GraphKey; label: string }[] {
@@ -170,5 +171,76 @@ function PowerRow({ label, now, since, help }: { label: string; now?: boolean; s
       {now ? <Badge tone="bad">Happening now</Badge> : since ? <Badge tone="warn">Since boot</Badge> : <Badge tone="ok">None</Badge>}
       <span className="min-w-0 text-xs text-neutral-500">{help}</span>
     </li>
+  );
+}
+
+// --- Compare: overlay any metrics on one chart to see what happened at the same moment ---
+
+type Kind = "pct" | "scaled";
+interface Candidate {
+  id: string;
+  label: string;
+  color: string;
+  kind: Kind; // pct: already 0-100; scaled: shown as a share of its own highest value in the hour
+  get: (x: MetricSample) => number;
+  fmt: (v: number) => string;
+  has: (s: MetricSample[], m: Metrics) => boolean;
+}
+
+const sumOf = (x: MetricSample, f: (d: NonNullable<MetricSample["disks"]>[number]) => number) => sum((x.disks ?? []).map(f));
+const sumNet = (x: MetricSample, f: (d: NonNullable<MetricSample["nets"]>[number]) => number) => sum((x.nets ?? []).map(f));
+const flag = (bit: number) => (x: MetricSample) => (x.has_power && (x.power ?? 0) & (1 << bit) ? 100 : 0);
+
+const CANDIDATES: Candidate[] = [
+  { id: "cpu", label: "CPU", color: "#0051c3", kind: "pct", get: (x) => x.cpu, fmt: (v) => `${v.toFixed(0)}%`, has: () => true },
+  { id: "mem", label: "Memory", color: "#f6821f", kind: "pct", get: (x) => x.mem, fmt: (v) => `${v.toFixed(0)}%`, has: () => true },
+  { id: "temp", label: "Temperature", color: "#d92d20", kind: "scaled", get: (x) => x.temp, fmt: (v) => `${v.toFixed(0)}°C`, has: (s) => s.some((x) => x.temp > 0) },
+  { id: "load", label: "Load (1 min)", color: "#7c3aed", kind: "scaled", get: (x) => x.load1, fmt: (v) => v.toFixed(2), has: (s) => s.some((x) => x.load1 > 0) },
+  { id: "iowait", label: "I/O wait", color: "#c026d3", kind: "pct", get: (x) => x.iowait ?? 0, fmt: (v) => `${v.toFixed(0)}%`, has: (s) => s.some((x) => (x.iowait ?? 0) > 0) },
+  { id: "swap", label: "Swap", color: "#a3a3a3", kind: "pct", get: (x) => x.swap ?? 0, fmt: (v) => `${v.toFixed(0)}%`, has: (_s, m) => (m.swap_total ?? 0) > 0 },
+  { id: "dread", label: "Disk read", color: "#0e7490", kind: "scaled", get: (x) => sumOf(x, (d) => d.read_bps), fmt: rate, has: (s) => s.some((x) => x.disks?.length) },
+  { id: "dwrite", label: "Disk write", color: "#b45309", kind: "scaled", get: (x) => sumOf(x, (d) => d.write_bps), fmt: rate, has: (s) => s.some((x) => x.disks?.length) },
+  { id: "dbusy", label: "Disk busy", color: "#4d7c0f", kind: "pct", get: (x) => Math.max(0, ...(x.disks ?? []).map((d) => d.busy)), fmt: (v) => `${v.toFixed(0)}%`, has: (s) => s.some((x) => x.disks?.length) },
+  { id: "rx", label: "Network in", color: "#16794c", kind: "scaled", get: (x) => sumNet(x, (d) => d.rx_bps), fmt: rate, has: (s) => s.some((x) => x.nets?.length) },
+  { id: "tx", label: "Network out", color: "#1d4ed8", kind: "scaled", get: (x) => sumNet(x, (d) => d.tx_bps), fmt: rate, has: (s) => s.some((x) => x.nets?.length) },
+  { id: "neterr", label: "Network errors", color: "#be123c", kind: "scaled", get: (x) => sumNet(x, (d) => d.errors ?? 0), fmt: (v) => `${v.toFixed(1)}/s`, has: (s) => s.some((x) => x.nets?.some((d) => (d.errors ?? 0) > 0)) },
+  { id: "clock", label: "CPU clock", color: "#0f766e", kind: "scaled", get: (x) => x.clock ?? 0, fmt: (v) => `${v.toFixed(0)} MHz`, has: (s) => s.some((x) => (x.clock ?? 0) > 0) },
+  { id: "uv", label: "Under-voltage", color: "#dc2626", kind: "pct", get: flag(0), fmt: (v) => (v ? "yes" : "no"), has: (s) => s.some((x) => x.has_power) },
+  { id: "throttle", label: "Throttled", color: "#ea580c", kind: "pct", get: (x) => (flag(2)(x) || flag(1)(x) || flag(3)(x) ? 100 : 0), fmt: (v) => (v ? "yes" : "no"), has: (s) => s.some((x) => x.has_power) },
+];
+
+export function CompareCard({ s, m }: { s: MetricSample[]; m: Metrics }) {
+  const avail = CANDIDATES.filter((c) => c.has(s, m));
+  const [picked, setPicked] = useState<string[]>(() => ["cpu", "temp", "iowait", "uv"].filter((id) => avail.some((c) => c.id === id)).slice(0, 3));
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const series = avail
+    .filter((c) => picked.includes(c.id))
+    .map((c) => {
+      const raw = s.map(c.get);
+      const top = c.kind === "pct" ? 100 : Math.max(...raw, 1e-9);
+      return { label: c.label, color: c.color, values: raw.map((v) => (v / top) * 100), shown: raw.length ? c.fmt(raw[raw.length - 1]) : "—" };
+    });
+  return (
+    <Card>
+      <CardHeader title="Compare" subtitle="Overlay metrics to see what happened at the same moment. Pick as many as you like." />
+      <div className="space-y-4 p-5">
+        <div className="flex flex-wrap gap-2">
+          {avail.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              aria-pressed={picked.includes(c.id)}
+              onClick={() => toggle(c.id)}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm ${picked.includes(c.id) ? "border-neutral-900 bg-neutral-50 font-medium" : "border-neutral-200 text-neutral-600"}`}
+            >
+              <span className="size-2 rounded-full" style={{ background: c.color, opacity: picked.includes(c.id) ? 1 : 0.35 }} />
+              {c.label}
+            </button>
+          ))}
+        </div>
+        {series.length > 0 ? <LineChart height={160} series={series} unit="%" /> : <p className="text-sm text-neutral-500">Pick at least one metric.</p>}
+        <p className="text-xs text-neutral-500">Percentages are shown as they are. Everything else (temperature, load, speeds, clock) is drawn as a share of its own highest value in the last hour, so the shapes line up; the legend shows the real latest value.</p>
+      </div>
+    </Card>
   );
 }

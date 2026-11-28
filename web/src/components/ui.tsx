@@ -430,7 +430,7 @@ export function LineChart({
   unit = "%",
   format,
 }: {
-  series: { label: string; color: string; values: number[] }[];
+  series: { label: string; color: string; values: number[]; /** Shown in the legend instead of the formatted last value (for scaled series). */ shown?: string }[];
   height?: number;
   max?: number;
   unit?: string;
@@ -465,7 +465,7 @@ export function LineChart({
             <span className="size-2 rounded-full" style={{ background: s.color }} />
             {s.label}
             <span className="font-medium text-neutral-900 tabular-nums">
-              {s.values.length ? (format ? format(s.values[s.values.length - 1]) : `${s.values[s.values.length - 1].toFixed(unit === "%" ? 0 : 2)}${unit}`) : "—"}
+              {s.shown ?? (s.values.length ? (format ? format(s.values[s.values.length - 1]) : `${s.values[s.values.length - 1].toFixed(unit === "%" ? 0 : 2)}${unit}`) : "—")}
             </span>
           </span>
         ))}

@@ -13,7 +13,7 @@ import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 import Disks from "../components/Disks";
-import HardwareMetrics, { PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
+import HardwareMetrics, { CompareCard, PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -334,6 +334,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
     { key: "perf", label: "Performance" },
     ...(s.some((x) => x.temp > 0) || hwTabs.some((g) => g.key === "power") ? [{ key: "temp" as const, label: hwTabs.some((g) => g.key === "power") ? "Temperature & power" : "Temperature" }] : []),
     ...hwTabs.filter((g) => g.key !== "power"),
+    { key: "compare" as const, label: "Compare" },
   ];
   const [picked, setPicked] = useState<string>(() => {
     try {
@@ -433,6 +434,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             </div>
           </Card>
         )}
+        {graph === "compare" && <CompareCard s={s} m={m} />}
         {graph === "temp" && <HardwareMetrics s={s} m={m} only="power" />}
         {(graph === "disk" || graph === "net") && <HardwareMetrics s={s} m={m} only={graph} />}
         <FoldCard title="Recent activity">

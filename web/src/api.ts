@@ -223,6 +223,29 @@ export interface DiskReport {
 
 export type Health = "ok" | "warning" | "critical";
 
+/** A failing container, explained: why it failed, the numbers behind it and what to do about it. */
+export interface ContainerIssue {
+  name: string;
+  id: string;
+  kind: "oom" | "killed" | "loop" | "dead";
+  message: string;
+  cause: string;
+  tips?: string[];
+  project_id?: string;
+  project_name?: string;
+  mem_limit?: number;
+  mem_used?: number;
+  host_mem_total?: number;
+  host_mem_used?: number;
+  swap_total?: number;
+  swap_used?: number;
+  /** A memory limit (MiB) worth trying in the project settings. */
+  suggest_mb?: number;
+  acked?: boolean;
+  acked_by?: string;
+  restarts?: number;
+}
+
 export interface Device {
   id: string;
   name: string;
@@ -235,6 +258,7 @@ export interface Device {
   status: "online" | "offline";
   health: Health;
   issues: string[];
+  container_issues?: ContainerIssue[];
   /** A change to the device's network, shown until acknowledged. */
   network_notice?: { message: string; at: string };
   proxy: "running" | "stopped" | "none" | "agent_too_old";
@@ -1426,6 +1450,8 @@ export const api = {
   setProjectMetricPrefs: (id: string, p: MetricPrefs) => request<MetricPrefsView>("PUT", `/api/projects/${id}/metrics/prefs`, p),
   updateDevice: (id: string, patch: { name?: string; labels?: string[]; maintenance?: boolean; maintenance_note?: string; maintenance_hours?: number }) =>
     request<Device>("PATCH", `/api/devices/${id}`, patch),
+  ackContainerIssue: (id: string, container: string, undo = false) =>
+    request<Device>("POST", `/api/devices/${id}/container-alerts/ack`, { container, undo }),
   ackNetworkNotice: (id: string) => request<Device>("POST", `/api/devices/${id}/network-notice/ack`),
   tunnel: (id: string) => request<TunnelView>("GET", `/api/devices/${id}/tunnel`),
   setTunnel: (id: string, token: string) => request<TunnelView>("PUT", `/api/devices/${id}/tunnel`, { token }),

@@ -367,6 +367,7 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 		}
 		if c := findByName(src, name); c != nil && c.State == "running" && hasCap(src, api.CapPreview) {
 			m.step(p.ID, "Stopping "+name+" on "+src.Name+" so its dedicated address is free")
+			s.markStopped(ctx, src.ID, *c)
 			cmd, err := s.store.CreateCommand(ctx, src.ID, api.ActionStop, c.ID, nil)
 			if err == nil {
 				_, err = s.waitCommand(ctx, cmd.ID, time.Minute)
@@ -489,6 +490,7 @@ func (s *Server) runMigration(ctx context.Context, p *store.Project, src, dst *s
 	} else if src != nil && stopSource && !src.Offline {
 		if c := findByName(src, name); c != nil && hasCap(src, api.CapPreview) {
 			m.step(p.ID, "Stopping the old container on "+src.Name)
+			s.markStopped(ctx, src.ID, *c)
 			if _, err := s.store.CreateCommand(ctx, src.ID, api.ActionStop, c.ID, nil); err != nil {
 				s.log.Error("migrate: stop source", "err", err)
 			}

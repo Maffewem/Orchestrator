@@ -72,6 +72,7 @@ type Config struct {
 type Server struct {
 	identity      ed25519.PrivateKey // proves to agents that this is their server; see discover.go
 	netNotes      netNotices         // recent network changes per device; see connectivity.go
+	dismissed     dismissals         // acknowledged or expected container failures; see containerissues.go
 	store         *store.Store
 	cfg           Config
 	log           *slog.Logger
@@ -313,6 +314,7 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/projects/{id}/metrics/prefs", s.handleSetProjectMetricPrefs)
 	admin("PATCH /api/devices/{id}", s.handleUpdateDevice)
 	admin("POST /api/devices/{id}/network-notice/ack", s.handleAckNetNotice)
+	admin("POST /api/devices/{id}/container-alerts/ack", s.handleAckContainerIssue)
 	admin("DELETE /api/devices/{id}", s.handleDeleteDevice)
 	admin("POST /api/devices/{id}/commands", s.handleCreateCommand)
 	admin("GET /api/containers", s.handleListContainers)

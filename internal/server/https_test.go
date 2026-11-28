@@ -17,8 +17,14 @@ import (
 
 func selfSigned(t *testing.T) (certPEM, keyPEM string) {
 	t.Helper()
+	return selfSignedWithLife(t, -time.Hour, 90*24*time.Hour)
+}
+
+// selfSignedWithLife makes a certificate valid from now+start until now+end.
+func selfSignedWithLife(t *testing.T, start, end time.Duration) (certPEM, keyPEM string) {
+	t.Helper()
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "orch.test"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(90 * 24 * time.Hour), DNSNames: []string{"orch.test"}}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "orch.test"}, NotBefore: time.Now().Add(start), NotAfter: time.Now().Add(end), DNSNames: []string{"orch.test"}}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)

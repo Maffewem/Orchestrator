@@ -1176,6 +1176,7 @@ export interface HTTPSView {
   can_publish: boolean;
   publish_note?: string;
   hsts_blocked?: string;
+  expiry?: { level: "ok" | "warning" | "critical"; days: number; message?: string };
 }
 
 export interface HTTPSTest {

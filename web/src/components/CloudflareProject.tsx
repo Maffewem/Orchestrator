@@ -68,7 +68,7 @@ export function CloudflareOverview({ p }: { p: Project }) {
         </p>
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader title="Production" subtitle="The newest deployment that went live on Cloudflare." />
           {d ? (
@@ -226,14 +226,14 @@ export function CloudflareMetrics({ p }: { p: Project }) {
           </Button>
         </Card>
       )}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {tile("Deployments", String(total ?? "—"))}
         {tile("Success rate", done.length ? `${Math.round((ok / done.length) * 100)}%` : "—")}
         {tile("Status", st ? STATE[st.state].label : "—", st ? `Checked ${ago(st.polled_at)}` : undefined, st?.state === "failed" || st?.state === "error")}
       </div>
       {worker ? (
         waiting || st?.analytics === "ok" ? (
-          <div className="grid gap-4 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
             {tile("Requests, 24h", fmt(st?.requests ?? 0), `${fmt(st?.subrequests ?? 0)} subrequests`)}
             {tile("Errors, 24h", fmt(st?.errors ?? 0), st?.requests ? `${errRate.toFixed(1)}% of requests` : undefined, errRate > 5)}
             {tile("CPU time p50", `${((st?.cpu_p50_us ?? 0) / 1000).toFixed(1)} ms`)}

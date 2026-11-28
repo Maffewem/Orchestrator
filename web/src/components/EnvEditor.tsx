@@ -78,13 +78,13 @@ export default function EnvEditor({ value, onChange }: { value: string; onChange
               type="button"
               key={String(r)}
               onClick={() => setMode(r)}
-              className={cx("rounded-md px-2.5 py-1", raw === r ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100")}
+              className={cx("rounded-md px-3 py-2.5 sm:px-2.5 sm:py-1", raw === r ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100")}
             >
               {r ? "Raw" : "Table"}
             </button>
           ))}
         </div>
-        <button type="button" onClick={() => file.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 px-2.5 py-1.5 hover:bg-neutral-50">
+        <button type="button" onClick={() => file.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 px-3 py-3 hover:bg-neutral-50 sm:px-2.5 sm:py-1.5">
           <Upload className="size-3.5" /> Import .env
         </button>
         <input ref={file} type="file" className="hidden" onChange={(e) => importFile(e.target.files?.[0])} />

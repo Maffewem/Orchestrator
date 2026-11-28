@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { copyText } from "../clipboard";
 import { Link, NavLink } from "react-router";
-import { AlertTriangle, Check, CircleDashed, Eye, EyeOff, Loader2, Minus, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleDashed, Eye, EyeOff, Loader2, Minus, RefreshCw, X } from "lucide-react";
 import type { DeploymentStatus, Health, StepStatus } from "../api";
 import { cx } from "../lib";
 
@@ -45,10 +45,30 @@ export function Card({ className, children }: { className?: string; children: Re
   return <div className={cx("rounded-xl border border-neutral-200 bg-white", className)}>{children}</div>;
 }
 
+/** A card that starts collapsed on phones (tap the header to open) and is always open from `sm` up, so long pages stay short. */
+export function FoldCard({ title, subtitle, defaultOpen = false, className, children }: { title: ReactNode; subtitle?: ReactNode; defaultOpen?: boolean; className?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className={className}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex min-h-11 w-full items-center justify-between gap-3 px-5 py-3 text-left sm:hidden">
+        <span className="text-sm font-semibold">{title}</span>
+        <ChevronDown className={cx("size-4 shrink-0 text-neutral-500 transition-transform", open && "rotate-180")} />
+      </button>
+      <div className="hidden sm:block">
+        <CardHeader title={title} subtitle={subtitle} />
+      </div>
+      <div className={cx(open ? "border-t border-neutral-200 sm:border-t-0" : "hidden sm:block")}>
+        {open && subtitle && <p className="px-5 pt-3 text-xs text-neutral-500 sm:hidden">{subtitle}</p>}
+        {children}
+      </div>
+    </Card>
+  );
+}
+
 export function CardHeader({ title, action, subtitle }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-neutral-200 px-5 py-3.5">
-      <div>
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-neutral-200 px-5 py-3.5">
+      <div className="min-w-0 max-w-full">
         <h3 className="text-sm font-semibold">{title}</h3>
         {subtitle && <p className="mt-0.5 text-xs text-neutral-500">{subtitle}</p>}
       </div>
@@ -241,7 +261,7 @@ export function RefreshButton({ onClick, busy, label = "Refresh" }: { onClick: (
       disabled={busy}
       aria-label={label}
       title={label}
-      className="inline-flex size-9 items-center justify-center rounded-lg border border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-70"
+      className="inline-flex size-11 sm:size-9 items-center justify-center rounded-lg border border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-70"
     >
       <RefreshCw className={cx("size-4", busy && "animate-spin motion-reduce:animate-none")} />
     </button>
@@ -316,19 +336,19 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     };
   }, []);
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/30 p-0 sm:items-start sm:p-10" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/30 p-0 sm:p-10" onMouseDown={onClose}>
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={cx("w-full rounded-t-xl bg-white shadow-xl outline-none sm:rounded-xl", wide ? "max-w-3xl" : "max-w-lg")}
+        className={cx("mt-auto w-full min-w-0 rounded-t-xl bg-white pb-[env(safe-area-inset-bottom)] shadow-xl outline-none sm:mt-0 sm:rounded-xl sm:pb-0", wide ? "max-w-3xl" : "max-w-lg")}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-3.5">
-          <h2 id={titleId} className="font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded-md p-1 text-neutral-500 hover:bg-neutral-100" aria-label="Close">
+          <h2 id={titleId} className="min-w-0 break-words font-semibold">{title}</h2>
+          <button onClick={onClose} className="-mr-2 shrink-0 rounded-md p-2.5 text-neutral-500 hover:bg-neutral-100 sm:-mr-1 sm:p-1" aria-label="Close">
             <X className="size-4" />
           </button>
         </div>
@@ -454,10 +474,20 @@ export function LineChart({
   );
 }
 
+/** Rows become stacked cards below the `sm` breakpoint: each cell shows its column heading as a label (see `.stack-table` in index.css). */
 export function Table({ head, children, compact }: { head: ReactNode[]; children: ReactNode; compact?: boolean }) {
+  const ref = useRef<HTMLTableElement>(null);
+  useEffect(() => {
+    ref.current?.querySelectorAll("tbody tr").forEach((tr) => {
+      Array.from(tr.children).forEach((td, i) => {
+        const h = head[i];
+        (td as HTMLElement).dataset.label = typeof h === "string" ? h : "";
+      });
+    });
+  });
   return (
     <div className="overflow-x-auto">
-      <table className={cx("w-full text-left text-sm", compact && "[&_td]:!py-1.5")}>
+      <table ref={ref} className={cx("stack-table w-full text-left text-sm", compact && "[&_td]:!py-1.5")}>
         <thead>
           <tr className="border-b border-neutral-200 text-xs text-neutral-500">
             {head.map((h, i) => (
@@ -486,7 +516,7 @@ export function Toggle({ checked, onChange, label }: { checked: boolean; onChang
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
-      className={cx("relative h-6 w-11 shrink-0 rounded-full transition-colors", checked ? "bg-primary" : "bg-neutral-300")}
+      className={cx("relative h-6 w-11 shrink-0 rounded-full transition-colors before:absolute before:-inset-x-1 before:-inset-y-2.5 before:content-[''] sm:before:hidden", checked ? "bg-primary" : "bg-neutral-300")}
     >
       <span className={cx("absolute top-0.5 size-5 rounded-full bg-white shadow transition-all", checked ? "left-[22px]" : "left-0.5")} />
     </button>

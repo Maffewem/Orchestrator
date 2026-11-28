@@ -150,8 +150,9 @@ export default function ContainerTable({
   const nameCell = (c: Container | FleetContainer, dev: string) => (
     <>
       <Link to={`/workers/${dev}/${encodeURIComponent(c.name)}`} className="flex items-center gap-2 font-medium text-neutral-900 hover:text-primary hover:underline">
-        <StatusDot status={c.state} />
+        <StatusDot status={c.unstable ? "restarting" : c.state} />
         {c.name}
+        {c.unstable && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-xs font-normal text-amber-700" title="Docker has restarted this container several times in the last 15 minutes">restart loop</span>}
         {c.name === "orchestrator-previous" && <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-normal text-neutral-600" title="Kept by the last server update so it can be rolled back">rollback copy</span>}
       </Link>
       {"project_name" in c && c.project_name ? (

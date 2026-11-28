@@ -90,16 +90,25 @@ func (s *Server) view(d *store.Device) DeviceView {
 	// Container failures that point at the device rather than the app: crash loops and kills
 	// by the kernel's out-of-memory killer (exit code 137).
 	var looping, killed []string
+	marked, unstable := s.markUnstable(d.ID, d.Containers)
+	if len(unstable) > 0 {
+		dc := *d
+		dc.Containers = marked
+		v.Device = &dc
+	}
 	for _, c := range d.Containers {
 		switch {
-		case c.State == "restarting" || c.State == "dead":
+		case c.State == "dead":
 			looping = append(looping, c.Name)
 		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
 			killed = append(killed, c.Name)
 		}
 	}
+	if len(unstable) > 0 {
+		raise("warning", "Containers restarting repeatedly: "+strings.Join(unstable, ", "))
+	}
 	if len(looping) > 0 {
-		raise("warning", "Containers restarting or dead: "+strings.Join(looping, ", "))
+		raise("warning", "Containers dead: "+strings.Join(looping, ", "))
 	}
 	if len(killed) > 0 {
 		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(killed, ", "))
@@ -662,7 +671,8 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 		if addrs == nil {
 			addrs = []string{}
 		}
-		for _, c := range d.Containers {
+		marked, _ := s.markUnstable(d.ID, d.Containers)
+		for _, c := range marked {
 			fc := fleetContainer{Container: c, DeviceID: d.ID, DeviceName: d.Name, DeviceStatus: status, DeviceAddresses: addrs}
 			if id := c.Labels["orchestrator.project"]; names[id] != "" {
 				fc.ProjectID, fc.ProjectName = id, names[id]

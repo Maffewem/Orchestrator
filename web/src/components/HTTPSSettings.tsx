@@ -54,7 +54,7 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
         </label>
       ))}
       {mode !== "off" && (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {mode === "auto" && (
             <Field label="Dashboard hostname" hint="Must already point at this server.">
               <input className={inputClass} value={host} onChange={(e) => setHost(e.target.value)} placeholder="orch.example.com" />

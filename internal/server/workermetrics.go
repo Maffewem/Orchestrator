@@ -145,6 +145,50 @@ type workerAcc struct {
 	latest   api.ContainerStats
 	latestAt int64
 	pruned   time.Time
+	// restarts are the report times of recent Docker restarts; loopEventAt is when the last
+	// "restart loop" event was written, so a loop logs one entry rather than one per restart.
+	restarts    []int64
+	loopEventAt int64
+}
+
+// A container Docker restarted this many times within restartLoopWindow is in a restart loop.
+const (
+	restartLoopCount  = 3
+	restartLoopWindow = 15 * 60 // seconds
+)
+
+// markUnstable flags containers in a restart loop and returns their names. It works on a copy,
+// so the stored device is untouched. Containers Docker reports as restarting or dead count too.
+func (s *Server) markUnstable(deviceID string, cs []api.Container) ([]api.Container, []string) {
+	if len(cs) == 0 {
+		return cs, nil
+	}
+	out := append([]api.Container(nil), cs...)
+	var names []string
+	now := time.Now().Unix()
+	if s.wstats != nil {
+		s.wstats.mu.Lock()
+		defer s.wstats.mu.Unlock()
+	}
+	for i, c := range out {
+		looping := c.State == "restarting"
+		if s.wstats != nil {
+			if acc := s.wstats.workers[deviceID+"|"+c.Name]; acc != nil {
+				n := 0
+				for _, t := range acc.restarts {
+					if now-t <= restartLoopWindow {
+						n++
+					}
+				}
+				looping = looping || n >= restartLoopCount
+			}
+		}
+		if looping {
+			out[i].Unstable = true
+			names = append(names, c.Name)
+		}
+	}
+	return out, names
 }
 
 type proxyAcc struct {
@@ -256,7 +300,21 @@ func (s *Server) ingestStats(ctx context.Context, d *store.Device, containers []
 		prev, seen := acc.latest, acc.latestAt > 0
 		acc.latest, acc.latestAt = cs, rep.Time
 		if seen && cs.Restarts > prev.Restarts {
-			if cs.OOMKilled {
+			acc.restarts = append(acc.restarts, rep.Time)
+			kept := acc.restarts[:0]
+			for _, t := range acc.restarts {
+				if rep.Time-t <= restartLoopWindow {
+					kept = append(kept, t)
+				}
+			}
+			acc.restarts = kept
+			if len(acc.restarts) >= restartLoopCount {
+				// One entry per loop (renewed every window), not one per restart.
+				if rep.Time-acc.loopEventAt > restartLoopWindow {
+					acc.loopEventAt = rep.Time
+					s.wstatsEvent(d, "warning", "container.restart_loop", fmt.Sprintf("%s on %s is restarting repeatedly (restart %d); further restarts are not logged individually", cs.Name, d.Name, cs.Restarts))
+				}
+			} else if cs.OOMKilled {
 				s.wstatsEvent(d, "warning", "container.oom", fmt.Sprintf("%s on %s restarted after running out of memory", cs.Name, d.Name))
 			} else {
 				s.wstatsEvent(d, "warning", "container.restarted", fmt.Sprintf("%s on %s restarted by Docker (restart %d)", cs.Name, d.Name, cs.Restarts))

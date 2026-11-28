@@ -3,7 +3,7 @@ import { KeyRound, Trash2, UserPlus } from "lucide-react";
 import { api, type Role, type User } from "../api";
 import { useCrumbs } from "../components/Layout";
 import { useMe } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, Modal, PageHeader, Table, Td, inputClass, SecretInput } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, Modal, PageHeader, inputClass, SecretInput } from "../components/ui";
 import { ago, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 
@@ -42,44 +42,44 @@ export default function UsersPage() {
       )}
       <Card>
         <CardHeader title="Accounts" subtitle="The admin token keeps working as a fallback and is not listed here." />
-        <Table head={["User", "Role", "Added", ""]}>
+        <ul className="divide-y divide-neutral-100">
           {users.data.map((u) => (
-            <tr key={u.id}>
-              <Td>
-                <span className="font-medium">{u.username}</span> {u.username === me?.username && <Badge tone="info">you</Badge>} {u.disabled && <Badge tone="warn">disabled</Badge>}
-              </Td>
-              <Td>
-                <select
-                  className={inputClass + " w-36"}
-                  value={u.role}
-                  aria-label={`Role of ${u.username}`}
-                  title={roleHelp[u.role]}
-                  onChange={(e) => act(() => api.updateUser(u.id, { role: e.target.value as Role }))}
-                >
-                  <option value="viewer">Viewer</option>
-                  <option value="operator">Operator</option>
-                  <option value="admin">Admin</option>
-                </select>
-              </Td>
-              <Td className="text-neutral-500">{ago(u.created_at)}</Td>
-              <Td className="text-right">
-                <div className="flex justify-end gap-1">
-                  <Button aria-label={`Reset password of ${u.username}`} icon={<KeyRound className="size-4" />} onClick={() => setReset(u)} />
-                  <Button onClick={() => act(() => api.updateUser(u.id, { disabled: !u.disabled }))}>{u.disabled ? "Enable" : "Disable"}</Button>
-                  <Button
-                    variant="danger"
-                    aria-label={`Delete ${u.username}`}
-                    icon={<Trash2 className="size-4" />}
-                    onClick={async () => (await confirmDialog({ title: `Delete ${u.username}?`, confirmLabel: "Delete", danger: true })) && act(() => api.deleteUser(u.id))}
-                  />
+            <li key={u.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:px-5">
+              <div className="min-w-0 flex-1 basis-40">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="break-all font-medium">{u.username}</span>
+                  {u.username === me?.username && <Badge tone="info">you</Badge>}
+                  {u.disabled && <Badge tone="warn">disabled</Badge>}
                 </div>
-              </Td>
-            </tr>
+                <div className="text-xs text-neutral-500">Added {ago(u.created_at)}</div>
+              </div>
+              <select
+                className={inputClass + " w-36 shrink-0"}
+                value={u.role}
+                aria-label={`Role of ${u.username}`}
+                title={roleHelp[u.role]}
+                onChange={(e) => act(() => api.updateUser(u.id, { role: e.target.value as Role }))}
+              >
+                <option value="viewer">Viewer</option>
+                <option value="operator">Operator</option>
+                <option value="admin">Admin</option>
+              </select>
+              <div className="flex w-full gap-2 sm:w-auto sm:gap-1">
+                <Button aria-label={`Reset password of ${u.username}`} icon={<KeyRound className="size-4" />} onClick={() => setReset(u)} />
+                <Button className="flex-1 sm:flex-none" onClick={() => act(() => api.updateUser(u.id, { disabled: !u.disabled }))}>{u.disabled ? "Enable" : "Disable"}</Button>
+                <Button
+                  variant="danger"
+                  aria-label={`Delete ${u.username}`}
+                  icon={<Trash2 className="size-4" />}
+                  onClick={async () => (await confirmDialog({ title: `Delete ${u.username}?`, confirmLabel: "Delete", danger: true })) && act(() => api.deleteUser(u.id))}
+                />
+              </div>
+            </li>
           ))}
-        </Table>
+        </ul>
         {users.data.length === 0 && <p className="p-5 text-sm text-neutral-500">No accounts yet. Sign out and create the first administrator.</p>}
       </Card>
-      <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-3">
+      <dl className="mt-6 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
         {(Object.keys(roleHelp) as Role[]).map((r) => (
           <div key={r} className="rounded-lg border border-neutral-200 bg-white p-4">
             <dt className="font-medium capitalize">{r}</dt>

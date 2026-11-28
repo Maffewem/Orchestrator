@@ -83,3 +83,27 @@ func TestNetworkNoticeStaysUntilAcknowledged(t *testing.T) {
 		t.Fatal("a new change should raise a new notice")
 	}
 }
+
+func TestRestartLoopMarksContainerUnstable(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}, wstats: &workerStats{workers: map[string]*workerAcc{}}}
+	now := time.Now().Unix()
+	s.wstats.workers["d1|paperless"] = &workerAcc{restarts: []int64{now - 90, now - 60, now - 30}}
+	s.wstats.workers["d1|old"] = &workerAcc{restarts: []int64{now - 4000, now - 3900, now - 3800}}
+	d := &store.Device{ID: "d1", LastSeen: time.Now(), Containers: []api.Container{
+		{Name: "paperless", State: "running"}, {Name: "old", State: "running"}, {Name: "calm", State: "running"},
+	}}
+	d.Host.CPUs = 4
+	d.Host.Docker = &api.DockerInfo{}
+	v := s.view(d)
+	if v.Health != "warning" || len(v.Issues) != 1 {
+		t.Fatalf("health %q issues %v", v.Health, v.Issues)
+	}
+	for _, c := range v.Containers {
+		if c.Unstable != (c.Name == "paperless") {
+			t.Errorf("%s unstable=%v", c.Name, c.Unstable)
+		}
+	}
+	if d.Containers[0].Unstable {
+		t.Error("stored device was modified")
+	}
+}

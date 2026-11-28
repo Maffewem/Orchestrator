@@ -55,7 +55,7 @@ export default function Disks({ d }: { d: Device }) {
           title="Disks"
           subtitle={`Live from ${d.name}. Format, partition and unmount are admin-only, need the device path typed back, and are written to Activity.`}
           action={
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button icon={<RefreshCw className="size-4" />} onClick={list.reload}>
                 Refresh
               </Button>
@@ -134,7 +134,7 @@ function DiskCard({ disk, busy, onUnmount, onDialog }: { disk: Disk; busy: strin
       </div>
       {disk.protected && <p className="border-b border-neutral-100 bg-neutral-50 px-5 py-2 text-xs text-neutral-600">🔒 {disk.protected}</p>}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr className="text-left text-xs text-neutral-500">
               <th className="px-5 py-2 font-medium">Volume</th>
@@ -308,12 +308,14 @@ function FormatDialog({ d, vol, disk, onClose }: { d: Device; vol: DiskVolume; d
 
 function PartitionDialog({ d, disk, onClose }: { d: Device; disk: Disk; onClose: () => void }) {
   const a = useAction(d, onClose);
-  const [layout, setLayout] = useState("rest");
+  const [split, setSplit] = useState(false);
+  const [firstGiB, setFirstGiB] = useState("50");
   const [confirm, setConfirm] = useState("");
-  const presets: [string, string][] = [
-    ["One partition using the whole disk", "rest"],
-    ["Two partitions: 50 GiB, then the rest", "51200,rest"],
-  ];
+  const diskGiB = disk.size_bytes / 1024 ** 3;
+  const first = Number(firstGiB);
+  const firstOk = Number.isFinite(first) && first >= 1 && first < diskGiB;
+  // The agent takes sizes in MiB; "rest" means all remaining space.
+  const layout = split ? `${Math.round(first * 1024)},rest` : "rest";
   return (
     <Modal title={`Partition ${disk.path}`} onClose={onClose}>
       {a.done ? (
@@ -324,21 +326,34 @@ function PartitionDialog({ d, disk, onClose }: { d: Device; disk: Disk; onClose:
             This replaces the partition table of <b className="font-mono">{disk.path}</b> ({bytes(disk.size_bytes)}
             {disk.model ? `, ${disk.model}` : ""}) with a new GPT table. All existing partitions and their data are lost. New partitions have no filesystem; format them afterwards.
           </WarnNote>
-          <Field label="Layout" hint="Sizes in MiB, comma separated; the last may be “rest” for all remaining space.">
-            <input className={inputClass + " font-mono"} value={layout} onChange={(e) => setLayout(e.target.value)} />
-          </Field>
-          <div className="flex flex-wrap gap-2">
-            {presets.map(([label, v]) => (
-              <Button key={v} size="sm" variant={layout === v ? "primary" : "secondary"} onClick={() => setLayout(v)}>
-                {label}
-              </Button>
-            ))}
+          <div className="space-y-2 text-sm">
+            <div className="font-medium">How should the disk be divided?</div>
+            <label className="flex items-start gap-2">
+              <input type="radio" name="layout" className="mt-1" checked={!split} onChange={() => setSplit(false)} />
+              <span>One partition using the whole disk</span>
+            </label>
+            <label className="flex items-start gap-2">
+              <input type="radio" name="layout" className="mt-1" checked={split} onChange={() => setSplit(true)} />
+              <span>Split into two partitions</span>
+            </label>
           </div>
+          {split && (
+            <Field label="Size of the first partition (GiB)" hint={`The second partition uses all the remaining space. The disk is ${diskGiB.toFixed(1)} GiB.`}>
+              <input className={inputClass} type="number" inputMode="decimal" min={1} step="any" value={firstGiB} onChange={(e) => setFirstGiB(e.target.value)} />
+            </Field>
+          )}
+          <p className="text-sm text-neutral-500">
+            {split
+              ? firstOk
+                ? `Result: partition 1 is ${firstGiB} GiB and partition 2 is the remaining ${Math.max(diskGiB - first, 0).toFixed(1)} GiB.`
+                : `Enter a size of at least 1 GiB and smaller than the disk (${diskGiB.toFixed(1)} GiB).`
+              : "Result: a single partition covering the whole disk."}
+          </p>
           <Confirm path={disk.path} value={confirm} onChange={setConfirm} />
           {a.error && <ErrorNote>{a.error}</ErrorNote>}
           <div className="flex justify-end gap-2">
             <Button onClick={onClose}>Cancel</Button>
-            <Button variant="danger" loading={a.busy} disabled={confirm !== disk.path} onClick={() => a.go("partition", { device: disk.path, layout, confirm })}>
+            <Button variant="danger" loading={a.busy} disabled={confirm !== disk.path || (split && !firstOk)} onClick={() => a.go("partition", { device: disk.path, layout, confirm })}>
               Erase and partition
             </Button>
           </div>
@@ -408,7 +423,7 @@ function ShareDialog({ d, onClose }: { d: Device; onClose: () => void }) {
             <input className={inputClass + " font-mono"} value={mountpoint} onChange={(e) => setMountpoint(e.target.value)} />
           </Field>
           {kind === "smb" && (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Username" hint="Leave empty for a guest share.">
                 <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
               </Field>

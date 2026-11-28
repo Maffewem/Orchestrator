@@ -609,11 +609,11 @@ function SecretBlock({ value }: { value: string }) {
   return (
     <div className="flex items-center gap-2 code-surface rounded-lg py-2 pl-3 pr-2 font-mono text-xs">
       <span className="min-w-0 flex-1 break-all">{shown ? value : "•".repeat(28)}</span>
-      <button className="shrink-0 rounded-md bg-white/10 px-2.5 py-1.5 hover:bg-white/20" onClick={() => setShown(!shown)}>
+      <button className="shrink-0 rounded-md bg-white/10 px-3 py-3 sm:px-2.5 sm:py-1.5 hover:bg-white/20" onClick={() => setShown(!shown)}>
         {shown ? "Hide" : "Reveal"}
       </button>
       <button
-        className="shrink-0 rounded-md bg-white/10 px-2.5 py-1.5 hover:bg-white/20"
+        className="shrink-0 rounded-md bg-white/10 px-3 py-3 sm:px-2.5 sm:py-1.5 hover:bg-white/20"
         onClick={async () => {
           if (await copyText(value)) {
             setCopied(true);

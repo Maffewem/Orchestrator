@@ -293,7 +293,7 @@ function Start({ v, failed, onStart }: { v: MoveView; failed?: ServerMove; onSta
           {eligible.length === 0 && v.devices.length > 0 && <p className="text-sm text-neutral-500">None of your devices can take over yet. The reason is shown on each one.</p>}
         </div>
         {dev && (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Address of the new server" hint="How your devices will reach it on the network">
               {dev.addresses.length > 1 ? (
                 <select className={inputClass} value={addr} onChange={(e) => setAddr(e.target.value)}>

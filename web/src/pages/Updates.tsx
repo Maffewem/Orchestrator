@@ -89,7 +89,7 @@ function ServerCard({ st, reload }: { st: UpdateStatus; reload: () => void }) {
     <Card className="mb-6">
       <CardHeader title="Control plane" subtitle="Updates pull the newest published image and restart the server on it. The previous version is kept and restored automatically if the new one doesn't come up healthy." />
       <div className="space-y-4 p-5">
-        <dl className="grid gap-4 text-sm sm:grid-cols-4">
+        <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-neutral-500">Running</dt>
             <dd className="font-mono font-medium">{st.version || "unknown"}</dd>
@@ -175,7 +175,7 @@ function ScheduleCard({ st, reload }: { st: UpdateStatus; reload: () => void }) 
     <Card className="mb-6">
       <CardHeader title="Automatic updates" subtitle="Check for the latest build and install it on a schedule." />
       <div className="space-y-4 p-5">
-        <div className="grid gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <Field label="Check">
             <select className={inputClass} value={s.mode} onChange={(e) => set({ mode: e.target.value as UpdateSchedule["mode"] })}>
               <option value="off">Never (manual only)</option>

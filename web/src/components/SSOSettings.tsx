@@ -50,7 +50,7 @@ export function SSOSettings({ value, onSaved }: { value: SSOView; onSaved: () =>
           <input type="checkbox" checked={gh.enabled} onChange={(e) => setGH({ enabled: e.target.checked })} /> GitHub
         </label>
         {gh.enabled && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Client ID"><input className={inputClass} value={gh.client_id} onChange={(e) => setGH({ client_id: e.target.value })} /></Field>
             <Field label="Client secret"><SecretInput className={inputClass} value={gh.client_secret ?? ""} placeholder={c.github_secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => setGH({ client_secret: e.target.value })} /></Field>
             <Field label="Allowed organisations" hint="Comma-separated. Members of these GitHub organisations can sign in."><input className={inputClass} value={gh.orgs.join(", ")} onChange={(e) => setGH({ orgs: list(e.target.value) })} /></Field>
@@ -69,7 +69,7 @@ export function SSOSettings({ value, onSaved }: { value: SSOView; onSaved: () =>
           <input type="checkbox" checked={oi.enabled} onChange={(e) => setOI({ enabled: e.target.checked })} /> OpenID Connect (Cloudflare Access, Google, Authentik, Entra, Keycloak)
         </label>
         {oi.enabled && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Provider">
               <select className={inputClass} value="" onChange={(e) => e.target.value && setOI({ name: presets[e.target.value].name, issuer: presets[e.target.value].issuer })}>
                 <option value="">Fill in from a preset…</option>

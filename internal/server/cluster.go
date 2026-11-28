@@ -378,6 +378,7 @@ func (s *Server) handleHomeReturn(ctx context.Context, p *store.Project, pol Clu
 		if p.Source.Type == store.SourceCompose {
 			s.store.CreateCommand(ctx, home.ID, api.ActionStackStop, p.Name, nil)
 		} else if c.State == "running" {
+			s.markStopped(ctx, home.ID, *c)
 			s.store.CreateCommand(ctx, home.ID, api.ActionStop, c.ID, nil)
 		}
 		s.event(ctx, home.ID, "info", "cluster.failover", fmt.Sprintf("%s is back. %s now runs on %s, so the old copy here was stopped", home.Name, p.Name, rec.ToName))
@@ -801,6 +802,7 @@ func (s *Server) retireReplica(ctx context.Context, p *store.Project, d *store.D
 	}
 	switch how {
 	case "stop":
+		s.markStopped(ctx, d.ID, *c)
 		s.store.CreateCommand(ctx, d.ID, api.ActionStop, c.ID, nil)
 		s.event(ctx, d.ID, "warning", "cluster.replica", fmt.Sprintf("The replica of %s on %s is being stopped (its container and data are kept)", p.Name, d.Name))
 	case "remove":

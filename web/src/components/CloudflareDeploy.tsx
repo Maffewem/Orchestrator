@@ -37,7 +37,7 @@ export function CloudflareDeploy({ s, reload }: { s: Settings; reload: () => voi
       <p className="text-sm text-neutral-500">
         Choose <b>Cloudflare</b> as the source when you create a project. This server clones the repository, runs the build, and uploads the result to Pages or as a Worker. Pull requests become preview deployments.
       </p>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Account ID" hint="Cloudflare dashboard → Workers &amp; Pages → Account ID.">
           <input className={inputClass} placeholder="32-character account ID" value={account} onChange={(e) => setAccount(e.target.value)} />
         </Field>

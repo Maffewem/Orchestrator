@@ -115,7 +115,7 @@ export default function DeploymentPage() {
             <Button
               icon={<Undo2 className="size-4" />}
               onClick={async () => {
-                if (!(await confirmDialog({ title: "Roll back to this version?", message: "It becomes the live version.", confirmLabel: "Roll back" }))) return;
+                if (!(await confirmDialog({ title: "Roll back to this version?", message: "It becomes the live version. If its image was cleaned up, it is rebuilt from the commit (or pulled by its recorded digest).", confirmLabel: "Roll back" }))) return;
                 try {
                   const n = await api.rollbackDeployment(d.id);
                   nav(`/deployments/${n.id}`);
@@ -219,7 +219,7 @@ function SourceCard({ d, deviceName, url }: { d: Deployment; deviceName?: string
         </span>
       </button>
       {open && (
-        <dl className="grid gap-x-8 gap-y-3 border-t border-neutral-200 px-5 py-4 text-sm sm:grid-cols-[180px_1fr]">
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-3 border-t border-neutral-200 px-5 py-4 text-sm sm:grid-cols-[180px_1fr]">
           <dt className="font-medium">{cf ? "Runs on" : "Device"}</dt>
           <dd>{cf ? "Cloudflare" : deviceName ?? d.device_id}</dd>
           {settings.map(([k, v]) => (

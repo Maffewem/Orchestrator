@@ -150,7 +150,7 @@ function Deployments({ w }: { w: FleetContainer }) {
       <Card>
         <div className="border-b border-neutral-200 px-5 py-3 text-sm font-medium text-neutral-600">Active deployment</div>
         {active ? (
-          <dl className="grid gap-5 p-5 text-sm sm:grid-cols-2 lg:grid-cols-5">
+          <dl className="grid grid-cols-1 gap-5 p-5 text-sm sm:grid-cols-2 lg:grid-cols-5">
             <div>
               <dt className="text-neutral-500">Version ID</dt>
               <dd className="mt-1 font-mono text-base">{versionId(active)}</dd>
@@ -265,7 +265,7 @@ function Backups({ w, canBackup, deviceLoaded }: { w: FleetContainer; canBackup:
           <Loading />
         ) : (
           <div className="space-y-4 p-5">
-            <div className="grid gap-4 sm:grid-cols-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
               <Field label="Back up">
                 <select className={inputClass} value={p.mode} onChange={(e) => set({ mode: e.target.value as BackupPolicy["mode"] })}>
                   <option value="off">Never (manual only)</option>

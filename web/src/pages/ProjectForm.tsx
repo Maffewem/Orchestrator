@@ -75,12 +75,15 @@ export default function ProjectForm({
   const [copyAddrs, setCopyAddrs] = useState<Record<string, DedicatedIP>>(initial?.runtime.copy_addresses ?? {});
   const [env, setEnv] = useState((initial?.runtime.env ?? []).join("\n"));
   const [volumes, setVolumes] = useState((initial?.runtime.volumes ?? []).join("\n"));
-  const [restart, setRestart] = useState(initial?.runtime.restart || "unless-stopped");
+  // New workers stop restarting after a few failures instead of looping forever; existing ones keep their policy.
+  const [restart, setRestart] = useState(initial ? initial.runtime.restart || "unless-stopped" : "on-failure");
+  const [maxRetries, setMaxRetries] = useState(String(initial ? (initial.runtime.max_retries ?? 0) : 5));
+  const [memoryMB, setMemoryMB] = useState(String(initial?.runtime.memory_mb ?? 0));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Unsaved edits are reported so a page can ask before throwing them away.
-  const snapshot = JSON.stringify([name, deviceId, source, ports, webPort, dedicated, copyAddrs, env, volumes, restart]);
+  const snapshot = JSON.stringify([name, deviceId, source, ports, webPort, dedicated, copyAddrs, env, volumes, restart, maxRetries, memoryMB]);
   const baseline = useRef(snapshot);
   const report = useRef(onDirty);
   report.current = onDirty;
@@ -169,7 +172,7 @@ export default function ProjectForm({
         }
       }
       await onSubmit(
-        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, copy_addresses: isCF || source.type === "compose" || Object.keys(copyAddrs).length === 0 ? undefined : copyAddrs, env: normalizeEnv(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, copy_addresses: isCF || source.type === "compose" || Object.keys(copyAddrs).length === 0 ? undefined : copyAddrs, env: normalizeEnv(env), restart, max_retries: restart === "on-failure" ? Math.max(0, Math.floor(Number(maxRetries)) || 0) : 0, memory_mb: Math.max(0, Math.floor(Number(memoryMB)) || 0), volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
       baseline.current = snapshot;
@@ -186,7 +189,7 @@ export default function ProjectForm({
       {!isCF && <p className="rounded-lg bg-neutral-50 px-4 py-2 text-sm text-neutral-600">Changes to the source, ports, address and environment are saved now but only take effect when the worker is redeployed. Redeploy runs the same source again with the new settings; a new commit or version is deployed from the Deployments tab.</p>}
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Source</legend>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { type: "github" as const, icon: Github, title: "GitHub repository", sub: "Build a Dockerfile or Node.js project on the device, redeploy on push" },
             { type: "image" as const, icon: Package, title: "Container image", sub: "Pull an image from Docker Hub or any registry" },
@@ -220,7 +223,7 @@ export default function ProjectForm({
 
         {source.type === "github" || isCF ? (
           <div className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field
                 label="Repository"
                 hint={connected ? "Repositories your GitHub token can see." : "Public repositories work without it. Connect GitHub in Settings for private repositories."}
@@ -255,7 +258,7 @@ export default function ProjectForm({
             {isCF && (
               <div>
                 <p className="mb-1.5 text-sm font-medium">Where does it go?</p>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {[
                     { kind: "pages" as const, icon: Globe, title: "Cloudflare Pages", sub: "A static site or front end: the build output folder is uploaded" },
                     { kind: "worker" as const, icon: Server, title: "Cloudflare Worker", sub: "Server-side code on Cloudflare's edge: one bundled JavaScript module" },
@@ -280,7 +283,7 @@ export default function ProjectForm({
             {!isCF && (
             <div>
               <p className="mb-1.5 text-sm font-medium">What are you building?</p>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {BUILD_KINDS.map((k) => (
                   <button
                     type="button"
@@ -331,7 +334,7 @@ export default function ProjectForm({
                   </Panel>
                   {isCF ? (
                     <Panel title="Build configuration" sub="Runs on this server in a fresh checkout. Anything left empty is detected.">
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <Field label="Install command" hint="Empty: npm ci, pnpm or yarn, chosen from your lock file.">
                           <input className={inputClass} placeholder="npm ci" value={node?.install ?? ""} onChange={(e) => setNode({ install: e.target.value })} />
                         </Field>
@@ -359,7 +362,7 @@ export default function ProjectForm({
                     </Panel>
                   ) : (
                   <Panel title="Build configuration">
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {node && (
                         <Field label="Build command" hint="Empty: npm run build, if package.json has a build script.">
                           <input className={inputClass} placeholder="npm run build" value={node.build ?? ""} onChange={(e) => setNode({ build: e.target.value })} />
@@ -382,7 +385,7 @@ export default function ProjectForm({
                   </Panel>
                   )}
                   <Panel title="Build watch paths" sub="Only commits that change a matching file trigger a build.">
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <Field as="div" label="Include paths">
                         <ChipInput value={source.include ?? []} onChange={(v) => set({ include: v })} placeholder="* (all files)" />
                       </Field>
@@ -394,7 +397,7 @@ export default function ProjectForm({
                   {node && (
                     <details className="rounded-xl border border-neutral-200 bg-white">
                       <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium">Advanced</summary>
-                      <div className="grid gap-4 border-t border-neutral-200 p-5 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 border-t border-neutral-200 p-5 sm:grid-cols-2">
                         <Field label="Install command" hint="Empty: npm ci, pnpm or yarn, chosen from your lock file.">
                           <input className={inputClass} placeholder="npm ci" value={node.install ?? ""} onChange={(e) => setNode({ install: e.target.value })} />
                         </Field>
@@ -423,7 +426,7 @@ export default function ProjectForm({
                   <div className={cx("space-y-4", !previewsOn && "opacity-50")}>
                     <p className="text-xs text-neutral-500">Anything left empty uses the Production setting shown as its placeholder.</p>
                     <Panel title="Build configuration">
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         {(node || isCF) && (
                           <Field label="Build command">
                             <input className={inputClass} placeholder={node?.build || "npm run build"} value={pv.build ?? ""} onChange={(e) => setPv({ build: e.target.value })} />
@@ -440,7 +443,7 @@ export default function ProjectForm({
                       </div>
                     </Panel>
                     <Panel title="Build watch paths">
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <Field as="div" label="Include paths">
                           <ChipInput value={pv.include ?? []} onChange={(v) => setPv({ include: v })} placeholder={source.include?.join(", ") || "* (all files)"} />
                         </Field>
@@ -472,7 +475,7 @@ export default function ProjectForm({
             </div>
             {source.repo ? (
               <>
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <Field label="Repository" hint="Public repositories work without it. Connect GitHub in Settings for private repositories.">
                     <input className={inputClass} placeholder="owner/repository" value={source.repo.trim()} onChange={(e) => set({ repo: e.target.value || " " })} />
                   </Field>
@@ -519,7 +522,7 @@ export default function ProjectForm({
 
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Project</legend>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Project name" hint={source.type === "compose" ? "Lowercase letters, digits and dashes. Also the Compose project name." : "Lowercase letters, digits and dashes. Also used as the container name."}>
             <input className={inputClass} placeholder="my-service" value={name} onChange={(e) => setName(e.target.value)} />
             {renamedCF && (
@@ -546,7 +549,7 @@ export default function ProjectForm({
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">{source.type === "compose" ? "Environment" : isCF ? "Build environment" : "Runtime"}</legend>
         {source.type !== "compose" && !isCF && (<>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Ports" hint={node ? "host:container. Empty: 8080:80 for a static site, 3000:3000 for a Node server (it gets PORT set to the container port)." : "One per line: host:container, e.g. 8080:80 or 53:53/udp."}>
             <textarea className={cx(inputClass, "font-mono")} rows={3} value={ports} onChange={(e) => setPorts(e.target.value)} />
           </Field>
@@ -560,6 +563,14 @@ export default function ProjectForm({
               <option value="on-failure">On failure</option>
               <option value="no">Never</option>
             </select>
+          </Field>
+          {restart === "on-failure" && (
+            <Field label="Maximum restarts" hint="Docker gives up after this many failed restarts in a row and leaves the container stopped, instead of looping forever. 0 means no limit.">
+              <input className={inputClass} type="number" inputMode="numeric" min={0} value={maxRetries} onChange={(e) => setMaxRetries(e.target.value)} />
+            </Field>
+          )}
+          <Field label="Memory limit (MiB)" hint="Docker kills the container if it uses more (and, with swap off, it never swaps). 0 means no limit. A worker killed for running out of memory needs a higher limit or more RAM on the device. Raising it applies to the running container straight away.">
+            <input className={inputClass} type="number" inputMode="numeric" min={0} value={memoryMB} onChange={(e) => setMemoryMB(e.target.value)} />
           </Field>
         </div>
         <DedicatedAddress

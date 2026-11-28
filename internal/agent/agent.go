@@ -52,6 +52,7 @@ type state struct {
 }
 
 type Agent struct {
+	digests sync.Map // deployment ID -> image digest of a pulled image, returned as the deploy output
 	cfg     Config
 	srvMu   sync.Mutex
 	servers []string // every known control-plane URL; cfg.Server is the one in use
@@ -87,12 +88,14 @@ type Agent struct {
 
 	lastCPUTotal, lastCPUIdle uint64
 
+	hw hwState // previous disk, network and CPU counters for the device graphs
+
 	stats statsState // per-container samples waiting for the next heartbeat
 
 	leases leaseTable // DHCP addresses held for workers with a dedicated address
 
-	hwOnce sync.Once
-	hw     *hardware // LED and SSH controllers (see hardware_linux.go)
+	devhwOnce sync.Once
+	devhw     *hardware // LED and SSH controllers (see hardware_linux.go)
 }
 
 var errUnauthorized = errors.New("control plane rejected the agent token")
@@ -328,6 +331,14 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		// brought up for it on another device.
 		a.releaseHostAccess(cctx, c.Target)
 		err = a.docker.Stop(cctx, c.Target)
+	case api.ActionUpdate:
+		retries, _ := strconv.Atoi(c.Args["retries"])
+		mem, _ := strconv.Atoi(c.Args["memory_mb"])
+		err = a.docker.Update(cctx, c.Target, c.Args["restart"], retries, mem)
+		if err == nil && c.Args["stop"] == "1" {
+			a.releaseHostAccess(cctx, c.Target)
+			err = a.docker.Stop(cctx, c.Target)
+		}
 	case api.ActionRestart:
 		err = a.docker.Restart(cctx, c.Target)
 	case api.ActionLogs:
@@ -345,6 +356,9 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		dctx, dcancel := context.WithTimeout(ctx, 25*time.Minute)
 		err = a.deploy(dctx, c.Target, *c.Deploy)
 		dcancel()
+		if v, ok := a.digests.LoadAndDelete(c.Target); ok && err == nil {
+			output, _ = v.(string)
+		}
 	case api.ActionAgentUpdate:
 		uctx, ucancel := context.WithTimeout(ctx, 10*time.Minute)
 		output, a.restart, err = a.selfUpdate(uctx)
@@ -399,6 +413,19 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		err = a.syncTunnel(cctx, c.Args["token"], c.Args["update"] == "1")
 	case api.ActionProxySync:
 		err = a.syncProxy(cctx, c.Args["caddyfile"], c.Args["cloudflare_token"])
+	case api.ActionDiskList, api.ActionDiskFormat, api.ActionDiskPartition, api.ActionDiskMount, api.ActionDiskUnmount, api.ActionShareMount:
+		// Formatting a large disk can take a long time; the other disk actions are quick.
+		dctx, dcancel := context.WithTimeout(ctx, 30*time.Minute)
+		output, err = a.diskAction(dctx, c)
+		dcancel()
+	case api.ActionDockerReport, api.ActionDockerPrune:
+		gctx, gcancel := context.WithTimeout(ctx, 30*time.Minute)
+		output, err = a.dockerGC(gctx, c)
+		gcancel()
+	case api.ActionImageFlash, api.ActionBootGet, api.ActionBootSet:
+		ictx, icancel := context.WithTimeout(ctx, 6*time.Hour) // large images over a slow link
+		output, err = a.imageAction(ictx, c)
+		icancel()
 	case api.ActionBackup, api.ActionRestore:
 		// Large volumes over a slow link can take a while.
 		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)

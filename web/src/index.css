@@ -92,3 +92,58 @@ body {
   background-size: 28px 100%;
   animation: stripes 1s linear infinite;
 }
+
+/* iOS Safari zooms the page when a field under 16px gets focus (the sign-in
+   form autofocuses one) and stays zoomed. Keep fields at 16px on small screens. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Tables stack into cards on phones: no sideways scrolling. Cells get their
+   column heading from data-label (set by the Table component). */
+@media (max-width: 639px) {
+  .stack-table,
+  .stack-table tbody,
+  .stack-table tr,
+  .stack-table td {
+    display: block;
+    width: 100%;
+  }
+  .stack-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .stack-table tbody tr {
+    padding: 0.625rem 1rem;
+  }
+  .stack-table td {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    min-width: 0;
+    padding: 0.3rem 0 !important;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+  .stack-table td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    color: var(--color-neutral-500);
+    text-align: left;
+  }
+  .stack-table td[data-label=""]::before {
+    display: none;
+  }
+  .stack-table td[data-label=""] {
+    justify-content: flex-end;
+  }
+}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -80,30 +81,62 @@ func (s *Server) view(d *store.Device) DeviceView {
 			raise("warning", fmt.Sprintf("CPU is heavily loaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
 		}
 	}
+	warn, crit := s.tempThresholds(context.Background())
 	// A blade on a 5 V-only supply can brown out under sustained load (it has about 15 W; PoE+ has 30 W).
 	if p := d.Host.Power; p != nil && p.Source == api.PowerBasic && d.Host.CPUs > 0 && d.Metrics.Load5/float64(d.Host.CPUs) >= 1 {
 		raise("warning", "Heavily loaded while powered by a 5 V-only supply (up to 15 W); PoE+ gives up to 30 W")
 	}
 	switch t := d.Metrics.TempC; {
-	case t >= 85:
-		raise("critical", fmt.Sprintf("Temperature is %.0f°C", t))
-	case t >= 80:
-		raise("warning", fmt.Sprintf("Temperature is %.0f°C", t))
+	case t >= crit:
+		raise("critical", fmt.Sprintf("Temperature is %.0f°C (critical at %.0f°C)", t, crit))
+	case t >= warn:
+		raise("warning", fmt.Sprintf("Temperature is %.0f°C (warning at %.0f°C)", t, warn))
+	}
+
+	for _, w := range s.hardwareIssues(d.ID, d.Metrics) {
+		raise("warning", w)
 	}
 
 	// Container failures that point at the device rather than the app: crash loops and kills
 	// by the kernel's out-of-memory killer (exit code 137).
 	var looping, killed []string
+	marked, unstable := s.markUnstable(d.ID, d.Containers)
+	if len(unstable) > 0 {
+		dc := *d
+		dc.Containers = marked
+		v.Device = &dc
+	}
+	oomed := s.oomKilled(d.ID, marked)
 	for _, c := range d.Containers {
 		switch {
-		case c.State == "restarting" || c.State == "dead":
+		case oomed[c.Name]:
+			// reported below with the advice that fits
+		case c.State == "dead":
 			looping = append(looping, c.Name)
 		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
 			killed = append(killed, c.Name)
 		}
 	}
+	var loops []string
+	for _, n := range unstable {
+		if !oomed[n] { // out-of-memory loops are reported below with their own advice
+			loops = append(loops, n)
+		}
+	}
+	if len(loops) > 0 {
+		raise("warning", "Containers restarting repeatedly: "+strings.Join(loops, ", "))
+	}
 	if len(looping) > 0 {
-		raise("warning", "Containers restarting or dead: "+strings.Join(looping, ", "))
+		raise("warning", "Containers dead: "+strings.Join(looping, ", "))
+	}
+	var oom []string
+	for _, c := range marked {
+		if oomed[c.Name] {
+			oom = append(oom, c.Name)
+		}
+	}
+	if len(oom) > 0 {
+		raise("warning", "Containers killed for running out of memory: "+strings.Join(oom, ", ")+". Raise the memory limit in the project settings, or free memory on the device")
 	}
 	if len(killed) > 0 {
 		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(killed, ", "))
@@ -128,10 +161,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	enrolID := ""
 	if join == "" || subtle.ConstantTimeCompare([]byte(req.JoinToken), []byte(join)) != 1 {
-		s.logins.fail(key)
-		writeError(w, http.StatusUnauthorized, "invalid join token")
-		return
+		// Not the shared join token: it may be a scoped enrolment token (expiring, limited, revocable).
+		if enrolID = s.useEnrol(r, req.JoinToken); enrolID == "" {
+			s.logins.fail(key)
+			writeError(w, http.StatusUnauthorized, "invalid join token")
+			return
+		}
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -152,8 +189,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
+		if enrolID != "" {
+			s.releaseEnrol(r, enrolID)
+		}
 		s.internal(w, err)
 		return
+	}
+	if enrolID != "" {
+		s.noteEnrolDevice(r, enrolID, d.Name)
+		s.event(r.Context(), d.ID, "info", "enrol.used", d.Name+" registered with an enrolment token")
 	}
 	s.applyDeviceSetup(r.Context(), d, req.Setup)
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{DeviceID: d.ID, AgentToken: token, ServerKey: s.serverKey()})
@@ -195,6 +239,13 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withCredentials(cmds, s.githubToken(ctx))
+	// A one-use enrolment token for a rebuilt machine is added only here, in the response to the device that will
+	// write the image, so it is never kept in the command history that dashboard users can read.
+	for i := range cmds {
+		if cmds[i].Action == api.ActionImageFlash && cmds[i].Args["enrol"] == "1" {
+			cmds[i].Args["join_token"] = s.takePlain(r, cmds[i].ID)
+		}
+	}
 	cancel, _ := s.store.RecentlyCancelled(ctx, d.ID, time.Now().Add(-15*time.Minute))
 	writeJSON(w, http.StatusOK, api.HeartbeatResponse{
 		Cancel:          cancel,
@@ -285,6 +336,36 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.event(r.Context(), d.ID, "error", c.Action, fmt.Sprintf("Stack %s: %s failed: %s", c.Target, verb, res.Error))
 		}
+	case api.ActionDiskList:
+		// A refresh is not worth an activity entry unless it fails.
+		if !res.OK {
+			s.event(r.Context(), d.ID, "error", "disk.list", fmt.Sprintf("Listing disks on %s failed: %s", d.Name, res.Error))
+		}
+	case api.ActionDiskFormat, api.ActionDiskPartition, api.ActionDiskMount, api.ActionDiskUnmount, api.ActionShareMount:
+		// The audit trail records the outcome next to the request, with who asked.
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, diskSummary(c.Args["by"], c.Action, c.Args, d.Name, state))
+	case api.ActionDockerPrune:
+		s.dockerPruneResult(r.Context(), d, c, res)
+	case api.ActionDockerReport:
+		if !res.OK {
+			s.event(r.Context(), d.ID, "error", "docker.report", fmt.Sprintf("Reading Docker storage on %s failed: %s", d.Name, res.Error))
+		}
+	case api.ActionImageFlash:
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, imageSummary(c.Args["by"], c.Args, d.Name, state))
+	case api.ActionBootSet:
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, fmt.Sprintf("%s: set boot order to %s %s on %s", c.Args["by"], c.Args["order"], state, d.Name))
 	case api.ActionRemove:
 		if !res.OK {
 			s.event(r.Context(), d.ID, "error", "container.remove", fmt.Sprintf("Removing %s failed: %s", c.Target, res.Error))
@@ -501,6 +582,7 @@ var allowedActions = map[string]bool{
 	api.ActionStart:   true,
 	api.ActionStop:    true,
 	api.ActionRestart: true,
+	api.ActionUpdate:  true,
 	api.ActionLogs:    true,
 	api.ActionRemove:  true,
 }
@@ -532,6 +614,25 @@ func (s *Server) handleCreateCommand(w http.ResponseWriter, r *http.Request) {
 	if !known {
 		writeError(w, http.StatusBadRequest, "container is not known on this device")
 		return
+	}
+	if req.Action == api.ActionUpdate {
+		if !hasCap(d, api.CapLimits) {
+			writeError(w, http.StatusConflict, "this device's agent is too old to change restart limits; update it from the Updates page first")
+			return
+		}
+		if !restarts[req.Args["restart"]] {
+			writeError(w, http.StatusBadRequest, "unknown restart policy")
+			return
+		}
+		for _, k := range []string{"retries", "memory_mb"} {
+			if v := req.Args[k]; v != "" {
+				if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 4<<20 {
+					writeError(w, http.StatusBadRequest, k+" should be a non-negative number")
+					return
+				}
+			}
+		}
+		req.Args = map[string]string{"restart": req.Args["restart"], "retries": req.Args["retries"], "memory_mb": req.Args["memory_mb"], "stop": req.Args["stop"]}
 	}
 	if req.Action == api.ActionRemove {
 		// The agent removes by name. Orchestrator's own containers and containers of projects that
@@ -580,7 +681,7 @@ func (s *Server) handleGetCommand(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	writeJSON(w, http.StatusOK, scrubCommand(c))
 }
 
 type fleetContainer struct {
@@ -624,7 +725,8 @@ func (s *Server) handleListContainers(w http.ResponseWriter, r *http.Request) {
 		if addrs == nil {
 			addrs = []string{}
 		}
-		for _, c := range d.Containers {
+		marked, _ := s.markUnstable(d.ID, d.Containers)
+		for _, c := range marked {
 			fc := fleetContainer{Container: c, DeviceID: d.ID, DeviceName: d.Name, DeviceStatus: status, DeviceAddresses: addrs}
 			if id := c.Labels["orchestrator.project"]; names[id] != "" {
 				fc.ProjectID, fc.ProjectName = id, names[id]
@@ -671,6 +773,8 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),
 		"security":                   s.securityView(r.Context()),
+		"temperature":                s.tempView(r.Context()),
+		"docker_gc":                  s.dockerGCView(r.Context()),
 		"sso":                        s.ssoView(r.Context()),
 		"https":                      s.httpsView(r.Context()),
 		"github": map[string]any{

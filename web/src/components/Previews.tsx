@@ -76,13 +76,13 @@ export default function PreviewsPanel({ projectId }: { projectId: string }) {
                 </Td>
                 <Td className="font-mono text-xs">{p.branch}</Td>
                 <Td><Link to={`/deployments/${p.deployment_id}`}><PreviewStatus s={p.status} /></Link></Td>
-                <Td>{p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="break-all text-primary hover:underline">{p.url.replace(/^https?:\/\//, "")}</a> : "—"}</Td>
+                <Td>{p.url ? <a href={p.url} target="_blank" rel="noreferrer" title={p.url} className="block max-w-[16rem] truncate text-primary hover:underline">{p.url.replace(/^https?:\/\//, "")}</a> : "—"}</Td>
                 <Td className="whitespace-nowrap text-neutral-500">{ago(p.updated_at)}</Td>
                 <Td>
                   {can && (
                     <button
                       aria-label={`Delete preview ${p.branch}`}
-                      className="rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-bad"
+                      className="rounded p-2.5 text-neutral-500 hover:bg-neutral-100 hover:text-bad sm:p-1"
                       onClick={async () => {
                         if (!(await confirmDialog({ title: `Delete the preview for ${p.branch}?`, confirmLabel: "Delete", danger: true }))) return;
                         await api.deletePreview(projectId, p.id);

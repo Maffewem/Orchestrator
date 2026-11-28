@@ -93,10 +93,10 @@ export function LiveLogs({ deviceId, container, name, onClose }: { deviceId: str
           <span className={`size-2 rounded-full ${status === "live" ? "animate-pulse bg-ok" : "bg-neutral-400"}`} />
           {status === "connecting" ? "Connecting…" : status === "live" ? (paused ? "Paused" : "Live") : "Ended"}
         </span>
-        <button className="rounded-md border border-neutral-300 px-2.5 py-1 hover:bg-neutral-50" onClick={() => setPaused(!paused)} disabled={status !== "live"}>
+        <button className="rounded-md border border-neutral-300 px-3 py-2.5 sm:px-2.5 sm:py-1 hover:bg-neutral-50" onClick={() => setPaused(!paused)} disabled={status !== "live"}>
           {paused ? "Resume" : "Pause"}
         </button>
-        <button className="rounded-md border border-neutral-300 px-2.5 py-1 hover:bg-neutral-50" onClick={() => setText("")}>
+        <button className="rounded-md border border-neutral-300 px-3 py-2.5 sm:px-2.5 sm:py-1 hover:bg-neutral-50" onClick={() => setText("")}>
           Clear
         </button>
         <input

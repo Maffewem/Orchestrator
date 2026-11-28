@@ -290,6 +290,7 @@ func (s *Server) deployPreview(ctx context.Context, p *store.Project, pv *store.
 	if err != nil {
 		return nil, err
 	}
+	s.applyKeepImages(ctx, &spec)
 	cport := containerPort(p.Runtime.Ports)
 	if cport == "" {
 		return nil, errors.New("the project publishes no TCP port to preview")
@@ -501,6 +502,11 @@ func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
 	d, err := s.deployWith(r.Context(), p, old.Commit, store.TriggerRollback, func(spec *api.DeploySpec) {
 		if p.Source.Type == store.SourceImage {
 			spec.Image = old.Spec.Image
+			if old.Spec.ImageDigest != "" {
+				// Ask the registry for exactly the version that ran, not whatever the tag points at now.
+				spec.Image = imageByDigest(old.Spec.Image, old.Spec.ImageDigest)
+				spec.ImageDigest = old.Spec.ImageDigest
+			}
 		} else if p.Source.Type == store.SourceCompose {
 			spec.Compose = old.Spec.Compose
 		} else {
@@ -529,4 +535,15 @@ func (s *Server) handlePullRequestEvent(ctx context.Context, repo string) int {
 		}
 	}
 	return n
+}
+
+// imageByDigest turns name[:tag] into name@digest.
+func imageByDigest(ref, digest string) string {
+	if i := strings.Index(ref, "@"); i >= 0 {
+		return ref
+	}
+	if c := strings.LastIndex(ref, ":"); c > strings.LastIndex(ref, "/") {
+		ref = ref[:c]
+	}
+	return ref + "@" + digest
 }

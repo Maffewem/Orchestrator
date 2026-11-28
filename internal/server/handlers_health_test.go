@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +39,26 @@ func TestDeviceViewHealthChecks(t *testing.T) {
 	}
 }
 
+func TestTemperatureThresholdsAreConfigurable(t *testing.T) {
+	st, _ := store.Open(":memory:")
+	s := &Server{store: st, cfg: Config{HeartbeatInterval: time.Second}}
+	ctx := context.Background()
+	if w, c := s.tempThresholds(ctx); w != 80 || c != 85 {
+		t.Fatalf("defaults %v %v", w, c)
+	}
+	s.store.SetSetting(ctx, settingTempWarn, "60")
+	s.store.SetSetting(ctx, settingTempCrit, "70")
+	d := &store.Device{LastSeen: time.Now(), Metrics: api.Metrics{TempC: 65}}
+	d.Host.Docker = &api.DockerInfo{}
+	if v := s.view(d); v.Health != "warning" {
+		t.Fatalf("health %q, want warning (%v)", v.Health, v.Issues)
+	}
+	d.Metrics.TempC = 71
+	if v := s.view(d); v.Health != "critical" {
+		t.Fatalf("health %q, want critical", v.Health)
+	}
+}
+
 func TestNetworkNoticeStaysUntilAcknowledged(t *testing.T) {
 	s := &Server{cfg: Config{HeartbeatInterval: time.Second}}
 	d := &store.Device{ID: "d1", LastSeen: time.Now()}
@@ -60,5 +82,42 @@ func TestNetworkNoticeStaysUntilAcknowledged(t *testing.T) {
 	s.setNetNote(t.Context(), d.ID, "Gained IP address 10.0.0.10")
 	if v := s.view(d); v.NetworkNotice == nil {
 		t.Fatal("a new change should raise a new notice")
+	}
+}
+
+func TestRestartLoopMarksContainerUnstable(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}, wstats: &workerStats{workers: map[string]*workerAcc{}}}
+	now := time.Now().Unix()
+	s.wstats.workers["d1|paperless"] = &workerAcc{restarts: []int64{now - 90, now - 60, now - 30}}
+	s.wstats.workers["d1|old"] = &workerAcc{restarts: []int64{now - 4000, now - 3900, now - 3800}}
+	d := &store.Device{ID: "d1", LastSeen: time.Now(), Containers: []api.Container{
+		{Name: "paperless", State: "running"}, {Name: "old", State: "running"}, {Name: "calm", State: "running"},
+	}}
+	d.Host.CPUs = 4
+	d.Host.Docker = &api.DockerInfo{}
+	v := s.view(d)
+	if v.Health != "warning" || len(v.Issues) != 1 {
+		t.Fatalf("health %q issues %v", v.Health, v.Issues)
+	}
+	for _, c := range v.Containers {
+		if c.Unstable != (c.Name == "paperless") {
+			t.Errorf("%s unstable=%v", c.Name, c.Unstable)
+		}
+	}
+	if d.Containers[0].Unstable {
+		t.Error("stored device was modified")
+	}
+}
+
+func TestOOMKilledLoopNamesMemoryLimit(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}, wstats: &workerStats{workers: map[string]*workerAcc{}}}
+	now := time.Now().Unix()
+	s.wstats.workers["d1|paperless"] = &workerAcc{restarts: []int64{now - 90, now - 60, now - 30}, latest: api.ContainerStats{OOMKilled: true}}
+	d := &store.Device{ID: "d1", LastSeen: time.Now(), Containers: []api.Container{{Name: "paperless", State: "running"}}}
+	d.Host.CPUs = 4
+	d.Host.Docker = &api.DockerInfo{}
+	v := s.view(d)
+	if len(v.Issues) != 1 || !strings.Contains(v.Issues[0], "out of memory") || !strings.Contains(v.Issues[0], "memory limit") {
+		t.Fatalf("issues %v", v.Issues)
 	}
 }

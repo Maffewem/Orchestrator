@@ -159,7 +159,7 @@ export function AddDeviceModal({ onClose }: { onClose: () => void }) {
           </p>
           <div className="mb-3 inline-flex rounded-lg border border-neutral-200 bg-neutral-100 p-0.5 text-sm">
             {(["script", "docker"] as const).map((t) => (
-              <button key={t} onClick={() => setTab(t)} className={cx("rounded-md px-3 py-1", tab === t ? "bg-white font-medium shadow-sm" : "text-neutral-600")}>
+              <button key={t} onClick={() => setTab(t)} className={cx("rounded-md px-3 py-2.5 sm:py-1", tab === t ? "bg-white font-medium shadow-sm" : "text-neutral-600")}>
                 {t === "script" ? "Install script (systemd)" : "Docker container"}
               </button>
             ))}
@@ -231,7 +231,7 @@ export default function DevicesPage() {
       ) : (
         <Card className="divide-y divide-neutral-100">
           {data.map((d) => (
-            <Link key={d.id} to={`/devices/${d.id}`} className={`grid items-center gap-4 px-5 py-4 hover:bg-neutral-50 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_auto] ${d.identifying_until && new Date(d.identifying_until) > new Date() ? "animate-pulse bg-amber-50 ring-2 ring-inset ring-amber-400" : ""}`}>
+            <Link key={d.id} to={`/devices/${d.id}`} className={`grid grid-cols-1 items-center gap-4 px-5 py-4 hover:bg-neutral-50 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_auto] ${d.identifying_until && new Date(d.identifying_until) > new Date() ? "animate-pulse bg-amber-50 ring-2 ring-inset ring-amber-400" : ""}`}>
               <div className="min-w-0">
                 <p className="flex items-center gap-2 font-medium">
                   <StatusDot status={d.status} />

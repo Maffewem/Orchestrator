@@ -82,6 +82,46 @@ export interface Metrics {
   load15: number;
   uptime_seconds: number;
   temp_c?: number;
+  sensors?: { name: string; c: number }[];
+  iowait_percent?: number;
+  swap_used?: number;
+  swap_total?: number;
+  oom_kills?: number;
+  clock_mhz?: number;
+  max_clock_mhz?: number;
+  disks?: DiskIO[];
+  nets?: NetIO[];
+  power?: PowerInfo;
+}
+
+export interface DiskIO {
+  name: string;
+  read_bps: number;
+  write_bps: number;
+  read_iops: number;
+  write_iops: number;
+  busy: number;
+}
+
+export interface NetIO {
+  name: string;
+  rx_bps: number;
+  tx_bps: number;
+  errors?: number;
+  wireless?: boolean;
+  signal_dbm?: number;
+}
+
+export interface PowerInfo {
+  raw: number;
+  under_voltage?: boolean;
+  freq_capped?: boolean;
+  throttled?: boolean;
+  temp_limit?: boolean;
+  since_under_voltage?: boolean;
+  since_freq_capped?: boolean;
+  since_throttled?: boolean;
+  since_temp_limit?: boolean;
 }
 
 export interface Port {
@@ -105,6 +145,80 @@ export interface Container {
   volumes?: string[];
   /** Docker networks the container is on, with its address and MAC (a macvlan one is a dedicated address). */
   networks?: { name: string; ip?: string; mac?: string }[];
+  /** Docker has restarted it repeatedly in the last few minutes, even if it is running right now. */
+  unstable?: boolean;
+}
+
+export interface DiskVolume {
+  path: string;
+  size_bytes: number;
+  fstype?: string;
+  label?: string;
+  uuid?: string;
+  mountpoint?: string;
+  used_bytes?: number;
+  persistent?: boolean;
+  protected?: string;
+}
+export interface Disk {
+  path: string;
+  kind: "disk" | "loop";
+  size_bytes: number;
+  model?: string;
+  serial?: string;
+  transport?: string;
+  removable?: boolean;
+  rotational?: boolean;
+  /** "emmc" or "sd" for MMC-bus devices; absent when unknown. */
+  medium?: "emmc" | "sd";
+  volume: DiskVolume;
+  partitions?: DiskVolume[];
+  protected?: string;
+  system?: boolean;
+}
+export interface DiskShare {
+  source: string;
+  mountpoint: string;
+  fstype: string;
+  size_bytes?: number;
+  used_bytes?: number;
+  persistent?: boolean;
+}
+export interface DockerGCPolicy {
+  keep: number;
+  max_gb: number;
+  mode: "off" | "daily" | "weekly";
+  time: string;
+  weekday: number;
+  tz: string;
+  dangling: boolean;
+  build_cache: boolean;
+  cache_days: number;
+  next_run?: string;
+}
+export interface DockerImageVersion { tag: string; id: string; size: number; created: number; in_use: boolean; removable: boolean }
+export interface DockerImageGroup { repo: string; worker: string; orphaned: boolean; versions: DockerImageVersion[] }
+export interface DockerStorage {
+  root_dir: string;
+  keep: number;
+  images: number;
+  images_size: number;
+  layers_size: number;
+  dangling: number;
+  dangling_size: number;
+  unused: number;
+  unused_size: number;
+  workers: DockerImageGroup[];
+  build_cache: number;
+  build_cache_reclaimable: number;
+  reclaimable: number;
+}
+
+export interface DiskReport {
+  disks: Disk[];
+  shares: DiskShare[];
+  /** Device model such as "Raspberry Pi Compute Module 5", when the system reports one. */
+  board?: string;
 }
 
 export type Health = "ok" | "warning" | "critical";
@@ -322,6 +436,10 @@ export interface Runtime {
   env: string[];
   command?: string[];
   restart: string;
+  /** Restart cap for the "on-failure" policy; 0 or absent is unlimited. */
+  max_retries?: number;
+  /** Hard memory limit in MiB; 0 or absent is none. */
+  memory_mb?: number;
   volumes?: string[];
   labels?: Record<string, string>;
   network?: string;
@@ -523,6 +641,17 @@ export interface MetricSample {
   mem: number;
   disk: number;
   load1: number;
+  temp: number;
+  iowait?: number;
+  swap?: number;
+  swap_used?: number;
+  oom?: number;
+  clock?: number;
+  max_clock?: number;
+  power?: number;
+  has_power?: boolean;
+  disks?: DiskIO[];
+  nets?: NetIO[];
 }
 
 export interface Alert {
@@ -636,6 +765,8 @@ export interface Settings {
   ssl_mode: "http" | "dns";
   sso: SSOView;
   https: HTTPSView;
+  temperature: { warn_c: number; crit_c: number };
+  docker_gc: DockerGCPolicy;
   security: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
@@ -1177,6 +1308,40 @@ export interface HAView {
   can_restart: boolean;
 }
 
+export interface GoldImage {
+  id: string;
+  name: string;
+  arch?: string;
+  notes?: string;
+  format: "raw" | "gz" | "xz" | "zst";
+  size: number;
+  sha256: string;
+  created_by?: string;
+  created_at: string;
+}
+
+export interface EnrolToken {
+  id: string;
+  label: string;
+  created_at: string;
+  created_by?: string;
+  expires_at: string;
+  max_uses: number;
+  uses: number;
+  status: "active" | "expired" | "used up" | "revoked";
+  devices?: string[];
+  /** Only in the response that creates the token. */
+  token?: string;
+}
+
+export interface BootInfo {
+  supported: boolean;
+  reason?: string;
+  model?: string;
+  order?: string;
+  config?: string;
+}
+
 export const api = {
   serverHA: () => request<HAView>("GET", "/api/server-ha"),
   haPair: () => request<HAView>("POST", "/api/server-ha/pair"),
@@ -1278,6 +1443,28 @@ export const api = {
   containers: () => request<FleetContainer[]>("GET", "/api/containers"),
   command: (deviceId: string, action: string, target: string, args?: Record<string, string>) =>
     request<Command>("POST", `/api/devices/${deviceId}/commands`, { action, target, args }),
+  disks: (deviceId: string) => request<DiskReport>("GET", `/api/devices/${deviceId}/disks`),
+  diskAction: (deviceId: string, action: "format" | "partition" | "mount" | "unmount" | "share", args: Record<string, string>) =>
+    request<Command>("POST", `/api/devices/${deviceId}/disks/${action}`, args),
+  dockerStorage: (deviceId: string) => request<DockerStorage>("GET", `/api/devices/${deviceId}/docker`),
+  dockerPrune: (deviceId: string, body: { trim: boolean; dangling: boolean; unused: boolean; build_cache: boolean; cache_days: number }) =>
+    request<Command>("POST", `/api/devices/${deviceId}/docker/prune`, { ...body, confirm: "prune" }),
+  setDockerGC: (b: Omit<DockerGCPolicy, "next_run">) => request<DockerGCPolicy>("PUT", "/api/settings/docker-gc", b),
+  enrolTokens: () => request<EnrolToken[]>("GET", "/api/enrol-tokens"),
+  createEnrolToken: (body: { label: string; ttl_hours: number; max_uses: number }) => request<EnrolToken>("POST", "/api/enrol-tokens", body),
+  revokeEnrolToken: (id: string) => request<void>("DELETE", `/api/enrol-tokens/${id}`),
+  images: () => request<GoldImage[]>("GET", "/api/images"),
+  uploadImage: async (file: File, meta: { name: string; arch: string; notes: string }) => {
+    const q = new URLSearchParams(meta);
+    const res = await fetch(`/api/images?${q}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: file });
+    if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error ?? res.statusText);
+    return (await res.json()) as GoldImage;
+  },
+  deleteImage: (id: string) => request<void>("DELETE", `/api/images/${id}`),
+  flashImage: (deviceId: string, body: { image: string; device: string; confirm: string; enrol: boolean; name?: string }) =>
+    request<Command>("POST", `/api/devices/${deviceId}/images/flash`, body),
+  bootInfo: (deviceId: string) => request<BootInfo>("GET", `/api/devices/${deviceId}/boot`),
+  setBootOrder: (deviceId: string, order: string, confirm: string) => request<Command>("POST", `/api/devices/${deviceId}/boot`, { order, confirm }),
   getCommand: (id: string) => request<Command>("GET", `/api/commands/${id}`),
   events: (device?: string, limit = 100) =>
     request<Event[]>("GET", `/api/events?limit=${limit}${device ? `&device=${device}` : ""}`),
@@ -1345,6 +1532,7 @@ export const api = {
   connectivity: () => request<ConnView>("GET", "/api/connectivity"),
   setAgentURLs: (urls: string[]) => request<{ agent_urls: string[] }>("PUT", "/api/settings/agent-urls", { urls }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
+  setTemperature: (b: { warn_c: number; crit_c: number }) => request<Settings["temperature"]>("PUT", "/api/settings/temperature", b),
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   createDeviceSetup: (b: { proxy: boolean; tunnel_token?: string; tunnel_via?: "" | "proxy"; maintenance: boolean; maintenance_note?: string }) =>
     request<{ id: string }>("POST", "/api/device-setups", b),

@@ -14,7 +14,7 @@ import { ago, bytes, cx, pct, usePoll, useTick } from "../lib";
 function Node({ title, count, open: initial = false, children }: { title: string; count: number; open?: boolean; children?: ReactNode }) {
   const [open, setOpen] = useState(initial);
   return (
-    <div className="rounded-xl border border-neutral-300 bg-white shadow-sm">
+    <div className="min-w-0 rounded-xl border border-neutral-300 bg-white shadow-sm">
       <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="flex items-center gap-2 font-medium">
           {title}
@@ -164,8 +164,8 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
 
       {/* Diagram */}
       <div className="rounded-xl border border-neutral-200 bg-neutral-50/60 p-4 sm:p-10">
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_2rem_minmax(0,1fr)_2rem_minmax(0,1fr)]">
-          <div className="space-y-3">
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_2rem_minmax(0,1fr)_2rem_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-3">
             <Node title="Domains" count={(prod?.enabled ? 1 : 0) + custom.length}>
               {prod?.enabled && <p className="font-mono text-xs">{prod.hostname}</p>}
               {custom.map((d) => (
@@ -183,10 +183,10 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
             </Node>
           </div>
           <Arrow />
-          <div className="rounded-xl border border-neutral-300 bg-white shadow-sm">
+          <div className="min-w-0 rounded-xl border border-neutral-300 bg-white shadow-sm">
             <div className="flex items-center justify-between px-4 py-3">
-              <span className="flex items-center gap-2 font-medium">
-                <Hexagon className="size-4" /> {w.name}
+              <span className="flex min-w-0 items-center gap-2 font-medium">
+                <Hexagon className="size-4 shrink-0" /> <span className="break-all">{w.name}</span>
               </span>
               <span className={cx("size-2.5 rounded-full", w.state === "running" ? "bg-primary" : "bg-neutral-400")} title={w.status} />
             </div>
@@ -217,11 +217,11 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-6">
           <Card>
             <CardTitle title="Metrics" badge="Last hour · device" to={`${base}/deployments`} />
-            <div className="grid divide-y divide-neutral-200 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            <div className="grid grid-cols-1 divide-y divide-neutral-200 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
               <Stat label="CPU" value={m ? `${m.cpu_percent.toFixed(0)}%` : "—"} values={samples.map((s) => s.cpu)} />
               <Stat label="Memory" value={m ? `${Math.round(pct(m.memory_used, m.memory_total))}%` : "—"} note={m ? `of ${bytes(m.memory_total)}` : undefined} values={samples.map((s) => s.mem)} color="#f6821f" />
               <Stat label="Failed deployments" value={String(failed24h)} note="24h" values={[]} />
@@ -309,9 +309,9 @@ function Arrow() {
 
 function Row({ k, v }: { k: string; v: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <span className="text-neutral-500">{k}</span>
-      <span className="min-w-0 truncate text-right">{v}</span>
+      <span className="min-w-0 break-all sm:max-w-[70%] sm:text-right">{v}</span>
     </div>
   );
 }

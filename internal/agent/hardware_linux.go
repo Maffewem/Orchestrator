@@ -29,14 +29,14 @@ type hardware struct {
 }
 
 func (a *Agent) hardware() *hardware {
-	a.hwOnce.Do(func() {
+	a.devhwOnce.Do(func() {
 		dir := filepath.Dir(a.cfg.StatePath)
 		if a.cfg.StatePath == "" {
 			dir = os.TempDir()
 		}
-		a.hw = &hardware{leds: newLEDCtl(dir, "/sys/class/leds", hostSampler()), ssh: newSSHCtl(dir)}
+		a.devhw = &hardware{leds: newLEDCtl(dir, "/sys/class/leds", hostSampler()), ssh: newSSHCtl(dir)}
 	})
-	return a.hw
+	return a.devhw
 }
 
 // powerSource is the blade's supply, read only while the LED profile says this device is a blade.

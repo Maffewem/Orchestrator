@@ -138,11 +138,16 @@ const (
 	CapDedicatedRelease = "dedicated-release"  // stopping or removing a worker also removes the device's access address
 	CapDedicatedVLAN    = "dedicated-vlan"     // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
 	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
+	CapDisks            = "disks"              // disk.list/format/partition/mount/unmount and share.mount/unmount
+	CapLimits           = "limits"             // container.update, and DeploySpec.MaxRetries / MemoryMB
+	CapImages           = "images"             // image.flash, boot.get and boot.set (gold images, Raspberry Pi boot order)
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
 	CapLED              = "led"                // led.list, led.identify and led.config
 	CapConsole          = "console"            // a host terminal (stream kind "console")
 	CapSSH              = "ssh"                // ssh.status, ssh.check, ssh.config, ssh.confirm and ssh.key
+	CapHWMetrics        = "hw-metrics"         // heartbeats carry disk and network rates, load, swap, clock and Raspberry Pi power flags
+	CapDockerGC         = "docker-gc"          // docker.report and docker.prune, and DeploySpec.KeepImages (old worker images trimmed after a deploy)
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -168,6 +173,75 @@ type Metrics struct {
 	UptimeSeconds uint64  `json:"uptime_seconds"`
 	// TempC is the hottest thermal zone in °C; 0 when the device has no sensor (or the agent predates it).
 	TempC float64 `json:"temp_c,omitempty"`
+	// Sensors lists every temperature sensor the device exposes (SoC, NVMe, and so on).
+	Sensors []TempSensor `json:"sensors,omitempty"`
+
+	// IOWaitPercent is the share of CPU time spent waiting for disk or network I/O since the last report.
+	IOWaitPercent float64 `json:"iowait_percent,omitempty"`
+	// SwapUsed and SwapTotal are in bytes; SwapTotal is 0 when the device has no swap.
+	SwapUsed  uint64 `json:"swap_used,omitempty"`
+	SwapTotal uint64 `json:"swap_total,omitempty"`
+	// OOMKills counts processes the kernel killed for running out of memory since boot.
+	OOMKills uint64 `json:"oom_kills,omitempty"`
+	// ClockMHz is the current CPU clock, and MaxClockMHz the highest the kernel allows.
+	ClockMHz    float64 `json:"clock_mhz,omitempty"`
+	MaxClockMHz float64 `json:"max_clock_mhz,omitempty"`
+	// Disks and Nets are per-device rates since the previous report. They are empty on the first report.
+	Disks []DiskIO `json:"disks,omitempty"`
+	Nets  []NetIO  `json:"nets,omitempty"`
+	// Power is the Raspberry Pi firmware's power and throttling state; nil on other hardware.
+	Power *PowerInfo `json:"power,omitempty"`
+}
+
+// DiskIO is the activity of one physical disk (for example mmcblk0 or nvme0n1).
+type DiskIO struct {
+	Name      string  `json:"name"`
+	ReadBps   float64 `json:"read_bps"`
+	WriteBps  float64 `json:"write_bps"`
+	ReadIOPS  float64 `json:"read_iops"`
+	WriteIOPS float64 `json:"write_iops"`
+	// Busy is the share of time the disk had requests in flight (0-100).
+	Busy float64 `json:"busy"`
+}
+
+// NetIO is the traffic of one network interface.
+type NetIO struct {
+	Name  string  `json:"name"`
+	RxBps float64 `json:"rx_bps"`
+	TxBps float64 `json:"tx_bps"`
+	// Errors counts receive and transmit errors and dropped packets per second.
+	Errors float64 `json:"errors,omitempty"`
+	// Wireless interfaces carry the signal level in dBm (negative; closer to 0 is stronger).
+	Wireless  bool `json:"wireless,omitempty"`
+	SignalDBm int  `json:"signal_dbm,omitempty"`
+}
+
+// PowerInfo is the decoded Raspberry Pi get_throttled word. The Now flags describe the present;
+// the Since flags stay set from the moment the condition first happened until the next reboot.
+type PowerInfo struct {
+	Raw               uint32 `json:"raw"`
+	UnderVoltage      bool   `json:"under_voltage,omitempty"`
+	FreqCapped        bool   `json:"freq_capped,omitempty"`
+	Throttled         bool   `json:"throttled,omitempty"`
+	TempLimit         bool   `json:"temp_limit,omitempty"`
+	SinceUnderVoltage bool   `json:"since_under_voltage,omitempty"`
+	SinceFreqCapped   bool   `json:"since_freq_capped,omitempty"`
+	SinceThrottled    bool   `json:"since_throttled,omitempty"`
+	SinceTempLimit    bool   `json:"since_temp_limit,omitempty"`
+}
+
+// DecodePower splits a get_throttled word into its flags.
+func DecodePower(raw uint32) *PowerInfo {
+	b := func(n uint) bool { return raw&(1<<n) != 0 }
+	return &PowerInfo{Raw: raw,
+		UnderVoltage: b(0), FreqCapped: b(1), Throttled: b(2), TempLimit: b(3),
+		SinceUnderVoltage: b(16), SinceFreqCapped: b(17), SinceThrottled: b(18), SinceTempLimit: b(19)}
+}
+
+// TempSensor is one temperature reading.
+type TempSensor struct {
+	Name string  `json:"name"`
+	C    float64 `json:"c"`
 }
 
 // Container is the agent's view of one container on its local engine.
@@ -185,6 +259,9 @@ type Container struct {
 	Volumes []string `json:"volumes,omitempty"`
 	// Networks lists the Docker networks the container is attached to with its address and MAC on each.
 	Networks []ContainerNet `json:"networks,omitempty"`
+	// Unstable is set by the server (never the agent) when Docker has restarted the container
+	// repeatedly in the last few minutes, even if it is "running" at this instant.
+	Unstable bool `json:"unstable,omitempty"`
 }
 
 // ContainerNet is a container's attachment to one Docker network.
@@ -323,8 +400,12 @@ const (
 	ActionStart   = "container.start"
 	ActionStop    = "container.stop"
 	ActionRestart = "container.restart"
-	ActionLogs    = "container.logs"
-	ActionDeploy  = "deploy"
+	// ActionUpdate changes a running container's restart policy and memory limit in place
+	// (docker update, no recreate): Args["restart"], ["retries"], ["memory_mb"] (0 = unchanged),
+	// and ["stop"]="1" to stop it afterwards.
+	ActionUpdate = "container.update"
+	ActionLogs   = "container.logs"
+	ActionDeploy = "deploy"
 	// ActionBackup streams a container's config and data to the control plane; Args["backup_id"].
 	ActionBackup = "container.backup"
 	// ActionRestore writes a backup's data back into the existing container; Args["backup_id"].
@@ -365,20 +446,121 @@ const (
 	ActionSSHConfig   = "ssh.config"
 	ActionSSHConfirm  = "ssh.confirm"
 	ActionSSHKey      = "ssh.key"
+	// Disk management (admin only, always sent by the server's disk API, never by the generic commands API).
+	// ActionDiskList reports a DiskReport as JSON. It never changes anything.
+	ActionDiskList = "disk.list"
+	// ActionDiskFormat creates a filesystem on Args["device"] (fstype, label) once Args["confirm"] equals the device path.
+	ActionDiskFormat = "disk.format"
+	// ActionDiskPartition replaces the partition table of Args["device"] with GPT and Args["layout"] (MiB sizes, "rest").
+	ActionDiskPartition = "disk.partition"
+	// ActionDiskMount mounts Args["device"] at Args["mountpoint"]; Args["persist"] == "1" adds an fstab entry by UUID.
+	ActionDiskMount = "disk.mount"
+	// ActionDiskUnmount unmounts Args["mountpoint"] and drops its Orchestrator-written fstab entry.
+	ActionDiskUnmount = "disk.unmount"
+	// ActionShareMount mounts an SMB or NFS share (Args: kind, source, mountpoint, options, username, password, persist).
+	ActionShareMount = "share.mount"
+
+	// Rebuild from a pooled (gold) image. Admin only, sent by the server's image API, never by the generic commands API.
+	// ActionImageFlash streams the server image Args["image_id"] (checked against Args["sha256"]) onto the whole disk
+	// Args["device"] once Args["confirm"] equals the device path. With Args["enrol"] == "1" it also installs a first-boot
+	// job that runs the agent installer with Args["join_token"] so the rebuilt machine registers itself.
+	ActionImageFlash = "image.flash"
+	// ActionBootGet reports the Raspberry Pi boot order (a BootInfo as JSON). It never changes anything.
+	ActionBootGet = "boot.get"
+	// ActionBootSet stages a new BOOT_ORDER (Args["order"], e.g. "0xf14") once Args["confirm"] equals it. It applies on the next reboot.
+	ActionBootSet = "boot.set"
 )
+
+// Image is a gold image stored on the server: a raw disk image, optionally compressed.
+type Image struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Arch      string    `json:"arch,omitempty"` // amd64, arm64, armv7 or empty when unknown
+	Notes     string    `json:"notes,omitempty"`
+	Format    string    `json:"format"` // raw, gz, xz or zst
+	Size      int64     `json:"size"`   // bytes stored on the server
+	SHA256    string    `json:"sha256"` // of the stored bytes
+	CreatedBy string    `json:"created_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// BootInfo is the boot configuration of a Raspberry Pi.
+type BootInfo struct {
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"` // why not, when Supported is false
+	Model     string `json:"model,omitempty"`
+	Order     string `json:"order,omitempty"`  // BOOT_ORDER as stored, e.g. "0xf41"
+	Config    string `json:"config,omitempty"` // the whole EEPROM configuration
+}
+
+// DiskReport is what a device reports for disk.list.
+type DiskReport struct {
+	Disks  []Disk      `json:"disks"`
+	Shares []DiskShare `json:"shares"`
+	// Board is the device model (for example "Raspberry Pi Compute Module 5"), when the system reports one.
+	Board string `json:"board,omitempty"`
+}
+
+// Disk is a block device (a whole disk or loop device) with its partitions.
+type Disk struct {
+	Path       string `json:"path"`
+	Kind       string `json:"kind"` // disk, loop
+	SizeBytes  int64  `json:"size_bytes"`
+	Model      string `json:"model,omitempty"`
+	Serial     string `json:"serial,omitempty"`
+	Transport  string `json:"transport,omitempty"`
+	Removable  bool   `json:"removable,omitempty"`
+	Rotational bool   `json:"rotational,omitempty"`
+	// Medium is "emmc" or "sd" for MMC-bus devices (from the kernel), empty when unknown.
+	Medium      string   `json:"medium,omitempty"`
+	BackingFile string   `json:"backing_file,omitempty"`
+	Volume      Volume   `json:"volume"`
+	Partitions  []Volume `json:"partitions,omitempty"`
+	// Protected is why Orchestrator will not format, partition or unmount this disk (the system disk, or
+	// something is mounted or otherwise using it). Empty means it is free to use.
+	Protected string `json:"protected,omitempty"`
+	// System is set when the device holds the operating system, Docker or the agent.
+	System bool `json:"system,omitempty"`
+}
+
+// Volume is a filesystem (or the lack of one) on a disk or partition.
+type Volume struct {
+	Path       string `json:"path"`
+	SizeBytes  int64  `json:"size_bytes"`
+	FSType     string `json:"fstype,omitempty"`
+	Label      string `json:"label,omitempty"`
+	UUID       string `json:"uuid,omitempty"`
+	Mountpoint string `json:"mountpoint,omitempty"`
+	UsedBytes  int64  `json:"used_bytes,omitempty"`
+	Persistent bool   `json:"persistent,omitempty"` // has an Orchestrator-written fstab entry
+	// Protected is why this volume can't be formatted or unmounted from here.
+	Protected string `json:"protected,omitempty"`
+}
+
+// DiskShare is a mounted SMB or NFS share.
+type DiskShare struct {
+	Source     string `json:"source"`
+	Mountpoint string `json:"mountpoint"`
+	FSType     string `json:"fstype"`
+	SizeBytes  int64  `json:"size_bytes,omitempty"`
+	UsedBytes  int64  `json:"used_bytes,omitempty"`
+	Persistent bool   `json:"persistent,omitempty"`
+}
 
 // ContainerSpec is a running container's configuration, translated into what a DeploySpec can
 // express. Anything the translation cannot carry over is named in Unsupported.
 type ContainerSpec struct {
-	Name    string            `json:"name"`
-	Image   string            `json:"image"`
-	Env     []string          `json:"env,omitempty"`
-	Command []string          `json:"command,omitempty"`
-	Ports   []string          `json:"ports,omitempty"`
-	Volumes []string          `json:"volumes,omitempty"`
-	Labels  map[string]string `json:"labels,omitempty"`
-	Restart string            `json:"restart,omitempty"`
-	Network string            `json:"network,omitempty"`
+	Name       string            `json:"name"`
+	Image      string            `json:"image"`
+	Env        []string          `json:"env,omitempty"`
+	Command    []string          `json:"command,omitempty"`
+	Ports      []string          `json:"ports,omitempty"`
+	Volumes    []string          `json:"volumes,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Restart    string            `json:"restart,omitempty"`
+	MaxRetries int               `json:"max_retries,omitempty"`
+	MemoryMB   int               `json:"memory_mb,omitempty"`
+	Network    string            `json:"network,omitempty"`
 	// Unsupported lists settings that a redeploy would lose (privileged mode, devices, limits, ...).
 	Unsupported []string `json:"unsupported,omitempty"`
 }
@@ -433,6 +615,10 @@ type DeploySpec struct {
 	Command []string `json:"command,omitempty"`
 	// Restart is a Docker restart policy name: no, always, unless-stopped, on-failure.
 	Restart string `json:"restart,omitempty"`
+	// MaxRetries caps restarts for the on-failure policy (0 = Docker's default, unlimited).
+	MaxRetries int `json:"max_retries,omitempty"`
+	// MemoryMB is a hard memory limit in MiB (swap is limited to the same); 0 means no limit.
+	MemoryMB int `json:"memory_mb,omitempty"`
 	// Build, when set, builds Image on the device instead of pulling it.
 	Build *BuildSpec `json:"build,omitempty"`
 	// Labels are added to the container.
@@ -446,6 +632,12 @@ type DeploySpec struct {
 	Dedicated *DedicatedIP `json:"dedicated,omitempty"`
 	// Compose, when set, makes this a Compose stack: Service is the stack (project) name and Image is unused.
 	Compose *ComposeSpec `json:"compose,omitempty"`
+	// ImageDigest is the content digest (sha256:...) the pulled Image resolved to, recorded after
+	// a successful deployment so a rollback can pull exactly that version while the registry has it.
+	ImageDigest string `json:"image_digest,omitempty"`
+	// KeepImages, when above zero, trims older images of this worker's own build after a
+	// successful deploy, leaving the newest KeepImages (the running one is never removed).
+	KeepImages int `json:"keep_images,omitempty"`
 	// Reuse lets the agent skip the build when Image already exists on the device (rollbacks).
 	Reuse bool `json:"reuse,omitempty"`
 	// Cloudflare, when set, makes this a deployment to Cloudflare Pages or Workers. The control
@@ -628,4 +820,57 @@ func LooksLikeComposeFile(p string) bool {
 		return false
 	}
 	return strings.Contains(b, "compose") || strings.Contains(b, "stack")
+}
+
+// Docker storage housekeeping. Orchestrator builds an image per commit and pulls new tags over
+// old ones, so a device collects images; these types describe what is there and what a prune did.
+const (
+	// ActionDockerReport returns a DockerStorage as JSON and never changes anything.
+	ActionDockerReport = "docker.report"
+	// ActionDockerPrune removes unused images and build cache and returns a DockerPruneResult as
+	// JSON. Args: keep (newest images per worker to keep), trim=1, dangling=1, unused=1,
+	// build_cache=1, cache_hours (0 = all of it).
+	ActionDockerPrune = "docker.prune"
+)
+
+// DockerImageVersion is one tagged image of a worker built on the device.
+type DockerImageVersion struct {
+	Tag       string `json:"tag"`
+	ID        string `json:"id"`
+	Size      int64  `json:"size"`
+	Created   int64  `json:"created"`
+	InUse     bool   `json:"in_use"`
+	Removable bool   `json:"removable"` // a prune with the current keep setting would remove it
+}
+
+// DockerImageGroup is every built image of one worker, newest first.
+type DockerImageGroup struct {
+	Repo     string               `json:"repo"`
+	Worker   string               `json:"worker"`
+	Orphaned bool                 `json:"orphaned"` // no container of this name exists on the device
+	Versions []DockerImageVersion `json:"versions"`
+}
+
+// DockerStorage is what a device's Docker engine holds.
+type DockerStorage struct {
+	RootDir        string             `json:"root_dir"`
+	Keep           int                `json:"keep"`
+	Images         int                `json:"images"`
+	ImagesSize     int64              `json:"images_size"`
+	LayersSize     int64              `json:"layers_size"` // shared layers counted once
+	Dangling       int                `json:"dangling"`
+	DanglingSize   int64              `json:"dangling_size"`
+	Unused         int                `json:"unused"` // tagged images no container uses, built or pulled
+	UnusedSize     int64              `json:"unused_size"`
+	Workers        []DockerImageGroup `json:"workers"`
+	BuildCache     int64              `json:"build_cache"`
+	BuildCacheFree int64              `json:"build_cache_reclaimable"`
+	Reclaimable    int64              `json:"reclaimable"` // dangling + removable worker images + reclaimable cache (an estimate)
+}
+
+// DockerPruneResult is what a prune did.
+type DockerPruneResult struct {
+	ImagesRemoved int      `json:"images_removed"`
+	Reclaimed     int64    `json:"reclaimed"`
+	Steps         []string `json:"steps"`
 }

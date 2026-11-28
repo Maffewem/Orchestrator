@@ -161,6 +161,7 @@ type dockerContainer struct {
 	ID      string            `json:"Id"`
 	Names   []string          `json:"Names"`
 	Image   string            `json:"Image"`
+	ImageID string            `json:"ImageID"`
 	State   string            `json:"State"`
 	Status  string            `json:"Status"`
 	Created int64             `json:"Created"`
@@ -540,7 +541,11 @@ func (d *Docker) CreateOn(ctx context.Context, name string, spec api.DeploySpec,
 	}
 	host := map[string]any{
 		"PortBindings":  bindings,
-		"RestartPolicy": map[string]string{"Name": spec.Restart},
+		"RestartPolicy": map[string]any{"Name": spec.Restart, "MaximumRetryCount": maxRetries(spec)},
+	}
+	if spec.MemoryMB > 0 {
+		host["Memory"] = int64(spec.MemoryMB) << 20
+		host["MemorySwap"] = int64(spec.MemoryMB) << 20 // no swap, so the limit is real
 	}
 	if len(spec.Volumes) > 0 {
 		host["Binds"] = spec.Volumes
@@ -625,4 +630,12 @@ func (d *Docker) BuildLocal(ctx context.Context, dir, dockerfile, target, tag st
 	cmd.Stdin = strings.NewReader(dockerfile)
 	cmd.Env = append(os.Environ(), "DOCKER_HOST="+d.host, "DOCKER_BUILDKIT=1")
 	return runStream(cmd, logf)
+}
+
+// maxRetries is the retry cap, which Docker only accepts with the on-failure policy.
+func maxRetries(spec api.DeploySpec) int {
+	if spec.Restart != "on-failure" || spec.MaxRetries < 0 {
+		return 0
+	}
+	return spec.MaxRetries
 }

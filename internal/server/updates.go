@@ -61,6 +61,26 @@ type updateCheck struct {
 	Version   string    `json:"version,omitempty"`
 	Newer     bool      `json:"newer"`
 	Error     string    `json:"error,omitempty"`
+	// ImageID is the build the check found. "Newer" is worked out again from it against the
+	// image that is running now, so an install never leaves an old "update available" behind.
+	ImageID string `json:"image_id,omitempty"`
+}
+
+// storedCheck loads the last check and brings Newer up to date with the running image.
+func (s *Server) storedCheck(ctx context.Context) (updateCheck, bool) {
+	var chk updateCheck
+	if !s.getJSON(ctx, settingUpdateCheck, &chk) {
+		return chk, false
+	}
+	if chk.ImageID != "" && chk.Error == "" {
+		if self, _ := s.selfInfo(ctx); self != nil {
+			chk.Newer = chk.ImageID != self.ImageID
+			if !chk.Newer {
+				chk.Version = s.cfg.Version
+			}
+		}
+	}
+	return chk, true
 }
 
 type updateResult struct {
@@ -257,8 +277,7 @@ func (s *Server) updateStatus(ctx context.Context) updateStatus {
 		st.Stage = s.up.stage
 	}
 	s.up.mu.Unlock()
-	var chk updateCheck
-	if s.getJSON(ctx, settingUpdateCheck, &chk) {
+	if chk, ok := s.storedCheck(ctx); ok {
 		st.Check = &chk
 	}
 	var res updateResult
@@ -322,7 +341,7 @@ func (s *Server) runCheck(ctx context.Context) (*selfupdate.Latest, error) {
 		s.setJSON(ctx, settingUpdateCheck, chk)
 		return nil, err
 	}
-	chk.Version, chk.Newer = latest.Version, latest.Newer
+	chk.Version, chk.Newer, chk.ImageID = latest.Version, latest.Newer, latest.ImageID
 	s.setJSON(ctx, settingUpdateCheck, chk)
 	return latest, nil
 }
@@ -563,6 +582,14 @@ func (s *Server) afterBoot(ctx context.Context) {
 			s.store.SetSetting(ctx, settingUpdateAgents, "")
 			s.setResult(ctx, false, fmt.Sprintf("The update to %s did not come up healthy, so the server was rolled back to %s", orUnknown(p.To), orUnknown(p.FromVersion)))
 		}
+	}
+	// The stored check describes the build from before this start; look again so the page
+	// shows "Latest" (or a build published meanwhile) without a manual re-check.
+	if s.begin("checking") {
+		if _, err := s.runCheck(ctx); err != nil {
+			s.log.Warn("update check after start", "err", err)
+		}
+		s.finish()
 	}
 	if v, _ := s.store.GetSetting(ctx, settingUpdateAgents); v == "1" {
 		s.store.SetSetting(ctx, settingUpdateAgents, "")

@@ -99,12 +99,14 @@ function Tile({ label, value, sub, loading, tone }: { label: string; value: Reac
   );
 }
 
+/** A graph card. Once loading has finished, a card with nothing to plot is not drawn at all. */
 function Panel({ title, subtitle, loading, empty, children }: { title: string; subtitle?: string; loading: boolean; empty?: boolean; children: ReactNode }) {
+  if (!loading && empty) return null;
   return (
     <Card>
       <CardHeader title={title} subtitle={subtitle} />
       <div className="p-5">
-        {loading ? <Skeleton className="h-28 w-full" /> : empty ? <p className="flex h-28 items-center justify-center text-sm text-neutral-500">No samples in this range yet.</p> : children}
+        {loading ? <Skeleton className="h-28 w-full" /> : children}
       </div>
     </Card>
   );
@@ -359,6 +361,9 @@ function ContainerResources({ m, loading }: { m: WorkerMetrics | null; loading: 
   const memLimit = cur ? cur.mem_limit : Math.max(0, ...defined(s.map((x) => x.mem_limit)));
   const net = rateUnit(defined(s.flatMap((x) => [x.net_rx, x.net_tx])));
   const blk = rateUnit(defined(s.flatMap((x) => [x.blk_read, x.blk_write])));
+  // Docker reports block I/O as zero where the kernel does not expose it (common on Raspberry Pi
+  // kernels without the io cgroup controller), so a series that never rises above zero is "no data".
+  const hasBlk = defined(s.flatMap((x) => [x.blk_read, x.blk_write])).some((v) => v > 0);
   const cpuVals = defined(s.map((x) => x.cpu));
   const memVals = defined(s.map((x) => (x.mem != null ? x.mem / 1024 / 1024 : undefined)));
   const health = cur?.health;
@@ -387,7 +392,8 @@ function ContainerResources({ m, loading }: { m: WorkerMetrics | null; loading: 
           sub={!on("volumes") ? undefined : m?.volumes.length ? m.volumes.map((v) => v.name).join(", ") : "No named volumes measured yet"}
         />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {!loading && m && !cpuVals.length && !memVals.length && !s.length && <p className="text-sm text-neutral-500 lg:col-span-2">No samples in this range yet.</p>}
         {on("cpu") && (
           <Panel loading={loading} empty={!cpuVals.length} title="CPU" subtitle="Percent of one core; 200% is two full cores">
             <LineChart max={niceMax(cpuVals, 10)} format={fixed(0, "%")} series={[{ label: "CPU", color: "#0051c3", values: cpuVals }]} />
@@ -412,7 +418,7 @@ function ContainerResources({ m, loading }: { m: WorkerMetrics | null; loading: 
           </Panel>
         )}
         {on("disk_io") && (
-          <Panel loading={loading} empty={!s.some((x) => x.blk_read != null)} title="Disk reads and writes">
+          <Panel loading={loading} empty={!hasBlk} title="Disk reads and writes" subtitle="Block I/O of this container">
             <LineChart
               unit={blk.unit}
               format={fixed(1, blk.unit)}
@@ -460,7 +466,7 @@ function ProxyTraffic({ m, loading }: { m: WorkerMetrics | null; loading: boolea
         <Tile loading={loading} label="Response time p50" value={on("proxy_latency") ? fmtMs(t?.p50) : "Off"} sub={on("proxy_latency") ? `p95 ${fmtMs(t?.p95)}` : undefined} />
         <Tile loading={loading} label={on("proxy_bandwidth") ? "Bandwidth" : "Response time p99"} value={on("proxy_bandwidth") ? (t?.bytes != null ? bytes(t.bytes) : "—") : fmtMs(p?.p99)} sub={on("proxy_bandwidth") ? "Sent to visitors" : undefined} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel loading={loading} empty={!s.length} title="Requests per minute">
           <LineChart unit="" format={fixed(0)} max={niceMax(s.map((x) => perMin(x.requests)), 1)} series={[{ label: "Requests", color: "#0051c3", values: s.map((x) => perMin(x.requests)) }]} />
         </Panel>
@@ -521,7 +527,7 @@ function WorkerRequests({ pm, loading }: { pm: ProjectMetrics | null; loading: b
         <Tile loading={loading} label="CPU time p50" value={fmtMs(t?.cpu_p50)} sub={t?.cpu_p99 != null ? `p99 ${fmtMs(t.cpu_p99)}` : undefined} />
         <Tile loading={loading} label="Wall time p50" value={fmtMs(t?.wall_p50)} sub={t?.wall_p99 != null ? `p99 ${fmtMs(t.wall_p99)}` : "Real time per request, including waits"} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel loading={loading} empty={!s.length} title="Requests" subtitle="Per hour">
           <LineChart
             unit=""

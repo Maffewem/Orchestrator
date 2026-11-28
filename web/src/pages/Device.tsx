@@ -6,13 +6,15 @@ import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
 import { useCan } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass, SecretInput } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, FoldCard, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass, SecretInput } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 import { DeviceHardwareActions, HardwareTab, useIdentifying } from "../components/DeviceHardware";
+import Disks from "../components/Disks";
+import HardwareMetrics, { CompareCard, PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -58,6 +60,7 @@ function DeviceBody({ d, base, isAdmin, rows, dev, fleet }: { d: Device; base: s
           items={[
             { to: base, label: "Overview", end: true },
             { to: `${base}/containers`, label: `Containers (${d.containers.length})` },
+            ...(isAdmin ? [{ to: `${base}/disks`, label: "Disks" }] : []),
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/activity`, label: "Activity" },
             ...(isAdmin ? [{ to: `${base}/hardware`, label: "Hardware" }] : []),
@@ -82,6 +85,7 @@ function DeviceBody({ d, base, isAdmin, rows, dev, fleet }: { d: Device; base: s
             </>
           }
         />
+        {isAdmin && <Route path="disks" element={<Disks d={d} />} />}
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
         <Route path="activity" element={<DeviceActivity d={d} />} />
         {isAdmin && <Route path="hardware" element={<HardwareTab d={d} />} />}
@@ -115,8 +119,7 @@ function ProxyCard({ d }: { d: Device }) {
     agent_too_old: "This agent is too old to run the proxy. Re-run the install command on the device to update it.",
   };
   return (
-    <Card>
-      <CardHeader title="Domain proxy" />
+    <FoldCard title="Domain proxy">
       <div className="space-y-3 p-5 text-sm">
         <p className="flex items-center gap-2">
           <Badge>{d.proxy === "agent_too_old" ? "agent too old" : d.proxy}</Badge>
@@ -143,7 +146,7 @@ function ProxyCard({ d }: { d: Device }) {
           </Button>
         )}
       </div>
-    </Card>
+    </FoldCard>
   );
 }
 
@@ -178,8 +181,7 @@ function TunnelCard({ d }: { d: Device }) {
     }
   };
   return (
-    <Card>
-      <CardHeader title="Cloudflare Tunnel" subtitle="Publish workers on this device through Cloudflare without opening ports." />
+    <FoldCard title="Cloudflare Tunnel" subtitle="Publish workers on this device through Cloudflare without opening ports.">
       <div className="space-y-3 p-5 text-sm">
         {!t ? (
           <p className="text-neutral-500">Loading…</p>
@@ -311,7 +313,7 @@ function TunnelCard({ d }: { d: Device }) {
           <p key={w} className="text-xs text-amber-700">{w}</p>
         ))}
       </div>
-    </Card>
+    </FoldCard>
   );
 }
 
@@ -333,11 +335,42 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
     }
   };
   const samples = usePoll(() => api.deviceMetrics(d.id), 5000, [d.id]);
+  const thresholds = usePoll(async () => (await api.settings()).temperature, 60000);
   const s = samples.data ?? [];
   const m = d.metrics;
+  const hwTabs = availableGraphs(s, m);
+  const graphs: { key: "perf" | "temp" | GraphKey; label: string }[] = [
+    { key: "perf", label: "Performance" },
+    ...(s.some((x) => x.temp > 0) || hwTabs.some((g) => g.key === "power") ? [{ key: "temp" as const, label: hwTabs.some((g) => g.key === "power") ? "Temperature & power" : "Temperature" }] : []),
+    ...hwTabs.filter((g) => g.key !== "power"),
+    { key: "compare" as const, label: "Compare" },
+  ];
+  const [picked, setPicked] = useState<string>(() => {
+    try {
+      return localStorage.getItem("orch.deviceGraph") ?? "perf";
+    } catch {
+      return "perf";
+    }
+  });
+  const graph = (graphs.find((g) => g.key === picked)?.key ?? "perf") as (typeof graphs)[number]["key"];
+  const pickGraph = (k: string) => {
+    setPicked(k);
+    try {
+      localStorage.setItem("orch.deviceGraph", k);
+    } catch {
+      /* remembering the choice is optional */
+    }
+  };
+  // Disk, network and power graphs only exist once the agent reports them. Say why they are missing.
+  const hasHW = s.some((x) => x.disks?.length || x.nets?.length || x.has_power || (x.clock ?? 0) > 0);
+  const agentHasHW = d.host.capabilities?.includes("hw-metrics") ?? false;
+  const hwHint = d.status !== "online" || !samples.data || hasHW ? null : agentHasHW
+    ? "This device's kernel exposes no disk, network or power counters, so those graphs are not shown."
+    : "Disk I/O, network, power and clock graphs need a newer agent. Update the agent from the Updates page to see them.";
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
+        {hwHint && <p className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm text-neutral-600">{hwHint}</p>}
         {d.issues.length > 0 && (
           <Card className="border-amber-200 bg-amber-50/50">
             <CardHeader title="Needs attention" />
@@ -357,6 +390,22 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             {ackError && <div className="px-5 pb-3"><ErrorNote>{ackError}</ErrorNote></div>}
           </Card>
         )}
+        <div role="tablist" aria-label="Graphs" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {graphs.map((g) => (
+            <button
+              key={g.key}
+              type="button"
+              role="tab"
+              aria-selected={graph === g.key}
+              onClick={() => pickGraph(g.key)}
+              className={`min-h-9 shrink-0 rounded-full border px-3.5 text-sm ${graph === g.key ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white text-neutral-700"}`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        {graph === "perf" && (
+          <>
         <Card>
           <CardHeader title="Performance" subtitle="Live samples from the agent (last hour)." />
           <div className="space-y-6 p-5">
@@ -370,18 +419,46 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
                 { label: "CPU", color: "#0051c3", values: s.map((x) => x.cpu) },
                 { label: "Memory", color: "#f6821f", values: s.map((x) => x.mem) },
                 { label: "Disk", color: "#16794c", values: s.map((x) => x.disk) },
+                ...pressureSeries(s, m, d.host.cpus),
               ]}
             />
+            <PressureStats m={m} />
           </div>
         </Card>
-        <Card>
-          <CardHeader title="Recent activity" />
+          </>
+        )}
+        {graph === "temp" && s.some((x) => x.temp > 0) && (
+          <Card>
+            <CardHeader title="Temperature" subtitle={thresholds.data ? `Hottest sensor, last hour. Alerts at ${thresholds.data.warn_c}°C (warning) and ${thresholds.data.crit_c}°C (critical).` : "Hottest sensor, last hour."} />
+            <div className="p-5">
+              <LineChart
+                max={Math.max(100, Math.ceil(((thresholds.data?.crit_c ?? 85) + 5) / 10) * 10)}
+                unit="°C"
+                format={(v) => `${v.toFixed(0)}°C`}
+                series={[{ label: "Temperature", color: "#d92d20", values: s.map((x) => x.temp) }]}
+              />
+              {(m.sensors?.length ?? 0) > 1 && (
+                <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+                  {m.sensors!.map((x) => (
+                    <div key={x.name} className="flex min-w-0 justify-between gap-2">
+                      <dt className="truncate text-neutral-500">{x.name}</dt>
+                      <dd className="font-medium tabular-nums">{x.c.toFixed(0)}°C</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </div>
+          </Card>
+        )}
+        {graph === "compare" && <CompareCard s={s} m={m} />}
+        {graph === "temp" && <HardwareMetrics s={s} m={m} only="power" />}
+        {(graph === "disk" || graph === "net") && <HardwareMetrics s={s} m={m} only={graph} />}
+        <FoldCard title="Recent activity">
           <DeviceActivity d={d} limit={8} bare />
-        </Card>
+        </FoldCard>
       </div>
       <div className="space-y-4">
-        <Card>
-          <CardHeader title="Properties" />
+        <FoldCard title="Properties">
           <dl className="divide-y divide-neutral-100 px-5 py-1">
             <Prop k="Hostname" v={d.host.hostname} />
             <Prop k="Model" v={d.host.model} />
@@ -399,9 +476,8 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             <Prop k="Last seen" v={ago(d.last_seen)} />
             <Prop k="Agent" v={d.host.agent_version} />
           </dl>
-        </Card>
-        <Card>
-          <CardHeader title="Docker" />
+        </FoldCard>
+        <FoldCard title="Docker">
           <dl className="divide-y divide-neutral-100 px-5 py-1">
             {d.host.docker?.error ? (
               <p className="py-3 text-sm text-bad">{d.host.docker.error}</p>
@@ -413,7 +489,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
               </>
             )}
           </dl>
-        </Card>
+        </FoldCard>
         <ProxyCard d={d} />
         <TunnelCard d={d} />
         {d.labels.length > 0 && (
@@ -732,7 +808,7 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
           <p>No workers are running on this device. New workers will be placed on other devices.</p>
         )}
         {!moving && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Reason (optional)">
               <input className={inputClass} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Replacing the SD card" />
             </Field>

@@ -20,21 +20,24 @@ type ImageInfo struct {
 	Labels map[string]string `json:"-"`
 	// RepoTags are the name:tag references pointing at the image (empty when untagged).
 	RepoTags []string `json:"-"`
+	// RepoDigests are the name@sha256:... references the image was pulled by.
+	RepoDigests []string `json:"-"`
 }
 
 // ImageInspect describes a local image by name or ID.
 func (d *Docker) ImageInspect(ctx context.Context, ref string) (*ImageInfo, error) {
 	var v struct {
-		ID       string   `json:"Id"`
-		RepoTags []string `json:"RepoTags"`
-		Config   struct {
+		ID          string   `json:"Id"`
+		RepoTags    []string `json:"RepoTags"`
+		RepoDigests []string `json:"RepoDigests"`
+		Config      struct {
 			Labels map[string]string `json:"Labels"`
 		} `json:"Config"`
 	}
 	if err := d.call(ctx, http.MethodGet, "/images/"+ref+"/json", nil, nil, &v); err != nil {
 		return nil, err
 	}
-	return &ImageInfo{ID: v.ID, Labels: v.Config.Labels, RepoTags: v.RepoTags}, nil
+	return &ImageInfo{ID: v.ID, Labels: v.Config.Labels, RepoTags: v.RepoTags, RepoDigests: v.RepoDigests}, nil
 }
 
 // ContainerNameOf resolves a container ID or name to its ID, name and image.
@@ -141,6 +144,25 @@ func (d *Docker) DisableRestart(ctx context.Context, id string) error {
 func (d *Docker) SetRestart(ctx context.Context, id, policy string) error {
 	return d.call(ctx, http.MethodPost, "/containers/"+id+"/update", nil,
 		map[string]any{"RestartPolicy": map[string]string{"Name": policy}}, nil)
+}
+
+// Update changes a container's restart policy and, when memoryMB > 0, its memory limit in place.
+func (d *Docker) Update(ctx context.Context, id, policy string, retries, memoryMB int) error {
+	body := map[string]any{}
+	if policy != "" {
+		if policy != "on-failure" {
+			retries = 0
+		}
+		body["RestartPolicy"] = map[string]any{"Name": policy, "MaximumRetryCount": retries}
+	}
+	if memoryMB > 0 {
+		body["Memory"] = int64(memoryMB) << 20
+		body["MemorySwap"] = int64(memoryMB) << 20
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return d.call(ctx, http.MethodPost, "/containers/"+id+"/update", nil, body, nil)
 }
 
 // RemoveIfExists removes a container, ignoring "no such container".

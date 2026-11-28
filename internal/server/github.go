@@ -152,6 +152,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("Push to %s could not deploy %s: %v", branch, p.Name, err))
 			continue
 		}
+		s.supersedeQueued(r.Context(), d)
 		ids = append(ids, d.ID)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"deployments": ids})
@@ -261,7 +262,7 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 		Ports:   p.Runtime.Ports,
 		Env:     env,
 		Command: p.Runtime.Command,
-		Restart: restart,
+		Restart: restart, MaxRetries: p.Runtime.MaxRetries, MemoryMB: p.Runtime.MemoryMB,
 		Volumes: p.Runtime.Volumes,
 		Network: p.Runtime.Network,
 		Labels:  map[string]string{},

@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: stable # the newest patch release, so standard-library fixes are included
       - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   # Promoting dev to main: prove both images still build before anything reaches stable.

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { Metrics, MetricSample } from "../api";
 import { Badge, Card, CardHeader, LineChart, Table } from "./ui";
 import { bytes } from "../lib";
@@ -212,6 +213,7 @@ const CANDIDATES: Candidate[] = [
 export function CompareCard({ s, m }: { s: MetricSample[]; m: Metrics }) {
   const avail = CANDIDATES.filter((c) => c.has(s, m));
   const [picked, setPicked] = useState<string[]>(() => ["temp", "uv", "clock"].filter((id) => avail.some((c) => c.id === id)).concat(avail.some((c) => c.id === "uv") ? [] : ["cpu"]).slice(0, 3));
+  const [open, setOpen] = useState(false);
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const series = avail
     .filter((c) => picked.includes(c.id))
@@ -225,7 +227,12 @@ export function CompareCard({ s, m }: { s: MetricSample[]; m: Metrics }) {
       <CardHeader title="Compare" subtitle="Overlay metrics to see what happened at the same moment." />
       <div className="space-y-3 p-5">
         {series.length > 0 ? <LineChart height={180} fill={false} series={series} unit="%" /> : <p className="py-10 text-center text-sm text-neutral-500">Pick at least one metric below.</p>}
-        <div className="flex flex-wrap gap-1.5 border-t border-neutral-100 pt-3">
+        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex min-h-9 w-full items-center justify-between gap-2 border-t border-neutral-100 pt-3 text-left text-sm font-medium">
+          <span>Choose metrics <span className="font-normal text-neutral-500">({series.length} shown)</span></span>
+          <ChevronDown className={`size-4 text-neutral-500 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+        {open && (
+        <div className="flex flex-wrap gap-1.5">
           {avail.map((c) => (
             <button
               key={c.id}
@@ -239,6 +246,7 @@ export function CompareCard({ s, m }: { s: MetricSample[]; m: Metrics }) {
             </button>
           ))}
         </div>
+        )}
         <p className="text-xs text-neutral-500">Each line is scaled to its own range (percentages as they are, the rest as a share of the hour's highest value). The legend shows the real latest value.</p>
       </div>
     </Card>

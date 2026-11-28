@@ -15,6 +15,8 @@ type MetricSample struct {
 	MemPercent float64   `json:"mem"`
 	DiskPerc   float64   `json:"disk"`
 	Load1      float64   `json:"load1"`
+	// Temp is the hottest sensor in °C; 0 when the device reports none.
+	Temp float64 `json:"temp"`
 }
 
 // metricsHistory keeps recent samples per device in memory. It is lost on restart, which
@@ -45,6 +47,7 @@ func (h *metricsHistory) add(deviceID string, m api.Metrics) {
 		MemPercent: pct(m.MemoryUsed, m.MemoryTotal),
 		DiskPerc:   pct(m.DiskUsed, m.DiskTotal),
 		Load1:      m.Load1,
+		Temp:       m.TempC,
 	})
 	if len(s) > h.size {
 		s = s[len(s)-h.size:]

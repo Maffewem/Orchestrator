@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -78,11 +79,20 @@ func (s *Server) view(d *store.Device) DeviceView {
 			raise("warning", fmt.Sprintf("CPU is heavily loaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
 		}
 	}
+	warn, crit := s.tempThresholds(context.Background())
 	switch t := d.Metrics.TempC; {
-	case t >= 85:
-		raise("critical", fmt.Sprintf("Temperature is %.0f°C", t))
-	case t >= 80:
-		raise("warning", fmt.Sprintf("Temperature is %.0f°C", t))
+	case t >= crit:
+		raise("critical", fmt.Sprintf("Temperature is %.0f°C (critical at %.0f°C)", t, crit))
+	case t >= warn:
+		raise("warning", fmt.Sprintf("Temperature is %.0f°C (warning at %.0f°C)", t, warn))
+	}
+
+	crit2, warn2 := s.thermalIssues(d.ID)
+	for _, m := range crit2 {
+		raise("critical", m)
+	}
+	for _, m := range warn2 {
+		raise("warning", m)
 	}
 
 	// Container failures that point at the device rather than the app: crash loops and kills
@@ -174,6 +184,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.metrics.add(d.ID, req.Metrics)
 	s.ingestStats(ctx, d, req.Containers, req.Stats)
 	s.noteStale(ctx, d.Name, d.ID, req.StaleServers)
+	s.ingestThermal(ctx, d.ID, req.Thermal)
 
 	// A server in standby has handed over: it gives out no work, only the new address.
 	if to := s.standby(); to != "" {
@@ -196,6 +207,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		IntervalSeconds: int(s.cfg.HeartbeatInterval / time.Second),
 		ServerKey:       s.serverKey(),
 		ServerURLs:      s.agentURLs(ctx),
+		Thermal:         s.policyForAgent(ctx, d.ID),
 	})
 }
 
@@ -677,6 +689,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),
 		"security":                   s.securityView(r.Context()),
+		"temperature":                s.tempView(r.Context()),
 		"sso":                        s.ssoView(r.Context()),
 		"https":                      s.httpsView(r.Context()),
 		"github": map[string]any{

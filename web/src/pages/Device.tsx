@@ -13,6 +13,7 @@ import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 import Disks from "../components/Disks";
+import Thermal from "../components/Thermal";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -55,6 +56,7 @@ export default function DevicePage() {
             ...(isAdmin ? [{ to: `${base}/disks`, label: "Disks" }] : []),
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/activity`, label: "Activity" },
+            ...(isAdmin ? [{ to: `${base}/thermal`, label: "Thermal" }] : []),
             ...(isAdmin ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
@@ -79,6 +81,7 @@ export default function DevicePage() {
         {isAdmin && <Route path="disks" element={<Disks d={d} />} />}
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
         <Route path="activity" element={<DeviceActivity d={d} />} />
+        {isAdmin && <Route path="thermal" element={<Thermal d={d} />} />}
         {isAdmin && <Route path="settings" element={<DeviceSettings d={d} onSaved={dev.reload} />} />}
       </Routes>
     </>
@@ -327,6 +330,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
     }
   };
   const samples = usePoll(() => api.deviceMetrics(d.id), 5000, [d.id]);
+  const thresholds = usePoll(async () => (await api.settings()).temperature, 60000);
   const s = samples.data ?? [];
   const m = d.metrics;
   return (
@@ -368,6 +372,29 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             />
           </div>
         </Card>
+        {s.some((x) => x.temp > 0) && (
+          <Card>
+            <CardHeader title="Temperature" subtitle={thresholds.data ? `Hottest sensor, last hour. Alerts at ${thresholds.data.warn_c}°C (warning) and ${thresholds.data.crit_c}°C (critical).` : "Hottest sensor, last hour."} />
+            <div className="p-5">
+              <LineChart
+                max={Math.max(100, Math.ceil(((thresholds.data?.crit_c ?? 85) + 5) / 10) * 10)}
+                unit="°C"
+                format={(v) => `${v.toFixed(0)}°C`}
+                series={[{ label: "Temperature", color: "#d92d20", values: s.map((x) => x.temp) }]}
+              />
+              {(m.sensors?.length ?? 0) > 1 && (
+                <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
+                  {m.sensors!.map((x) => (
+                    <div key={x.name} className="flex min-w-0 justify-between gap-2">
+                      <dt className="truncate text-neutral-500">{x.name}</dt>
+                      <dd className="font-medium tabular-nums">{x.c.toFixed(0)}°C</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </div>
+          </Card>
+        )}
         <Card>
           <CardHeader title="Recent activity" />
           <DeviceActivity d={d} limit={8} bare />

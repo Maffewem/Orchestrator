@@ -136,6 +136,7 @@ const (
 	CapDedicatedRelease = "dedicated-release"  // stopping or removing a worker also removes the device's access address
 	CapDedicatedVLAN    = "dedicated-vlan"     // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
 	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
+	CapThermal          = "thermal"            // fan control and thermal protection (thermal.go)
 	CapDisks            = "disks"              // disk.list/format/partition/mount/unmount and share.mount/unmount
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
@@ -164,6 +165,14 @@ type Metrics struct {
 	UptimeSeconds uint64  `json:"uptime_seconds"`
 	// TempC is the hottest thermal zone in °C; 0 when the device has no sensor (or the agent predates it).
 	TempC float64 `json:"temp_c,omitempty"`
+	// Sensors lists every temperature sensor the device exposes (SoC, NVMe, and so on).
+	Sensors []TempSensor `json:"sensors,omitempty"`
+}
+
+// TempSensor is one temperature reading.
+type TempSensor struct {
+	Name string  `json:"name"`
+	C    float64 `json:"c"`
 }
 
 // Container is the agent's view of one container on its local engine.
@@ -235,6 +244,73 @@ type HeartbeatRequest struct {
 	Epoch int `json:"epoch,omitempty"`
 	// StaleServers are servers the agent has refused lately because their epoch was lower.
 	StaleServers []StaleServer `json:"stale_servers,omitempty"`
+	// Thermal is the state of the agent's local fan and protection controller; nil from an older agent.
+	Thermal *ThermalStatus `json:"thermal,omitempty"`
+}
+
+// FanInfo describes a fan the agent found.
+type FanInfo struct {
+	Driver string `json:"driver"` // hwmon | cooling | bladectl
+	Name   string `json:"name"`
+	// Controllable is false for a fan the agent can only read.
+	Controllable bool   `json:"controllable"`
+	Percent      int    `json:"percent"`        // current duty, 0-100; -1 when unknown
+	RPM          int    `json:"rpm,omitempty"`  // 0 when the fan has no tachometer
+	Note         string `json:"note,omitempty"` // e.g. that a driver is unverified
+}
+
+// CurvePoint maps a temperature to a fan duty.
+type CurvePoint struct {
+	C   float64 `json:"c"`
+	Pct int     `json:"pct"`
+}
+
+// ThermalProtect is the rule for a sustained high temperature.
+type ThermalProtect struct {
+	Enabled bool `json:"enabled"`
+	// TempC must be held for ForSeconds before the rule acts.
+	TempC      float64 `json:"temp_c"`
+	ForSeconds int     `json:"for_seconds"`
+	// ResumeBelowC is the hysteresis: stopped workers start again once the device is below it for a minute.
+	ResumeBelowC float64  `json:"resume_below_c"`
+	FanFull      bool     `json:"fan_full"`       // set the fan to 100%
+	Stop         []string `json:"stop,omitempty"` // worker (container) names to stop
+}
+
+// ThermalPolicy is what an admin configured for one device. The agent keeps a copy and applies
+// it by itself, so it keeps working when the server is unreachable.
+type ThermalPolicy struct {
+	Rev     int64  `json:"rev"`
+	FanMode string `json:"fan_mode"` // auto (leave the fan alone) | manual | curve
+	// FanManual is the duty for manual mode.
+	FanManual int          `json:"fan_manual"`
+	Curve     []CurvePoint `json:"curve,omitempty"`
+	MinPct    int          `json:"min_pct"`
+	// CritC is the server's critical temperature: at or above it the fan is forced to 100%.
+	CritC   float64        `json:"crit_c"`
+	Protect ThermalProtect `json:"protect"`
+	// Critical workers are never stopped, even if listed in Protect.Stop.
+	Critical []string `json:"critical,omitempty"`
+}
+
+// ThermalEvent is something the thermal controller did by itself.
+type ThermalEvent struct {
+	At      time.Time `json:"at"`
+	Level   string    `json:"level"`
+	Message string    `json:"message"`
+}
+
+// ThermalStatus is the agent's report on its thermal controller.
+type ThermalStatus struct {
+	Fan       *FanInfo `json:"fan,omitempty"`
+	PolicyRev int64    `json:"policy_rev"`
+	Mode      string   `json:"mode,omitempty"`
+	Target    int      `json:"target"` // duty the agent is applying; -1 when it leaves the fan alone
+	// Failsafe says why the fan was forced to full speed (sensor lost, fan write failed); empty when fine.
+	Failsafe   string         `json:"failsafe,omitempty"`
+	Protecting bool           `json:"protecting"`
+	Stopped    []string       `json:"stopped,omitempty"`
+	Events     []ThermalEvent `json:"events,omitempty"`
 }
 
 // StaleServer is a server the agent ignored because it reported an older epoch than the agent
@@ -312,6 +388,8 @@ type HeartbeatResponse struct {
 	// MoveTo is set by a server that has handed its role to another one (a server move). An
 	// agent that can reach MoveTo switches to it and keeps this address as its way back.
 	MoveTo string `json:"move_to,omitempty"`
+	// Thermal is the device's thermal policy; nil when none was ever saved.
+	Thermal *ThermalPolicy `json:"thermal,omitempty"`
 }
 
 // Command actions understood by the agent.

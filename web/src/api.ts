@@ -80,6 +80,7 @@ export interface Metrics {
   load15: number;
   uptime_seconds: number;
   temp_c?: number;
+  sensors?: { name: string; c: number }[];
 }
 
 export interface Port {
@@ -144,6 +145,21 @@ export interface DiskReport {
 }
 
 export type Health = "ok" | "warning" | "critical";
+
+export interface FanInfo { driver: string; name: string; controllable: boolean; percent: number; rpm?: number; note?: string }
+export interface ThermalPolicy {
+  rev?: number;
+  fan_mode: "auto" | "manual" | "curve";
+  fan_manual: number;
+  curve?: { c: number; pct: number }[];
+  min_pct: number;
+  protect: { enabled: boolean; temp_c: number; for_seconds: number; resume_below_c: number; fan_full: boolean; stop?: string[] };
+  critical?: string[];
+}
+export interface ThermalStatus {
+  fan?: FanInfo; policy_rev: number; mode?: string; target: number; failsafe?: string; protecting: boolean; stopped?: string[];
+}
+export interface ThermalView { policy: ThermalPolicy; saved: boolean; supported: boolean; status?: ThermalStatus; warn_c: number; crit_c: number; min_pct: number }
 
 export interface Device {
   id: string;
@@ -499,6 +515,7 @@ export interface MetricSample {
   mem: number;
   disk: number;
   load1: number;
+  temp: number;
 }
 
 export interface Alert {
@@ -612,6 +629,7 @@ export interface Settings {
   ssl_mode: "http" | "dns";
   sso: SSOView;
   https: HTTPSView;
+  temperature: { warn_c: number; crit_c: number };
   security: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
@@ -1313,6 +1331,9 @@ export const api = {
   connectivity: () => request<ConnView>("GET", "/api/connectivity"),
   setAgentURLs: (urls: string[]) => request<{ agent_urls: string[] }>("PUT", "/api/settings/agent-urls", { urls }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
+  thermal: (id: string) => request<ThermalView>("GET", `/api/devices/${id}/thermal`),
+  setThermal: (id: string, p: ThermalPolicy) => request<ThermalView>("PUT", `/api/devices/${id}/thermal`, p),
+  setTemperature: (b: { warn_c: number; crit_c: number }) => request<Settings["temperature"]>("PUT", "/api/settings/temperature", b),
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   createDeviceSetup: (b: { proxy: boolean; tunnel_token?: string; tunnel_via?: "" | "proxy"; maintenance: boolean; maintenance_note?: string }) =>
     request<{ id: string }>("POST", "/api/device-setups", b),

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -80,7 +81,12 @@ func (a *Agent) metrics() api.Metrics {
 		m.UptimeSeconds = uint64(up)
 	}
 
-	m.TempC = a.temperature()
+	m.Sensors = a.sensors()
+	for _, s := range m.Sensors {
+		if s.C > m.TempC {
+			m.TempC = s.C
+		}
+	}
 
 	var st syscall.Statfs_t
 	if syscall.Statfs(a.hostPath("/"), &st) == nil {
@@ -91,15 +97,41 @@ func (a *Agent) metrics() api.Metrics {
 	return m
 }
 
-// temperature returns the hottest thermal zone in °C, or 0 when the device exposes none.
-func (a *Agent) temperature() float64 {
-	zones, _ := filepath.Glob(a.hostPath("/sys/class/thermal/thermal_zone*/temp"))
-	var hottest float64
-	for _, z := range zones {
-		milli, err := strconv.ParseFloat(readTrim(z), 64)
-		if err == nil && milli/1000 > hottest {
-			hottest = milli / 1000
+// sensors returns every temperature the kernel exposes: thermal zones (the SoC on a Pi) and
+// hwmon chips (NVMe drives, add-in boards). Readings of zero or less are ignored.
+func (a *Agent) sensors() []api.TempSensor {
+	var out []api.TempSensor
+	seen := map[string]int{}
+	add := func(name string, file string) {
+		milli, err := strconv.ParseFloat(readTrim(file), 64)
+		if err != nil || milli <= 0 || milli > 200000 {
+			return
 		}
+		if name == "" {
+			name = "sensor"
+		}
+		seen[name]++
+		if n := seen[name]; n > 1 {
+			name = fmt.Sprintf("%s %d", name, n)
+		}
+		out = append(out, api.TempSensor{Name: name, C: milli / 1000})
 	}
-	return hottest
+	zones, _ := filepath.Glob(a.hostPath("/sys/class/thermal/thermal_zone*/temp"))
+	for _, z := range zones {
+		add(readTrim(filepath.Join(filepath.Dir(z), "type")), z)
+	}
+	inputs, _ := filepath.Glob(a.hostPath("/sys/class/hwmon/hwmon*/temp*_input"))
+	for _, in := range inputs {
+		dir := filepath.Dir(in)
+		name := readTrim(filepath.Join(dir, "name"))
+		// A thermal zone often mirrors the same chip; skip chips already reported that way.
+		if name == "cpu_thermal" || name == "soc_thermal" {
+			continue
+		}
+		if label := readTrim(strings.TrimSuffix(in, "_input") + "_label"); label != "" {
+			name += " " + label
+		}
+		add(name, in)
+	}
+	return out
 }

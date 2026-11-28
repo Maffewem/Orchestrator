@@ -526,3 +526,20 @@ func TestIdentifyRunsUntilStopped(t *testing.T) {
 	}
 	c.identifyOff() // stopping twice is harmless
 }
+
+func TestPulseLevel(t *testing.T) {
+	if pulseLevel(0) != 0 {
+		t.Fatal("a breath starts dark")
+	}
+	if got := pulseLevel(pulsePeriod / 2); got < 0.99 {
+		t.Fatalf("peak %v", got)
+	}
+	prev := -1.0
+	for d := time.Duration(0); d <= pulsePeriod/2; d += pulseStep {
+		if l := pulseLevel(d); l < prev {
+			t.Fatalf("fade up is not smooth at %v", d)
+		} else {
+			prev = l
+		}
+	}
+}

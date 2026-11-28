@@ -77,7 +77,7 @@ export default function OverviewPage() {
             </Empty>
           </Card>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {devices.data.map((d) => (
               <Link key={d.id} to={`/devices/${d.id}`}>
                 <Card className="h-full overflow-hidden transition-shadow hover:shadow-md">
@@ -112,7 +112,7 @@ export default function OverviewPage() {
         )}
       </Section>
 
-      <div className="grid gap-8 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <Section title="Recent deployments">
             <Card>

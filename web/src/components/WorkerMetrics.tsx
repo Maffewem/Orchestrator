@@ -387,7 +387,7 @@ function ContainerResources({ m, loading }: { m: WorkerMetrics | null; loading: 
           sub={!on("volumes") ? undefined : m?.volumes.length ? m.volumes.map((v) => v.name).join(", ") : "No named volumes measured yet"}
         />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {on("cpu") && (
           <Panel loading={loading} empty={!cpuVals.length} title="CPU" subtitle="Percent of one core; 200% is two full cores">
             <LineChart max={niceMax(cpuVals, 10)} format={fixed(0, "%")} series={[{ label: "CPU", color: "#0051c3", values: cpuVals }]} />
@@ -460,7 +460,7 @@ function ProxyTraffic({ m, loading }: { m: WorkerMetrics | null; loading: boolea
         <Tile loading={loading} label="Response time p50" value={on("proxy_latency") ? fmtMs(t?.p50) : "Off"} sub={on("proxy_latency") ? `p95 ${fmtMs(t?.p95)}` : undefined} />
         <Tile loading={loading} label={on("proxy_bandwidth") ? "Bandwidth" : "Response time p99"} value={on("proxy_bandwidth") ? (t?.bytes != null ? bytes(t.bytes) : "—") : fmtMs(p?.p99)} sub={on("proxy_bandwidth") ? "Sent to visitors" : undefined} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel loading={loading} empty={!s.length} title="Requests per minute">
           <LineChart unit="" format={fixed(0)} max={niceMax(s.map((x) => perMin(x.requests)), 1)} series={[{ label: "Requests", color: "#0051c3", values: s.map((x) => perMin(x.requests)) }]} />
         </Panel>
@@ -521,7 +521,7 @@ function WorkerRequests({ pm, loading }: { pm: ProjectMetrics | null; loading: b
         <Tile loading={loading} label="CPU time p50" value={fmtMs(t?.cpu_p50)} sub={t?.cpu_p99 != null ? `p99 ${fmtMs(t.cpu_p99)}` : undefined} />
         <Tile loading={loading} label="Wall time p50" value={fmtMs(t?.wall_p50)} sub={t?.wall_p99 != null ? `p99 ${fmtMs(t.wall_p99)}` : "Real time per request, including waits"} />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel loading={loading} empty={!s.length} title="Requests" subtitle="Per hour">
           <LineChart
             unit=""

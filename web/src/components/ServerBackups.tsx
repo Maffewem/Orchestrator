@@ -125,7 +125,7 @@ function Schedule({ saved, nextRun, dir, place, onSaved }: { saved: ServerBackup
   return (
     <section aria-labelledby="backup-schedule" className="space-y-3 border-t border-neutral-200 pt-4">
       <h3 id="backup-schedule" className="text-sm font-medium">Schedule</h3>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Run">
           <select className={inputClass} value={policy.mode} onChange={(e) => edit({ mode: e.target.value as ServerBackupPolicy["mode"] })}>
             <option value="off">Never</option>
@@ -196,7 +196,7 @@ function CloudSignIn({ onMessage }: { onMessage: (m: { ok: boolean; text: string
           <summary className="cursor-pointer text-sm font-medium">{p.name}{p.client_id && p.secret_set ? " · app saved" : ""}</summary>
           <div className="mt-2 space-y-3">
             <p className="text-xs text-neutral-500">{p.setup} <a className="underline" href={p.console} target="_blank" rel="noreferrer">Open the developer console</a>.</p>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Client ID"><input className={inputClass} value={get(p).client_id} onChange={(e) => setDraft({ ...draft, [p.id]: { ...get(p), client_id: e.target.value } })} /></Field>
               <Field label="Client secret"><SecretInput className={inputClass} value={get(p).client_secret} placeholder={p.secret_set ? "Saved. Leave blank to keep" : ""} onChange={(e) => setDraft({ ...draft, [p.id]: { ...get(p), client_secret: e.target.value } })} /></Field>
             </div>
@@ -276,7 +276,7 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
           )}
           {d.last_error && <ErrorNote>{d.last_error}</ErrorNote>}
           {d.kind === "s3" && (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Endpoint" hint="For R2: https://<account>.r2.cloudflarestorage.com"><input className={inputClass} value={d.endpoint ?? ""} onChange={(e) => set(i, { endpoint: e.target.value })} placeholder="https://s3.amazonaws.com" /></Field>
               <Field label="Region" hint="auto for R2, otherwise e.g. eu-west-2"><input className={inputClass} value={d.region ?? ""} onChange={(e) => set(i, { region: e.target.value })} /></Field>
               <Field label="Bucket"><input className={inputClass} value={d.bucket ?? ""} onChange={(e) => set(i, { bucket: e.target.value })} /></Field>
@@ -300,7 +300,7 @@ function Destinations({ dests, onChanged }: { dests: BackupDest[]; onChanged: ()
             </div>
           )}
           {d.kind === "device" && (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Device">
                 <select className={inputClass} value={d.device_id ?? ""} onChange={(e) => set(i, { device_id: e.target.value })}>
                   <option value="">Choose a device</option>

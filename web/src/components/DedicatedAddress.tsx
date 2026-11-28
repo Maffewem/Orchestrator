@@ -139,7 +139,7 @@ export default function DedicatedAddress({
       )}
       {value && (
         <div className="mt-4 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Address">
               <select className={inputClass} disabled={!canEdit} value={value.mode} onChange={(e) => set({ mode: e.target.value as DedicatedIP["mode"] })}>
                 <option value="dhcp">From DHCP (reserve it in the router)</option>
@@ -161,7 +161,7 @@ export default function DedicatedAddress({
           </div>
           <details className="text-sm" open={!!value.vlan || !!value.host_ip || undefined}>
             <summary className="cursor-pointer text-neutral-600">Advanced{value.vlan ? ` · VLAN ${value.vlan}` : ""}</summary>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Ports on this address" hint="One per line, like 80:80. Leave empty to use the project's ports.">
                 <textarea
                   className={inputClass}
@@ -211,7 +211,7 @@ export default function DedicatedAddress({
               </Field>
             </div>
             <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <Field label="VLAN ID" hint="Optional. Leave empty for the device's normal network.">
                   <input
                     className={inputClass}

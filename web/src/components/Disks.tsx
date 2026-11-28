@@ -412,7 +412,7 @@ function ShareDialog({ d, onClose }: { d: Device; onClose: () => void }) {
             <input className={inputClass + " font-mono"} value={mountpoint} onChange={(e) => setMountpoint(e.target.value)} />
           </Field>
           {kind === "smb" && (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Username" hint="Leave empty for a guest share.">
                 <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
               </Field>

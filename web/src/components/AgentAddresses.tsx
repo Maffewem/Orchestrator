@@ -104,7 +104,7 @@ export function AgentAddresses({ urls, onSaved }: { urls: string[]; onSaved: () 
           <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
             Suggested:
             {suggestions.map((u) => (
-              <button key={u} type="button" className="rounded-md border border-neutral-200 px-2 py-1 font-mono hover:bg-neutral-100" onClick={() => save([...urls, u])}>
+              <button key={u} type="button" className="rounded-md border border-neutral-200 px-2 py-2 sm:py-1 font-mono hover:bg-neutral-100" onClick={() => save([...urls, u])}>
                 + {u}
               </button>
             ))}
@@ -117,7 +117,7 @@ export function AgentAddresses({ urls, onSaved }: { urls: string[]; onSaved: () 
         <h4 className="font-medium">How each device connects</h4>
         <ul className="mt-3 divide-y divide-neutral-100 rounded-lg border border-neutral-200">
           {v.devices.map((d) => (
-            <li key={d.id} className="grid gap-x-4 gap-y-1 px-3 py-2.5 sm:grid-cols-[10rem_1fr_auto] sm:items-center">
+            <li key={d.id} className="grid grid-cols-1 gap-x-4 gap-y-1 px-3 py-2.5 sm:grid-cols-[10rem_1fr_auto] sm:items-center">
               <Link to={`/devices/${d.id}`} className="flex items-center gap-2 font-medium hover:underline">
                 <StatusDot status={d.status} /> {d.name}
               </Link>

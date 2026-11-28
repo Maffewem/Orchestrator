@@ -186,7 +186,7 @@ export default function ProjectForm({
       {!isCF && <p className="rounded-lg bg-neutral-50 px-4 py-2 text-sm text-neutral-600">Changes to the source, ports, address and environment are saved now but only take effect when the worker is redeployed. Redeploy runs the same source again with the new settings; a new commit or version is deployed from the Deployments tab.</p>}
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Source</legend>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { type: "github" as const, icon: Github, title: "GitHub repository", sub: "Build a Dockerfile or Node.js project on the device, redeploy on push" },
             { type: "image" as const, icon: Package, title: "Container image", sub: "Pull an image from Docker Hub or any registry" },
@@ -220,7 +220,7 @@ export default function ProjectForm({
 
         {source.type === "github" || isCF ? (
           <div className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field
                 label="Repository"
                 hint={connected ? "Repositories your GitHub token can see." : "Public repositories work without it. Connect GitHub in Settings for private repositories."}
@@ -255,7 +255,7 @@ export default function ProjectForm({
             {isCF && (
               <div>
                 <p className="mb-1.5 text-sm font-medium">Where does it go?</p>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {[
                     { kind: "pages" as const, icon: Globe, title: "Cloudflare Pages", sub: "A static site or front end: the build output folder is uploaded" },
                     { kind: "worker" as const, icon: Server, title: "Cloudflare Worker", sub: "Server-side code on Cloudflare's edge: one bundled JavaScript module" },
@@ -280,7 +280,7 @@ export default function ProjectForm({
             {!isCF && (
             <div>
               <p className="mb-1.5 text-sm font-medium">What are you building?</p>
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 {BUILD_KINDS.map((k) => (
                   <button
                     type="button"
@@ -331,7 +331,7 @@ export default function ProjectForm({
                   </Panel>
                   {isCF ? (
                     <Panel title="Build configuration" sub="Runs on this server in a fresh checkout. Anything left empty is detected.">
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <Field label="Install command" hint="Empty: npm ci, pnpm or yarn, chosen from your lock file.">
                           <input className={inputClass} placeholder="npm ci" value={node?.install ?? ""} onChange={(e) => setNode({ install: e.target.value })} />
                         </Field>
@@ -359,7 +359,7 @@ export default function ProjectForm({
                     </Panel>
                   ) : (
                   <Panel title="Build configuration">
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       {node && (
                         <Field label="Build command" hint="Empty: npm run build, if package.json has a build script.">
                           <input className={inputClass} placeholder="npm run build" value={node.build ?? ""} onChange={(e) => setNode({ build: e.target.value })} />
@@ -382,7 +382,7 @@ export default function ProjectForm({
                   </Panel>
                   )}
                   <Panel title="Build watch paths" sub="Only commits that change a matching file trigger a build.">
-                    <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <Field as="div" label="Include paths">
                         <ChipInput value={source.include ?? []} onChange={(v) => set({ include: v })} placeholder="* (all files)" />
                       </Field>
@@ -394,7 +394,7 @@ export default function ProjectForm({
                   {node && (
                     <details className="rounded-xl border border-neutral-200 bg-white">
                       <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium">Advanced</summary>
-                      <div className="grid gap-4 border-t border-neutral-200 p-5 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 border-t border-neutral-200 p-5 sm:grid-cols-2">
                         <Field label="Install command" hint="Empty: npm ci, pnpm or yarn, chosen from your lock file.">
                           <input className={inputClass} placeholder="npm ci" value={node.install ?? ""} onChange={(e) => setNode({ install: e.target.value })} />
                         </Field>
@@ -423,7 +423,7 @@ export default function ProjectForm({
                   <div className={cx("space-y-4", !previewsOn && "opacity-50")}>
                     <p className="text-xs text-neutral-500">Anything left empty uses the Production setting shown as its placeholder.</p>
                     <Panel title="Build configuration">
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         {(node || isCF) && (
                           <Field label="Build command">
                             <input className={inputClass} placeholder={node?.build || "npm run build"} value={pv.build ?? ""} onChange={(e) => setPv({ build: e.target.value })} />
@@ -440,7 +440,7 @@ export default function ProjectForm({
                       </div>
                     </Panel>
                     <Panel title="Build watch paths">
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <Field as="div" label="Include paths">
                           <ChipInput value={pv.include ?? []} onChange={(v) => setPv({ include: v })} placeholder={source.include?.join(", ") || "* (all files)"} />
                         </Field>
@@ -472,7 +472,7 @@ export default function ProjectForm({
             </div>
             {source.repo ? (
               <>
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <Field label="Repository" hint="Public repositories work without it. Connect GitHub in Settings for private repositories.">
                     <input className={inputClass} placeholder="owner/repository" value={source.repo.trim()} onChange={(e) => set({ repo: e.target.value || " " })} />
                   </Field>
@@ -519,7 +519,7 @@ export default function ProjectForm({
 
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">Project</legend>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Project name" hint={source.type === "compose" ? "Lowercase letters, digits and dashes. Also the Compose project name." : "Lowercase letters, digits and dashes. Also used as the container name."}>
             <input className={inputClass} placeholder="my-service" value={name} onChange={(e) => setName(e.target.value)} />
             {renamedCF && (
@@ -546,7 +546,7 @@ export default function ProjectForm({
       <fieldset className="space-y-4">
         <legend className="mb-3 text-base font-semibold">{source.type === "compose" ? "Environment" : isCF ? "Build environment" : "Runtime"}</legend>
         {source.type !== "compose" && !isCF && (<>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Ports" hint={node ? "host:container. Empty: 8080:80 for a static site, 3000:3000 for a Node server (it gets PORT set to the container port)." : "One per line: host:container, e.g. 8080:80 or 53:53/udp."}>
             <textarea className={cx(inputClass, "font-mono")} rows={3} value={ports} onChange={(e) => setPorts(e.target.value)} />
           </Field>

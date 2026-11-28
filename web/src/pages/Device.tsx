@@ -330,7 +330,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
   const s = samples.data ?? [];
   const m = d.metrics;
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
         {d.issues.length > 0 && (
           <Card className="border-amber-200 bg-amber-50/50">
@@ -725,7 +725,7 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
           <p>No workers are running on this device. New workers will be placed on other devices.</p>
         )}
         {!moving && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Reason (optional)">
               <input className={inputClass} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Replacing the SD card" />
             </Field>

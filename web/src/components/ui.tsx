@@ -241,7 +241,7 @@ export function RefreshButton({ onClick, busy, label = "Refresh" }: { onClick: (
       disabled={busy}
       aria-label={label}
       title={label}
-      className="inline-flex size-9 items-center justify-center rounded-lg border border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-70"
+      className="inline-flex size-11 sm:size-9 items-center justify-center rounded-lg border border-neutral-300 bg-white text-neutral-600 hover:bg-neutral-50 focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-70"
     >
       <RefreshCw className={cx("size-4", busy && "animate-spin motion-reduce:animate-none")} />
     </button>
@@ -316,19 +316,19 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
     };
   }, []);
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/30 p-0 sm:items-start sm:p-10" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain bg-black/30 p-0 sm:p-10" onMouseDown={onClose}>
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className={cx("w-full rounded-t-xl bg-white shadow-xl outline-none sm:rounded-xl", wide ? "max-w-3xl" : "max-w-lg")}
+        className={cx("mt-auto w-full min-w-0 rounded-t-xl bg-white pb-[env(safe-area-inset-bottom)] shadow-xl outline-none sm:mt-0 sm:rounded-xl sm:pb-0", wide ? "max-w-3xl" : "max-w-lg")}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-3.5">
-          <h2 id={titleId} className="font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded-md p-1 text-neutral-500 hover:bg-neutral-100" aria-label="Close">
+          <h2 id={titleId} className="min-w-0 break-words font-semibold">{title}</h2>
+          <button onClick={onClose} className="-mr-2 shrink-0 rounded-md p-2.5 text-neutral-500 hover:bg-neutral-100 sm:-mr-1 sm:p-1" aria-label="Close">
             <X className="size-4" />
           </button>
         </div>

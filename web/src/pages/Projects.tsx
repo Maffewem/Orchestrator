@@ -144,7 +144,7 @@ export default function ProjectsPage() {
           </Empty>
         </Card>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {data.map((p) => (
             <div key={p.id} className="relative">
             <Link to={`/projects/${p.id}`}>

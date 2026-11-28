@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -25,6 +26,13 @@ var severityRank = map[string]int{"critical": 0, "warning": 1, "info": 2}
 func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	out := []Alert{}
+
+	// A dashboard reached over plain HTTP sends sign-in tokens in the clear. Localhost is exempt.
+	if !requestIsHTTPS(r) && !isLoopbackHost(r.Host) {
+		out = append(out, Alert{ID: "security:http", Severity: "warning", Title: "The dashboard is served over plain HTTP",
+			Detail: "Anyone on the network path can read sign-in tokens and, unless commands are signed, tamper with what devices are told to run. Turn on HTTPS in Settings, or put the dashboard behind an HTTPS proxy or tunnel.",
+			Link:   "/settings", At: time.Now()})
+	}
 
 	// Devices: one alert per device, with all of its issues combined.
 	devices, err := s.store.ListDevices(ctx)
@@ -106,6 +114,17 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The dashboard's own certificate, long before browsers start refusing it.
+	if id := identityFrom(r); id != nil && id.Role == store.RoleAdmin {
+		if h := s.certHealth(); h.Level != "ok" {
+			title := "Dashboard certificate needs attention"
+			if h.Days < 0 {
+				title = "Dashboard certificate has expired"
+			}
+			out = append(out, Alert{ID: "https-cert", Severity: h.Level, Title: title, Detail: h.Message, Link: "/settings"})
+		}
+	}
+
 	sort.SliceStable(out, func(i, j int) bool {
 		if a, b := severityRank[out[i].Severity], severityRank[out[j].Severity]; a != b {
 			return a < b
@@ -120,4 +139,16 @@ func shortSHA(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+func isLoopbackHost(hostport string) bool {
+	h, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		h = hostport
+	}
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(h, "[]"))
+	return ip != nil && ip.IsLoopback()
 }

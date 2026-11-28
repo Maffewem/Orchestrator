@@ -65,7 +65,11 @@ func signIn(t *testing.T, h *harness, f *fakeIDP, provider string) (string, stri
 		t.Fatalf("start redirected to %s", loc)
 	}
 	f.nonce = loc.Query().Get("nonce")
-	resp, err = c.Get(h.ts.URL + "/api/auth/sso/" + provider + "/callback?code=abc&state=" + url.QueryEscape(loc.Query().Get("state")))
+	req, _ := http.NewRequest("GET", h.ts.URL+"/api/auth/sso/"+provider+"/callback?code=abc&state="+url.QueryEscape(loc.Query().Get("state")), nil)
+	for _, ck := range resp.Cookies() {
+		req.AddCookie(ck) // the browser that started the sign-in sends its cookie back
+	}
+	resp, err = c.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,5 +170,43 @@ func TestSSO(t *testing.T) {
 	bad.GitHub.Orgs = nil
 	if code := h.do("PUT", "/api/settings/sso", adminToken, bad, nil); code != http.StatusBadRequest {
 		t.Fatalf("empty allow-list: %d", code)
+	}
+}
+
+// A callback opened in a browser that did not start the sign-in (login CSRF) is refused, and the
+// flow can't then be completed by the real browser either.
+func TestSSOCallbackNeedsStartingBrowser(t *testing.T) {
+	h := newHarness(t)
+	f := newFakeIDP(t)
+	h.srv.ssoGitHubURL, h.srv.githubAPI = f.URL, f.URL
+	cfg := SSOConfig{OIDC: SSOOIDC{Enabled: true, Name: "IdP", Issuer: f.URL, ClientID: "cid", ClientSecret: "shh", Domains: []string{"example.com"}, DefaultRole: "viewer"}}
+	if code := h.do("PUT", "/api/settings/sso", adminToken, cfg, nil); code != http.StatusOK {
+		t.Fatalf("save: %d", code)
+	}
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Get(h.ts.URL + "/api/auth/sso/oidc/start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	f.nonce = loc.Query().Get("nonce")
+	if len(resp.Cookies()) == 0 {
+		t.Fatal("start did not set the browser-binding cookie")
+	}
+	cb := h.ts.URL + "/api/auth/sso/oidc/callback?code=abc&state=" + url.QueryEscape(loc.Query().Get("state"))
+	resp, err = c.Get(cb) // a different browser: no cookie
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest, _ := url.Parse(resp.Header.Get("Location"))
+	if dest.Query().Get("sso") != "" || dest.Query().Get("sso_error") == "" {
+		t.Fatalf("callback without the cookie was accepted: %s", dest)
+	}
+	req, _ := http.NewRequest("GET", cb, nil)
+	req.AddCookie(&http.Cookie{Name: ssoCookie, Value: loc.Query().Get("state")})
+	resp, _ = c.Do(req) // the flow was dropped by the refused attempt
+	dest, _ = url.Parse(resp.Header.Get("Location"))
+	if dest.Query().Get("sso") != "" {
+		t.Fatalf("a dropped flow was completed: %s", dest)
 	}
 }

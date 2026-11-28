@@ -70,6 +70,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 	h.Network = a.network()
 	h.Tunnel = a.tunnelInfo()
 	h.Power = a.powerSource()
+	h.Identify = a.identifyInfo()
 	return h
 }
 

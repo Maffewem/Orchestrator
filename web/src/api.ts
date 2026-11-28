@@ -25,6 +25,8 @@ export interface HostInfo {
   capabilities?: string[];
   /** A Compute Blade's supply, from GPIO23 (only while its LED profile is "blade"). */
   power?: { source: "poe-plus" | "5v"; max_watts: number };
+  /** Whether Identify can flash an LED on this device; absent from agents that predate it. */
+  identify?: { available: boolean; method?: string; reason?: string };
   /** Each address with its interface, subnet, gateway and whether it is on Wi-Fi. */
   network?: NetAddr[];
 }
@@ -1177,6 +1179,7 @@ export interface HTTPSView {
   can_publish: boolean;
   publish_note?: string;
   hsts_blocked?: string;
+  expiry?: { level: "ok" | "warning" | "critical"; days: number; message?: string };
 }
 
 export interface HTTPSTest {

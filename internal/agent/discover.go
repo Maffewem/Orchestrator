@@ -79,7 +79,7 @@ func (a *Agent) learn(res api.HeartbeatResponse) {
 		a.followMove(res.MoveTo)
 	}
 	changed := false
-	if res.ServerKey != "" && res.ServerKey != a.state.ServerKey {
+	if res.ServerKey != "" && res.ServerKey != a.state.ServerKey && (a.state.ServerKey == "" || repinAllowed()) {
 		a.state.ServerKey = res.ServerKey
 		changed = true
 	}

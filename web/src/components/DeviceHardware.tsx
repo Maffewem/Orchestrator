@@ -29,12 +29,26 @@ export function IdentifyToggle({ d, onChanged, compact }: { d: Device; onChanged
   const isAdmin = useCan("admin");
   const [busy, setBusy] = useState(false);
   const identifying = useIdentifying(d);
-  if (!isAdmin || d.status !== "online" || !hasCap(d, "led")) return null;
+  if (!isAdmin || d.status !== "online") return null;
+  const info = d.host.identify;
+  // The agent says whether it found an LED it can flash. Without an answer (an older agent) the capability decides.
+  if (info ? !info.available : !hasCap(d, "led")) {
+    // The device page says why; the crowded list stays quiet.
+    if (compact) return null;
+    return (
+      <span className="inline-flex items-center gap-2">
+        <Button icon={<Lightbulb className="size-4" />} disabled>
+          Identify
+        </Button>
+        <span className="max-w-xs text-xs text-neutral-500">{info?.reason || "Update the agent to flash this device's LEDs."}</span>
+      </span>
+    );
+  }
   return (
     <Button
       icon={<Lightbulb className="size-4" />}
       loading={busy}
-      title={identifying ? "Stop flashing the LEDs" : "Flash the LEDs until switched off (stops by itself after 30 minutes)"}
+      title={identifying ? "Stop flashing the LEDs" : `Flash ${info?.method ?? "the LEDs"} until switched off (stops by itself after 30 minutes)`}
       onClick={async (e) => {
         e.preventDefault();
         e.stopPropagation();

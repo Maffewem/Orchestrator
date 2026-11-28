@@ -130,7 +130,15 @@ type cfRecord struct {
 	Name    string `json:"name"`
 	Content string `json:"content"`
 	Proxied bool   `json:"proxied"`
+	Comment string `json:"comment"`
 }
+
+// dnsManagedComment marks the DNS records Orchestrator created. A record without it was made
+// by a person, so it is never overwritten: whoever can add a domain to a project (operators
+// included) must not be able to repoint an existing hostname in the account's zones.
+const dnsManagedComment = "Managed by Orchestrator"
+
+func (r cfRecord) managed() bool { return r.Comment == dnsManagedComment }
 
 // cfZoneFor finds the Cloudflare zone that contains host by trying ever shorter suffixes.
 func (s *Server) cfZoneFor(ctx context.Context, token, host string) (*cfZone, error) {
@@ -196,8 +204,10 @@ func (s *Server) cfUpsertA(ctx context.Context, tok, zone, host, ip string, prox
 			a = &recs[i]
 		}
 	}
-	want := map[string]any{"type": "A", "name": host, "content": ip, "proxied": proxied, "ttl": 1, "comment": "Managed by Orchestrator"}
+	want := map[string]any{"type": "A", "name": host, "content": ip, "proxied": proxied, "ttl": 1, "comment": dnsManagedComment}
 	switch {
+	case a != nil && !a.managed() && (a.Content != ip || a.Proxied != proxied):
+		return fmt.Errorf("an A record for this name already exists that Orchestrator did not create (%s); leaving it alone. Delete or edit it in Cloudflare if it should point at this device", a.Content)
 	case a == nil:
 		if err := s.cfCall(ctx, tok, http.MethodPost, "/zones/"+zone+"/dns_records", want, nil); err != nil {
 			return err

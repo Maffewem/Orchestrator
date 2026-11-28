@@ -172,5 +172,97 @@ func TestCheckSnapshotKeepsBackupKey(t *testing.T) {
 	os.WriteFile(bad, []byte("not a database at all, just text padding padding padding"), 0o600)
 	if CheckSnapshot(bad) == nil {
 		t.Fatal("a non-database must be refused")
+
+func TestStepLogIsCappedAndEventsPruned(t *testing.T) {
+	st, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	for i := 0; i < 10; i++ {
+		st.AddEvent(ctx, "", "info", "k", "m")
+	}
+	if n, err := st.PruneEvents(ctx, 3); err != nil || n != 7 {
+		t.Fatalf("pruned %d, %v", n, err)
+	}
+	if ev, _ := st.ListEvents(ctx, "", 100); len(ev) != 3 {
+		t.Fatalf("kept %d events", len(ev))
+	}
+	if n, err := st.PruneEvents(ctx, 3); err != nil || n != 0 {
+		t.Fatalf("second prune %d, %v", n, err)
+	}
+}
+
+func TestStepLogStopsGrowing(t *testing.T) {
+	st, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	dev, _, err := st.CreateDevice(ctx, "dev", nil, api.HostInfo{Hostname: "dev"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := newProject()
+	pr.DeviceID = dev.ID
+	if err := st.CreateProject(ctx, pr); err != nil {
+		t.Fatal(err)
+	}
+	d, err := st.CreateDeployment(ctx, NewDeployment{ProjectID: pr.ID, DeviceID: dev.ID, Trigger: "manual", Spec: api.DeploySpec{Service: "x", Image: "i"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := []api.LogLine{{Text: strings.Repeat("x", 100000)}}
+	for i := 0; i < 40; i++ { // 4 MB offered
+		if err := st.UpdateStep(ctx, dev.ID, d.ID, 0, api.StepUpdate{Lines: chunk}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := st.GetDeployment(ctx, d.ID)
+	n := len(got.Steps[0].Log)
+	if n < maxStepLog || n > maxStepLog+200000 {
+		t.Fatalf("log is %d bytes, want about %d", n, maxStepLog)
+	}
+}
+
+func TestMoreSettingsSealedAndOldPlaintextMigrated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "o.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	raw := map[string]string{"cloudflare_deploy_token": "cf-deploy", "tunnel:dev_1": `{"token":"tun-secret"}`, "ha:state": `{"token":"peer-secret"}`, "backup_oauth_clients": `{"google":{"client_secret":"g"}}`}
+	for k, v := range raw {
+		if _, err := st.db.Exec(`INSERT INTO settings(key, value) VALUES(?, ?)`, k, v); err != nil { // as an older version stored them
+			t.Fatal(err)
+		}
+	}
+	st.Close()
+	st, err = Open(path) // opening seals what is still plain
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for k, v := range raw {
+		var stored string
+		st.db.QueryRow(`SELECT value FROM settings WHERE key = ?`, k).Scan(&stored)
+		if !strings.HasPrefix(stored, sealPrefix) || strings.Contains(stored, "secret") {
+			t.Errorf("%s not sealed at rest: %q", k, stored)
+		}
+		if got, _ := st.GetSetting(ctx, k); got != v {
+			t.Errorf("%s reads back %q, want %q", k, got, v)
+		}
+	}
+	st.SetSetting(ctx, "tunnel:dev_2", "new-secret")
+	var stored string
+	st.db.QueryRow(`SELECT value FROM settings WHERE key = 'tunnel:dev_2'`).Scan(&stored)
+	if !strings.HasPrefix(stored, sealPrefix) {
+		t.Errorf("new tunnel setting stored in the clear: %q", stored)
+	}
+	if m, _ := st.ListSettingsWithPrefix(ctx, "tunnel:"); m["tunnel:dev_2"] != "new-secret" {
+		t.Errorf("prefix listing = %v", m)
 	}
 }

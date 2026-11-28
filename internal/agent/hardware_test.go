@@ -543,3 +543,23 @@ func TestPulseLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestIdentifyInfo(t *testing.T) {
+	root := fakeLEDs(t)
+	a := &Agent{}
+	a.devhwOnce.Do(func() {})
+	a.devhw = &hardware{leds: newLEDCtl(t.TempDir(), root, nil)}
+	if in := a.identifyInfo(); !in.Available || in.Method == "" {
+		t.Fatalf("a Pi with ACT/PWR should be able to identify: %+v", in)
+	}
+	// No kernel LEDs at all: unavailable, with a reason.
+	a.devhw = &hardware{leds: newLEDCtl(t.TempDir(), t.TempDir(), nil)}
+	if in := a.identifyInfo(); in.Available || in.Reason == "" {
+		t.Fatalf("a device with no LEDs must say why: %+v", in)
+	}
+	// A blade profile without /dev/pio0 (a CM4 blade) is unsupported and says so.
+	a.devhw.leds.setConfig(api.LEDConfig{Profile: "blade", Enabled: true})
+	if in := a.identifyInfo(); in.Available || !strings.Contains(in.Reason, "/dev/pio0") {
+		t.Fatalf("blade without PIO: %+v", in)
+	}
+}

@@ -351,11 +351,14 @@ func (s *Server) cfUpsertTunnelCNAME(ctx context.Context, tok, host, target stri
 	if err := s.cfCall(ctx, tok, http.MethodGet, "/zones/"+z.ID+"/dns_records?name="+url.QueryEscape(host), nil, &recs); err != nil {
 		return err
 	}
-	want := map[string]any{"type": "CNAME", "name": host, "content": target, "proxied": true, "ttl": 1, "comment": "Managed by Orchestrator"}
+	want := map[string]any{"type": "CNAME", "name": host, "content": target, "proxied": true, "ttl": 1, "comment": dnsManagedComment}
 	for _, rec := range recs {
 		switch {
 		case rec.Type == "CNAME" && rec.Content == target && rec.Proxied:
 			return nil
+		case rec.Type == "CNAME" && !rec.managed() && !strings.HasSuffix(strings.ToLower(rec.Content), ".cfargotunnel.com"):
+			// Not ours and not a tunnel record: it may be a live site. Repointing it is an administrator's decision.
+			return fmt.Errorf("a CNAME record for this name already exists that Orchestrator did not create (it points at %s); leaving it alone. Delete it in Cloudflare if this hostname should use the tunnel", rec.Content)
 		case rec.Type == "CNAME":
 			return s.cfCall(ctx, tok, http.MethodPut, "/zones/"+z.ID+"/dns_records/"+rec.ID, want, nil)
 		default:

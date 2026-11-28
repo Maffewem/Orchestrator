@@ -67,6 +67,9 @@ type httpsView struct {
 	PublishedHost string `json:"published_host,omitempty"`
 	CanPublish    bool   `json:"can_publish"`
 	PublishNote   string `json:"publish_note,omitempty"`
+	// Expiry grades the certificate (ok | warning | critical) so the settings page can say
+	// when it needs attention before browsers start refusing it.
+	Expiry certHealth `json:"expiry"`
 	// HSTSBlocked is set (and HSTS left off) when switching HSTS on was refused as unsafe.
 	HSTSBlocked string `json:"hsts_blocked,omitempty"`
 }
@@ -78,6 +81,9 @@ type httpsState struct {
 	cfg  HTTPSConfig
 	err  string
 	leaf *x509.Certificate
+	// autoLeaf is the certificate read back from the listener in automatic (TLS-ALPN) mode,
+	// where the certificate manager keeps the certificate to itself.
+	autoLeaf *x509.Certificate
 
 	dns       *dnsCertManager // set while the DNS challenge is used
 	cancelDNS context.CancelFunc
@@ -164,7 +170,7 @@ func (s *Server) applyHTTPS(cfg HTTPSConfig) error {
 		st.srv.Close()
 		st.srv, st.ln = nil, nil
 	}
-	st.cfg, st.leaf, st.err = cfg, leaf, ""
+	st.cfg, st.leaf, st.err, st.autoLeaf = cfg, leaf, "", nil
 	st.cancelDNS, st.dns = cancelDNS, dnsMgr
 	if tlsConf == nil {
 		return nil
@@ -175,7 +181,7 @@ func (s *Server) applyHTTPS(cfg HTTPSConfig) error {
 		st.err = "could not listen on " + cfg.Addr + ": " + err.Error()
 		return errors.New(st.err)
 	}
-	srv := &http.Server{Handler: s.Handler(), TLSConfig: tlsConf, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: s.Handler(), TLSConfig: tlsConf, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	st.srv, st.ln = srv, ln
 	go func() {
 		if err := srv.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -196,6 +202,8 @@ func (s *Server) httpsAddr() string {
 
 // startHTTPS brings the saved HTTPS setup up at boot.
 func (s *Server) startHTTPS(ctx context.Context) {
+	s.recoverHTTPSFromEnv(ctx)
+	go s.certWatchLoop(ctx)
 	cfg := s.httpsConfig(ctx)
 	if cfg.Mode == "off" {
 		s.https.mu.Lock()
@@ -235,8 +243,12 @@ func (s *Server) httpsViewBase(ctx context.Context) httpsView {
 			v.Error = "Certificate not issued yet: " + e
 		}
 	}
-	if st.leaf != nil {
-		l := st.leaf
+	leaf := st.leaf
+	if leaf == nil {
+		leaf = st.autoLeaf
+	}
+	if leaf != nil {
+		l := leaf
 		v.Subject = l.Subject.CommonName
 		exp, nb := l.NotAfter, l.NotBefore
 		v.Expires, v.NotBefore = &exp, &nb
@@ -246,6 +258,13 @@ func (s *Server) httpsViewBase(ctx context.Context) httpsView {
 		}
 		v.SANs = certNames(l)
 		v.SelfSigned = isSelfSigned(l)
+	}
+	if v.Mode != "off" && v.Listening {
+		renewErr := ""
+		if st.dns != nil {
+			_, renewErr = st.dns.status()
+		}
+		v.Expiry = assessCert(v.Mode, leaf, renewErr, time.Now())
 	}
 	return v
 }
@@ -397,7 +416,7 @@ func (s *Server) httpsRedirectSafe(ctx context.Context) bool {
 	s.https.mu.Lock()
 	on, addr := s.https.ln != nil, s.https.cfg.Addr
 	s.https.mu.Unlock()
-	if !on {
+	if !on || s.certExpired() { // an expired certificate would turn the redirect into a lockout
 		return false
 	}
 	if self, _ := s.selfInfo(ctx); self != nil {
@@ -610,4 +629,11 @@ func hstsBlocker(res httpsTestResult, view httpsView) string {
 		return "the certificate is self-signed or from an authority browsers do not trust (" + res.TrustError + "); under HSTS the browser warning could not be clicked through and you would be locked out"
 	}
 	return ""
+}
+
+func unmarshalHTTPSConfig(raw string, c *HTTPSConfig) error { return json.Unmarshal([]byte(raw), c) }
+
+func marshalHTTPSConfig(c HTTPSConfig) string {
+	b, _ := json.Marshal(c)
+	return string(b)
 }

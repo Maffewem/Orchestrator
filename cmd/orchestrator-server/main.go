@@ -43,6 +43,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "import-backup" {
 		os.Exit(runImportBackup(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "https-reset" {
+		os.Exit(runHTTPSReset(os.Args[2:]))
+	}
 	addr := flag.String("addr", env("ORCH_ADDR", ":8080"), "listen address")
 	dbPath := flag.String("db", env("ORCH_DB", "orchestrator.db"), "SQLite database path")
 	downloads := flag.String("downloads", env("ORCH_DOWNLOADS", ""), "directory of agent binaries served to /install.sh")
@@ -93,7 +96,7 @@ func main() {
 	}
 
 	go srv.Run(ctx)
-	hs := &http.Server{Addr: *addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	hs := &http.Server{Addr: *addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -270,3 +273,33 @@ type multiFlag []string
 
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
+
+// runHTTPSReset is the command-line way back in after an HTTPS lockout, for example an expired
+// certificate while HSTS is on. It edits the settings in the database, so run it inside the
+// server container (docker exec orchestrator orchestrator-server https-reset) and restart the
+// container afterwards.
+func runHTTPSReset(args []string) int {
+	fs := flag.NewFlagSet("https-reset", flag.ExitOnError)
+	db := fs.String("db", env("ORCH_DB", "orchestrator.db"), "the server's database path")
+	off := fs.Bool("off", false, "also switch dashboard HTTPS off (default: only HSTS and the redirect)")
+	fs.Parse(args)
+	st, err := store.Open(*db)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "https-reset:", err)
+		return 1
+	}
+	defer st.Close()
+	done, err := server.ResetHTTPS(context.Background(), st, *off)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "https-reset:", err)
+		return 1
+	}
+	if len(done) == 0 {
+		fmt.Fprintln(os.Stderr, "nothing to change: HSTS and the redirect were already off")
+	}
+	for _, d := range done {
+		fmt.Fprintln(os.Stderr, "https-reset:", d)
+	}
+	fmt.Fprintln(os.Stderr, "restart the server container to apply it, then open http://<server IP address>:8080")
+	return 0
+}

@@ -56,6 +56,11 @@ export default function Login({ onLogin }: { onLogin: (token: string) => void })
           run(async () => done(await api.setup(token.trim(), username, password)));
         }}
       >
+        {window.location.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname) && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+            This page is not encrypted: the password and token you enter can be read on the network. Set up HTTPS in Settings right after signing in, or open this page through an HTTPS proxy or tunnel.
+          </p>
+        )}
         <p className="text-sm text-neutral-500">
           Create the first administrator. Paste the admin token the server printed on first start (or <code>ORCH_ADMIN_TOKEN</code>) to prove it's you.
         </p>

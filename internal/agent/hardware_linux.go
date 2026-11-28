@@ -53,6 +53,26 @@ func (a *Agent) powerSource() *api.PowerSource {
 	return hw.power.get()
 }
 
+// identifyInfo reports whether Identify has an LED it can really flash here, and what it would flash.
+func (a *Agent) identifyInfo() *api.IdentifyInfo {
+	if InContainer() {
+		return &api.IdentifyInfo{Reason: "The agent runs in a container, so it cannot reach the device's LEDs. Install it as a service on the device."}
+	}
+	st := a.hardware().leds.list()
+	if !st.Supported {
+		return &api.IdentifyInfo{Reason: st.Note}
+	}
+	for _, l := range st.LEDs {
+		if l.Role != "other" {
+			if st.Profile == api.LEDProfileBlade {
+				return &api.IdentifyInfo{Available: true, Method: "Compute Blade LEDs (blue pulse)"}
+			}
+			return &api.IdentifyInfo{Available: true, Method: "Activity and power LEDs"}
+		}
+	}
+	return &api.IdentifyInfo{Reason: "This device has no activity or power LED the agent can flash."}
+}
+
 // startHardware runs the LED rules and the SSH trial watcher.
 func (a *Agent) startHardware(ctx context.Context) {
 	if InContainer() {

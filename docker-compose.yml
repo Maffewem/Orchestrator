@@ -15,6 +15,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     group_add:
       - "${DOCKER_GID:-0}"
+    # The server needs no extra privileges: it runs as an unprivileged user and listens on 8080.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     # environment:
     #   ORCH_ADMIN_TOKEN: change-me
 

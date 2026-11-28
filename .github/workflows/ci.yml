@@ -16,6 +16,8 @@ jobs:
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test -race ./...
+      # Bug-finding checks only (SA*); style checks are not enforced.
+      - run: go run honnef.co/go/tools/cmd/staticcheck@latest -checks 'SA*' ./...
       - name: Cross-compile agents
         run: make agents
 
@@ -32,8 +34,20 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      # Known vulnerabilities in the dashboard's runtime dependencies.
+      - run: npm audit --omit=dev --audit-level=high
       - run: npm test
       - run: npm run build
+
+  # Known vulnerabilities in the Go standard library and modules that the code actually calls.
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable # the newest patch release, so standard-library fixes are included
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   # Promoting dev to main: prove both images still build before anything reaches stable.
   images:

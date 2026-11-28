@@ -2,6 +2,7 @@
 package api
 
 import (
+	"encoding/json"
 	"path"
 	"strings"
 	"time"
@@ -37,6 +38,15 @@ type HostInfo struct {
 	Tunnel *TunnelInfo `json:"tunnel,omitempty"`
 	// Power is the supply a Compute Blade reports (only sent while its LED profile is "blade").
 	Power *PowerSource `json:"power,omitempty"`
+	// Identify says whether Identify can flash an LED on this device, and why not when it cannot.
+	Identify *IdentifyInfo `json:"identify,omitempty"`
+}
+
+// IdentifyInfo is the agent's own answer to "can you flash an LED?", from what it finds on the device.
+type IdentifyInfo struct {
+	Available bool   `json:"available"`
+	Method    string `json:"method,omitempty"` // what flashes, when available
+	Reason    string `json:"reason,omitempty"` // why not, when unavailable
 }
 
 // TunnelInfo is what the agent knows about its cloudflared container.
@@ -589,6 +599,7 @@ type AgentUpdateInfo struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`
 	URL     string `json:"url"` // path on the control plane
+	Sig     string `json:"sig,omitempty"`
 }
 
 // Command is work queued by the control plane for a device's agent.
@@ -604,6 +615,10 @@ type Command struct {
 	Error     string            `json:"error,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
+	// Sig is the control plane's signature over the rest of the command (see sign.go).
+	Sig string `json:"sig,omitempty"`
+
+	raw json.RawMessage // the bytes this command arrived as; see UnmarshalJSON
 }
 
 // Command statuses.
@@ -808,6 +823,7 @@ type StreamRequest struct {
 	Tail      int    `json:"tail,omitempty"`
 	Cols      int    `json:"cols,omitempty"`
 	Rows      int    `json:"rows,omitempty"`
+	Sig       string `json:"sig,omitempty"`
 }
 
 // StreamPoll is the answer to the agent's long-poll for new streams.

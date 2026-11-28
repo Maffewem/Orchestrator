@@ -27,3 +27,7 @@ func BladeLEDTest(interface{ Write([]byte) (int, error) }) error {
 }
 
 func (a *Agent) powerSource() *api.PowerSource { return nil }
+
+func (a *Agent) identifyInfo() *api.IdentifyInfo {
+	return &api.IdentifyInfo{Reason: "LED control is only available on Linux devices."}
+}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,6 +82,9 @@ func milliPtr(v int64) *time.Time {
 }
 
 // formatLines renders log lines as "<RFC3339 millis> <text>\n", one per line.
+// maxStepLog is the size after which a step stops taking log lines (about 1 MiB).
+const maxStepLog = 1 << 20
+
 func formatLines(lines []api.LogLine) string {
 	var b strings.Builder
 	for _, l := range lines {
@@ -278,7 +282,9 @@ func (s *Store) UpdateStep(ctx context.Context, deviceID, deploymentID string, i
 		}
 	}
 
-	set := `log = log || ?`
+	// A step's log stops growing at maxStepLog: a build that prints forever (or a hostile agent)
+	// must not be able to fill the database.
+	set := `log = CASE WHEN length(log) < ` + strconv.Itoa(maxStepLog) + ` THEN log || ? ELSE log END`
 	args := []any{formatLines(u.Lines)}
 	switch u.Status {
 	case "":

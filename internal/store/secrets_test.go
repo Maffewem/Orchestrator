@@ -140,6 +140,41 @@ func TestBackupCarriesKeyOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+// Checking a backup before it is staged must leave the key it carries in place, or restoring a
+// protected backup on a fresh server loses every sealed value.
+func TestCheckSnapshotKeepsBackupKey(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, _ := Open(filepath.Join(dir, "a.db"))
+	p := newProject("A=topsecret")
+	st.CreateProject(ctx, p)
+	withKey := filepath.Join(dir, "key.db")
+	if err := st.Snapshot(ctx, withKey, true); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	if err := CheckSnapshot(withKey); err != nil {
+		t.Fatal(err)
+	}
+	os.Remove(withKey + "-wal")
+	os.Remove(withKey + "-shm")
+	os.Rename(withKey, filepath.Join(dir, "fresh.db"))
+	c, err := Open(filepath.Join(dir, "fresh.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	got, _ := c.GetProject(ctx, p.ID)
+	if got.Runtime.Env[0] != "A=topsecret" {
+		t.Fatalf("env after check = %q", got.Runtime.Env)
+	}
+	bad := filepath.Join(dir, "bad.db")
+	os.WriteFile(bad, []byte("not a database at all, just text padding padding padding"), 0o600)
+	if CheckSnapshot(bad) == nil {
+		t.Fatal("a non-database must be refused")
+	}
+}
+
 func TestStepLogIsCappedAndEventsPruned(t *testing.T) {
 	st, err := Open(":memory:")
 	if err != nil {

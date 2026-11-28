@@ -805,6 +805,7 @@ export interface Settings {
   /** Addresses added automatically (the paired standby server). */
   agent_urls_auto?: string[] | null;
   backup_password_set: boolean;
+  backup_plain_key?: boolean;
   cloudflare: { connected: boolean; proxied: boolean; deploy: { configured: boolean; account_id: string; own_token: boolean } };
   ssl_mode: "http" | "dns";
   sso: SSOView;
@@ -1402,6 +1403,9 @@ export interface HAView {
   previous?: string;
   version: string;
   can_restart: boolean;
+  auto_promote?: boolean;
+  auto_after?: number;
+  auto_note?: string;
 }
 
 export interface GoldImage {
@@ -1443,6 +1447,7 @@ export const api = {
   haPair: () => request<HAView>("POST", "/api/server-ha/pair"),
   haJoin: (b: { active_url: string; token: string; self_url: string }) => request<HAView>("POST", "/api/server-ha/join", b),
   haLeave: () => request<{ status: string }>("POST", "/api/server-ha/leave"),
+  haAuto: (enabled: boolean, after_seconds: number) => request<unknown>("PUT", "/api/server-ha/auto", { enabled, after_seconds }),
   haPromote: (activeIsDown: boolean) => request<{ status: string }>("POST", "/api/server-ha/promote", { active_is_down: activeIsDown }),
   cluster: () => request<ClusterView>("GET", "/api/cluster"),
   clusterHistory: (project?: string) => request<FailoverEntry[]>("GET", `/api/cluster/history${project ? `?project=${project}` : ""}`),
@@ -1652,6 +1657,7 @@ export const api = {
     request<DomainsView>("POST", `/api/projects/${id}/domains`, d),
   setDomainAccess: (id: string, did: string, access: "" | "tunnel") => request<DomainsView>("PATCH", `/api/projects/${id}/domains/${did}`, { access }),
   deleteDomain: (id: string, did: string) => request<void>("DELETE", `/api/projects/${id}/domains/${did}`),
+  setBackupPlainKey: (enabled: boolean) => request<{ backup_plain_key: boolean }>("PUT", "/api/settings/backup-plain-key", { enabled }),
   setBackupPassword: (password: string) => request<{ backup_password_set: boolean }>("PUT", "/api/settings/backup-password", { password }),
   setBaseDomain: (base_domain: string) => request<{ base_domain: string }>("PUT", "/api/settings/domain", { base_domain }),
   githubRepos: () => request<GitHubRepo[]>("GET", "/api/github/repos"),

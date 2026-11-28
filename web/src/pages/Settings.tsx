@@ -88,6 +88,27 @@ export default function SettingsPage() {
     }
   };
 
+  const setPlainKey = async (enabled: boolean) => {
+    if (
+      enabled &&
+      !(await confirmDialog({
+        title: "Include the secret key in unprotected backups?",
+        message:
+          "Anyone who gets a backup file will be able to read every secret in it (tokens, environment values, passwords). Setting a backup password is safer and also carries the key. Only continue if the files stay somewhere you fully control.",
+        confirmLabel: "Include the key",
+        danger: true,
+      }))
+    )
+      return;
+    setBkMsg(null);
+    try {
+      await api.setBackupPlainKey(enabled);
+      settings.reload();
+    } catch (e) {
+      setBkMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   const saveBase = async () => {
     setBaseMsg(null);
     try {
@@ -456,6 +477,17 @@ export default function SettingsPage() {
                 </Button>
               )}
             </div>
+            {!s.backup_password_set && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <p>
+                  Without a password, backups do not include the secret key. Restoring one on a new server leaves stored secrets (join token, environment values, tokens) unreadable unless you also keep this server's key file. Set a password above, or tick the box below.
+                </p>
+                <label className="mt-2 flex items-center gap-2">
+                  <input type="checkbox" checked={!!s.backup_plain_key} onChange={(e) => setPlainKey(e.target.checked)} />
+                  Include the secret key in unprotected backups (anyone with the file can read every secret)
+                </label>
+              </div>
+            )}
             {bkMsg && (bkMsg.ok ? <p className="text-sm text-neutral-600">{bkMsg.text}</p> : <ErrorNote>{bkMsg.text}</ErrorNote>)}
             <Help title="What this protects">
             <ul className="list-disc space-y-1 pl-5">

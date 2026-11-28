@@ -111,8 +111,9 @@ func (s *Server) createServerBackup(ctx context.Context) (*serverBackup, error) 
 	tmp := filepath.Join(dir, fmt.Sprintf(".snapshot-%d.tmp", time.Now().UnixNano()))
 	defer os.Remove(tmp)
 	pw := s.backupPassword(ctx)
-	// Environment values are sealed in the copy. Only a password-protected backup also carries the key.
-	if err := s.store.Snapshot(ctx, tmp, pw != ""); err != nil {
+	// Environment values are sealed in the copy. A password-protected backup carries the key; an
+	// unprotected one does only when an admin opted in (backup_plain_key), after a warning.
+	if err := s.store.Snapshot(ctx, tmp, pw != "" || s.backupPlainKey(ctx)); err != nil {
 		return nil, fmt.Errorf("snapshot: %w", err)
 	}
 	name := serverBackupPrefix + time.Now().UTC().Format("20060102-150405") + ".db"

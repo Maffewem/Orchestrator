@@ -58,6 +58,12 @@ type haState struct {
 	SyncError   string    `json:"sync_error,omitempty"`
 	SyncVersion string    `json:"sync_version,omitempty"`
 	SyncBytes   int64     `json:"sync_bytes,omitempty"`
+
+	// AutoPromote lets a standby take over by itself (opt-in, see ha_auto.go). AutoAfter is how
+	// long the active server must have been unreachable first, in seconds.
+	AutoPromote bool   `json:"auto_promote,omitempty"`
+	AutoAfter   int    `json:"auto_after,omitempty"`
+	AutoNote    string `json:"auto_note,omitempty"`
 }
 
 type haPromotion struct {
@@ -143,6 +149,9 @@ func (s *Server) haMiddleware(next http.Handler) http.Handler {
 				return
 			}
 		}
+		if s.haStandby() && strings.HasPrefix(r.URL.Path, "/api/agent/") {
+			s.haNoteKnock(r)
+		}
 		if s.haStandby() && strings.HasPrefix(r.URL.Path, "/api/") {
 			p := r.URL.Path
 			switch {
@@ -226,6 +235,7 @@ func (s *Server) haLoop(ctx context.Context) {
 		case <-t.C:
 			if s.haStandby() {
 				s.haPullOnce(ctx)
+				s.haAutoCheck(ctx)
 			} else {
 				s.haFenceOnce(ctx)
 			}
@@ -320,11 +330,14 @@ type haView struct {
 	Previous    string     `json:"previous,omitempty"`
 	Version     string     `json:"version"`
 	CanRestart  bool       `json:"can_restart"`
+	AutoPromote bool       `json:"auto_promote"`
+	AutoAfter   int        `json:"auto_after"`
+	AutoNote    string     `json:"auto_note,omitempty"`
 }
 
 func (s *Server) haView(ctx context.Context) haView {
 	st := s.loadHA(ctx)
-	v := haView{Role: st.Role, Epoch: st.Epoch, PeerURL: st.PeerURL, SelfURL: st.SelfURL, Paired: st.Token != "", LastSync: st.LastSync, SyncError: st.SyncError, SyncVersion: st.SyncVersion, Previous: st.Previous, Version: s.cfg.Version, CanRestart: s.cfg.Restart != nil && s.cfg.DBPath != ""}
+	v := haView{Role: st.Role, Epoch: st.Epoch, PeerURL: st.PeerURL, SelfURL: st.SelfURL, Paired: st.Token != "", LastSync: st.LastSync, SyncError: st.SyncError, SyncVersion: st.SyncVersion, Previous: st.Previous, Version: s.cfg.Version, CanRestart: s.cfg.Restart != nil && s.cfg.DBPath != "", AutoPromote: st.AutoPromote, AutoAfter: autoAfter(st), AutoNote: st.AutoNote}
 	if st.Role == haRoleActive {
 		v.Token = st.Token
 		if t := s.haLastPull.Load(); t > 0 {
@@ -474,18 +487,26 @@ func (s *Server) handleHAPromote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := copyFile(s.standbyPath(), store.PendingRestorePath(s.cfg.DBPath)); err != nil {
+	if err := s.stagePromotion(ctx, st, "Promoting this standby to the active server; restarting"); err != nil {
 		s.internal(w, err)
 		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+}
+
+// stagePromotion stages the newest verified copy as the next database, records the promotion
+// and schedules the restart that completes it.
+func (s *Server) stagePromotion(ctx context.Context, st haState, msg string) error {
+	if err := copyFile(s.standbyPath(), store.PendingRestorePath(s.cfg.DBPath)); err != nil {
+		return err
 	}
 	b, _ := json.Marshal(haPromotion{Epoch: st.Epoch + 1, Previous: st.PeerURL, Token: st.Token, SelfURL: st.SelfURL})
 	if err := os.WriteFile(s.promotedPath(), b, 0o600); err != nil {
-		s.internal(w, err)
-		return
+		return err
 	}
-	s.event(ctx, "", "warning", "ha.promote", "Promoting this standby to the active server; restarting")
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+	s.event(ctx, "", "warning", "ha.promote", msg)
 	s.restartSoon(500 * time.Millisecond)
+	return nil
 }
 
 type haFenceRequest struct {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/Maffewem/Orchestrator/internal/api"
 	"os"
+	"time"
 )
 
 // Snapshot writes a consistent copy of the whole database to path (which must not exist).
@@ -21,14 +22,26 @@ func (s *Store) Snapshot(ctx context.Context, path string, withKey bool) error {
 	return nil
 }
 
-// CheckSnapshot opens the database file at path and confirms it is an Orchestrator database.
+// CheckSnapshot opens the database file at path and confirms it is an intact Orchestrator
+// database. It deliberately does not go through Open: opening a store adopts the secret key a
+// protected backup carries and re-seals values under a throwaway key file, which would strip the
+// key out of the very file that is about to be restored.
 func CheckSnapshot(path string) error {
-	st, err := Open(path)
+	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-	if _, err := st.CountUsers(context.Background()); err != nil {
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	var res string
+	if err := db.QueryRow(`PRAGMA quick_check(1)`).Scan(&res); err != nil {
+		return fmt.Errorf("not an Orchestrator database: %w", err)
+	}
+	if res != "ok" {
+		return fmt.Errorf("the database is damaged: %s", res)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
 		return fmt.Errorf("not an Orchestrator database: %w", err)
 	}
 	return nil
@@ -89,4 +102,30 @@ func (s *Store) BusyWork(ctx context.Context) (deployments, commands int, err er
 	}
 	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM commands WHERE status IN (?, ?)`, api.CommandPending, api.CommandDispatched).Scan(&commands)
 	return
+}
+
+// SnapshotAgents lists the token hashes of devices in the database file at path that were seen
+// within window of its newest sighting and are not marked offline. A standby uses it to know
+// which agents it should expect to hear from, without opening the file as a live store.
+func SnapshotAgents(path string, window time.Duration) (map[string]struct{}, error) {
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	rows, err := db.Query(`SELECT token_hash FROM devices WHERE offline = 0 AND last_seen >= (SELECT COALESCE(MAX(last_seen), 0) FROM devices) - ?`, int64(window.Seconds()))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		out[h] = struct{}{}
+	}
+	return out, rows.Err()
 }

@@ -128,6 +128,8 @@ export interface Disk {
   transport?: string;
   removable?: boolean;
   rotational?: boolean;
+  /** "emmc" or "sd" for MMC-bus devices; absent when unknown. */
+  medium?: "emmc" | "sd";
   volume: DiskVolume;
   partitions?: DiskVolume[];
   protected?: string;
@@ -144,6 +146,8 @@ export interface DiskShare {
 export interface DiskReport {
   disks: Disk[];
   shares: DiskShare[];
+  /** Device model such as "Raspberry Pi Compute Module 5", when the system reports one. */
+  board?: string;
 }
 
 export type Health = "ok" | "warning" | "critical";
@@ -301,6 +305,10 @@ export interface Runtime {
   env: string[];
   command?: string[];
   restart: string;
+  /** Restart cap for the "on-failure" policy; 0 or absent is unlimited. */
+  max_retries?: number;
+  /** Hard memory limit in MiB; 0 or absent is none. */
+  memory_mb?: number;
   volumes?: string[];
   labels?: Record<string, string>;
   network?: string;

@@ -93,6 +93,9 @@ type Runtime struct {
 	Env     []string `json:"env"`
 	Command []string `json:"command,omitempty"`
 	Restart string   `json:"restart"`
+	// MaxRetries caps restarts for the on-failure policy (0 = unlimited). MemoryMB is a hard memory limit (0 = none).
+	MaxRetries int `json:"max_retries,omitempty"`
+	MemoryMB   int `json:"memory_mb,omitempty"`
 	// Volumes are "source:/path[:ro]" mounts (named volumes or host paths); Labels are extra container labels.
 	Volumes []string          `json:"volumes,omitempty"`
 	Labels  map[string]string `json:"labels,omitempty"`

@@ -53,7 +53,7 @@ export default function Disks({ d }: { d: Device }) {
       <Card>
         <CardHeader
           title="Disks"
-          subtitle={`Live from ${d.name}. Format, partition and unmount are admin-only, need the device path typed back, and are written to Activity.`}
+          subtitle={`Live from ${d.name}${rep?.board ? ` (${rep.board})` : ""}. Format, partition and unmount are admin-only, need the device path typed back, and are written to Activity.`}
           action={
             <div className="flex flex-wrap gap-2">
               <Button icon={<RefreshCw className="size-4" />} onClick={list.reload}>
@@ -109,7 +109,7 @@ export default function Disks({ d }: { d: Device }) {
 function DiskCard({ disk, busy, onUnmount, onDialog }: { disk: Disk; busy: string | null; onUnmount: (mp: string) => void; onDialog: (d: Dialog) => void }) {
   const parts = disk.partitions ?? [];
   const rows = parts.length > 0 ? parts : [disk.volume];
-  const meta = [bytes(disk.size_bytes), disk.model, disk.transport?.toUpperCase(), disk.kind === "loop" ? "loop device (file-backed)" : disk.removable ? "removable" : disk.rotational ? "HDD" : "SSD/flash"].filter(Boolean);
+  const meta = [bytes(disk.size_bytes), disk.model, disk.medium === "emmc" ? "eMMC (soldered flash)" : disk.medium === "sd" ? "microSD card" : disk.transport?.toUpperCase(), disk.kind === "loop" ? "loop device (file-backed)" : disk.removable ? "removable" : disk.rotational ? "HDD" : disk.medium ? "" : "SSD/flash"].filter(Boolean);
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-5 py-3.5">

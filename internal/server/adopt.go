@@ -218,7 +218,7 @@ func (s *Server) adoptOne(ctx context.Context, dev *store.Device, it *AdoptItem,
 		DeviceID: dev.ID,
 		Source:   store.Source{Type: store.SourceImage, Image: spec.Image},
 		Runtime: store.Runtime{
-			Ports: cleanLabels(spec.Ports), Env: cleanLabels(spec.Env), Command: spec.Command, Restart: restart,
+			Ports: cleanLabels(spec.Ports), Env: cleanLabels(spec.Env), Command: spec.Command, Restart: restart, MaxRetries: spec.MaxRetries, MemoryMB: spec.MemoryMB,
 			Volumes: spec.Volumes, Labels: spec.Labels, Network: spec.Network,
 			Adopted: true, Unsupported: spec.Unsupported,
 		},

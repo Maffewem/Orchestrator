@@ -356,6 +356,15 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 	if !restarts[in.Runtime.Restart] {
 		return errors.New("unknown restart policy")
 	}
+	if in.Runtime.MaxRetries < 0 || in.Runtime.MaxRetries > 1000 {
+		return errors.New("max restarts should be between 0 and 1000")
+	}
+	if in.Runtime.Restart != "on-failure" {
+		in.Runtime.MaxRetries = 0
+	}
+	if in.Runtime.MemoryMB < 0 || in.Runtime.MemoryMB > 4<<20 {
+		return errors.New("memory limit should be a positive number of MiB, or 0 for no limit")
+	}
 	in.Runtime.Volumes = cleanLabels(in.Runtime.Volumes)
 	for _, v := range in.Runtime.Volumes {
 		if !volumeRe.MatchString(v) {
@@ -498,6 +507,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	oldRT := p.Runtime
 	p.Name, p.DeviceID, p.Source, p.Runtime = in.Name, in.DeviceID, in.Source, in.Runtime
 	if err := s.store.UpdateProject(r.Context(), p); errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "a project with that name already exists")
@@ -506,6 +516,7 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	s.applyLimitsLive(r.Context(), p, oldRT, oldDevice)
 	s.syncProxy(r.Context(), p.DeviceID)
 	if oldDevice != "" && oldDevice != p.DeviceID {
 		s.syncProxy(r.Context(), oldDevice) // drop the project's routes from the device it left
@@ -809,4 +820,37 @@ func tidyEnv(in []string) []string {
 		out = out[:len(out)-1]
 	}
 	return out
+}
+
+// applyLimitsLive pushes a changed restart policy or memory limit to the running container with
+// docker update, so it takes effect at once, without a redeploy and without recreating the
+// container (which matters for adopted ones). Best effort: a redeploy applies the same values.
+func (s *Server) applyLimitsLive(ctx context.Context, p *store.Project, old store.Runtime, oldDevice string) {
+	rt := p.Runtime
+	if p.DeviceID == "" || p.DeviceID != oldDevice || p.Source.Type == store.SourceCloudflare || p.Source.Type == store.SourceCompose {
+		return
+	}
+	if rt.Restart == old.Restart && rt.MaxRetries == old.MaxRetries && rt.MemoryMB == old.MemoryMB {
+		return
+	}
+	d, err := s.store.GetDevice(ctx, p.DeviceID)
+	if err != nil || d == nil || !hasCap(d, api.CapLimits) {
+		return
+	}
+	name := serviceOf(p)
+	args := map[string]string{"restart": rt.Restart, "retries": strconv.Itoa(rt.MaxRetries)}
+	if args["restart"] == "" {
+		args["restart"] = "unless-stopped"
+	}
+	if rt.MemoryMB > 0 && rt.MemoryMB != old.MemoryMB { // removing a limit needs a redeploy
+		args["memory_mb"] = strconv.Itoa(rt.MemoryMB)
+	}
+	for _, c := range d.Containers {
+		if c.Name == name {
+			if _, err := s.store.CreateCommand(ctx, d.ID, api.ActionUpdate, c.ID, args); err != nil {
+				s.log.Warn("apply restart limits", "err", err)
+			}
+			return
+		}
+	}
 }

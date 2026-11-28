@@ -96,19 +96,37 @@ func (s *Server) view(d *store.Device) DeviceView {
 		dc.Containers = marked
 		v.Device = &dc
 	}
+	oomed := s.oomKilled(d.ID, marked)
 	for _, c := range d.Containers {
 		switch {
+		case oomed[c.Name]:
+			// reported below with the advice that fits
 		case c.State == "dead":
 			looping = append(looping, c.Name)
 		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
 			killed = append(killed, c.Name)
 		}
 	}
-	if len(unstable) > 0 {
-		raise("warning", "Containers restarting repeatedly: "+strings.Join(unstable, ", "))
+	var loops []string
+	for _, n := range unstable {
+		if !oomed[n] { // out-of-memory loops are reported below with their own advice
+			loops = append(loops, n)
+		}
+	}
+	if len(loops) > 0 {
+		raise("warning", "Containers restarting repeatedly: "+strings.Join(loops, ", "))
 	}
 	if len(looping) > 0 {
 		raise("warning", "Containers dead: "+strings.Join(looping, ", "))
+	}
+	var oom []string
+	for _, c := range marked {
+		if oomed[c.Name] {
+			oom = append(oom, c.Name)
+		}
+	}
+	if len(oom) > 0 {
+		raise("warning", "Containers killed for running out of memory: "+strings.Join(oom, ", ")+". Raise the memory limit in the project settings, or free memory on the device")
 	}
 	if len(killed) > 0 {
 		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(killed, ", "))
@@ -548,6 +566,7 @@ var allowedActions = map[string]bool{
 	api.ActionStart:   true,
 	api.ActionStop:    true,
 	api.ActionRestart: true,
+	api.ActionUpdate:  true,
 	api.ActionLogs:    true,
 	api.ActionRemove:  true,
 }
@@ -579,6 +598,25 @@ func (s *Server) handleCreateCommand(w http.ResponseWriter, r *http.Request) {
 	if !known {
 		writeError(w, http.StatusBadRequest, "container is not known on this device")
 		return
+	}
+	if req.Action == api.ActionUpdate {
+		if !hasCap(d, api.CapLimits) {
+			writeError(w, http.StatusConflict, "this device's agent is too old to change restart limits; update it from the Updates page first")
+			return
+		}
+		if !restarts[req.Args["restart"]] {
+			writeError(w, http.StatusBadRequest, "unknown restart policy")
+			return
+		}
+		for _, k := range []string{"retries", "memory_mb"} {
+			if v := req.Args[k]; v != "" {
+				if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 4<<20 {
+					writeError(w, http.StatusBadRequest, k+" should be a non-negative number")
+					return
+				}
+			}
+		}
+		req.Args = map[string]string{"restart": req.Args["restart"], "retries": req.Args["retries"], "memory_mb": req.Args["memory_mb"], "stop": req.Args["stop"]}
 	}
 	if req.Action == api.ActionRemove {
 		// The agent removes by name. Orchestrator's own containers and containers of projects that

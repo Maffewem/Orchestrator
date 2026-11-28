@@ -75,12 +75,15 @@ export default function ProjectForm({
   const [copyAddrs, setCopyAddrs] = useState<Record<string, DedicatedIP>>(initial?.runtime.copy_addresses ?? {});
   const [env, setEnv] = useState((initial?.runtime.env ?? []).join("\n"));
   const [volumes, setVolumes] = useState((initial?.runtime.volumes ?? []).join("\n"));
-  const [restart, setRestart] = useState(initial?.runtime.restart || "unless-stopped");
+  // New workers stop restarting after a few failures instead of looping forever; existing ones keep their policy.
+  const [restart, setRestart] = useState(initial ? initial.runtime.restart || "unless-stopped" : "on-failure");
+  const [maxRetries, setMaxRetries] = useState(String(initial ? (initial.runtime.max_retries ?? 0) : 5));
+  const [memoryMB, setMemoryMB] = useState(String(initial?.runtime.memory_mb ?? 0));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Unsaved edits are reported so a page can ask before throwing them away.
-  const snapshot = JSON.stringify([name, deviceId, source, ports, webPort, dedicated, copyAddrs, env, volumes, restart]);
+  const snapshot = JSON.stringify([name, deviceId, source, ports, webPort, dedicated, copyAddrs, env, volumes, restart, maxRetries, memoryMB]);
   const baseline = useRef(snapshot);
   const report = useRef(onDirty);
   report.current = onDirty;
@@ -169,7 +172,7 @@ export default function ProjectForm({
         }
       }
       await onSubmit(
-        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, copy_addresses: isCF || source.type === "compose" || Object.keys(copyAddrs).length === 0 ? undefined : copyAddrs, env: normalizeEnv(env), restart, volumes: lines(volumes) } },
+        { name: name.trim(), device_id: isCF ? "" : device, source: src, runtime: { ports: lines(ports), web_port: webPort.trim(), dedicated: isCF || source.type === "compose" ? null : dedicated, copy_addresses: isCF || source.type === "compose" || Object.keys(copyAddrs).length === 0 ? undefined : copyAddrs, env: normalizeEnv(env), restart, max_retries: restart === "on-failure" ? Math.max(0, Math.floor(Number(maxRetries)) || 0) : 0, memory_mb: Math.max(0, Math.floor(Number(memoryMB)) || 0), volumes: lines(volumes) } },
         previewsPick !== null && previewsPick !== previewsNow ? { enabled: previewsPick, max: saved.data?.settings.max || 5 } : undefined,
       );
       baseline.current = snapshot;
@@ -560,6 +563,14 @@ export default function ProjectForm({
               <option value="on-failure">On failure</option>
               <option value="no">Never</option>
             </select>
+          </Field>
+          {restart === "on-failure" && (
+            <Field label="Maximum restarts" hint="Docker gives up after this many failed restarts in a row and leaves the container stopped, instead of looping forever. 0 means no limit.">
+              <input className={inputClass} type="number" inputMode="numeric" min={0} value={maxRetries} onChange={(e) => setMaxRetries(e.target.value)} />
+            </Field>
+          )}
+          <Field label="Memory limit (MiB)" hint="Docker kills the container if it uses more (and, with swap off, it never swaps). 0 means no limit. A worker killed for running out of memory needs a higher limit or more RAM on the device. Raising it applies to the running container straight away.">
+            <input className={inputClass} type="number" inputMode="numeric" min={0} value={memoryMB} onChange={(e) => setMemoryMB(e.target.value)} />
           </Field>
         </div>
         <DedicatedAddress

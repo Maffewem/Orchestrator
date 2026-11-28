@@ -272,6 +272,41 @@ func orchestratorLine(line string) (string, bool) {
 	return f[1], true
 }
 
+// emmcHW matches the hardware partitions of an eMMC chip (boot0, boot1, rpmb). They are tiny
+// separate block devices that belong to the parent disk and must never be changed from here.
+var emmcHW = regexp.MustCompile(`^(mmcblk\d+)(boot\d+|rpmb)$`)
+
+// readSys reads a small sysfs/devicetree file; a variable so tests can fake it.
+var readSys = readTrim
+
+// mmcMedium says whether an mmcblk device is eMMC or an SD card, from /sys/block/<dev>/device/type.
+func mmcMedium(name string) string {
+	if !strings.HasPrefix(name, "mmcblk") {
+		return ""
+	}
+	base := name
+	if m := emmcHW.FindStringSubmatch(name); m != nil {
+		base = m[1]
+	}
+	switch strings.ToUpper(readSys("/sys/block/" + base + "/device/type")) {
+	case "MMC":
+		return "emmc"
+	case "SD", "SDIO":
+		return "sd"
+	}
+	return ""
+}
+
+// boardModel is the device-tree model string, such as "Raspberry Pi 4 Model B Rev 1.4".
+func boardModel() string {
+	for _, p := range []string{"/proc/device-tree/model", "/sys/firmware/devicetree/base/model"} {
+		if m := readSys(p); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
 func buildDisks(nodes []lsblkNode, system map[string]bool, persistent map[string]bool, usage func(string) int64) []api.Disk {
 	var disks []api.Disk
 	for _, n := range nodes {
@@ -289,6 +324,7 @@ func buildDisks(nodes []lsblkNode, system map[string]bool, persistent map[string
 			Path: n.Path, Kind: n.Type, SizeBytes: int64(n.Size), Model: str(n.Model), Serial: str(n.Serial),
 			Transport: str(n.Tran), Removable: bool(n.RM), Rotational: bool(n.Rota),
 		}
+		d.Medium = mmcMedium(n.Name)
 		d.Volume = volumeOf(n, system, persistent, usage)
 		var sys, busy bool
 		var reasons []string
@@ -315,7 +351,11 @@ func buildDisks(nodes []lsblkNode, system map[string]bool, persistent map[string
 				d.Partitions = append(d.Partitions, volumeOf(c, system, persistent, usage))
 			}
 		}
+		hw := emmcHW.FindStringSubmatch(n.Name)
 		switch {
+		case hw != nil:
+			d.System = true
+			d.Protected = "eMMC hardware partition (" + n.Name + "), part of /dev/" + hw[1] + ". Orchestrator never changes it."
 		case sys:
 			d.System = true
 			d.Protected = "System disk: it holds the operating system, Docker data or the agent."
@@ -404,7 +444,7 @@ func diskReport(ctx context.Context) (api.DiskReport, []mountEntry, error) {
 	}
 	mounts := readMounts()
 	persistent := fstabEntries()
-	rep := api.DiskReport{Disks: buildDisks(nodes, systemMountpoints(mounts), persistent, statUsed), Shares: []api.DiskShare{}}
+	rep := api.DiskReport{Disks: buildDisks(nodes, systemMountpoints(mounts), persistent, statUsed), Shares: []api.DiskShare{}, Board: boardModel()}
 	if rep.Disks == nil {
 		rep.Disks = []api.Disk{}
 	}
@@ -440,6 +480,9 @@ func findVolume(rep api.DiskReport, dev string) (disk *api.Disk, vol *api.Volume
 func guardWrite(rep api.DiskReport, dev, op string) error {
 	if !devicePath.MatchString(dev) {
 		return fmt.Errorf("%q is not a valid device path", dev)
+	}
+	if emmcHW.MatchString(strings.TrimPrefix(dev, "/dev/")) {
+		return fmt.Errorf("refusing: %s is an eMMC hardware partition (boot or rpmb) and is never changed from here", dev)
 	}
 	d, v, whole := findVolume(rep, dev)
 	if d == nil {
@@ -640,6 +683,8 @@ func diskMount(ctx context.Context, args map[string]string) (string, error) {
 	}
 	d, v, _ := findVolume(rep, dev)
 	switch {
+	case emmcHW.MatchString(strings.TrimPrefix(dev, "/dev/")):
+		return "", fmt.Errorf("refusing: %s is an eMMC hardware partition and is never changed from here", dev)
 	case d == nil:
 		return "", fmt.Errorf("%s is not a disk or partition this device can manage (refresh the list)", dev)
 	case d.System || v.Protected != "":

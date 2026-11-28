@@ -143,6 +143,25 @@ func (d *Docker) SetRestart(ctx context.Context, id, policy string) error {
 		map[string]any{"RestartPolicy": map[string]string{"Name": policy}}, nil)
 }
 
+// Update changes a container's restart policy and, when memoryMB > 0, its memory limit in place.
+func (d *Docker) Update(ctx context.Context, id, policy string, retries, memoryMB int) error {
+	body := map[string]any{}
+	if policy != "" {
+		if policy != "on-failure" {
+			retries = 0
+		}
+		body["RestartPolicy"] = map[string]any{"Name": policy, "MaximumRetryCount": retries}
+	}
+	if memoryMB > 0 {
+		body["Memory"] = int64(memoryMB) << 20
+		body["MemorySwap"] = int64(memoryMB) << 20
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return d.call(ctx, http.MethodPost, "/containers/"+id+"/update", nil, body, nil)
+}
+
 // RemoveIfExists removes a container, ignoring "no such container".
 func (d *Docker) RemoveIfExists(ctx context.Context, id string) error {
 	if err := d.Remove(ctx, id); err != nil && !isStatus(err, http.StatusNotFound) {

@@ -262,7 +262,7 @@ func specFor(p *store.Project, commit *store.Commit) (api.DeploySpec, error) {
 		Ports:   p.Runtime.Ports,
 		Env:     env,
 		Command: p.Runtime.Command,
-		Restart: restart,
+		Restart: restart, MaxRetries: p.Runtime.MaxRetries, MemoryMB: p.Runtime.MemoryMB,
 		Volumes: p.Runtime.Volumes,
 		Network: p.Runtime.Network,
 		Labels:  map[string]string{},

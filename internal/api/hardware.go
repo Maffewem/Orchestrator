@@ -45,19 +45,35 @@ type LEDRule struct {
 type LEDConfig struct {
 	Profile string `json:"profile"`
 	Enabled bool   `json:"enabled"`
-	// Stealth keeps every LED of the profile off, whatever the rules say (identify still works).
+	// Stealth (shown as "Lights off" in the dashboard; the stored name is kept so saved settings still load) keeps every LED of the profile off, whatever the rules say (identify still works).
 	Stealth bool      `json:"stealth,omitempty"`
 	Rules   []LEDRule `json:"rules,omitempty"`
+	// Colours sets what colour each state shows and how bright, on LEDs that can do colour (the Compute
+	// Blade's). Ordinary Pi LEDs are on or off and ignore it.
+	Colours *LEDColours `json:"colours,omitempty"`
+}
+
+// LEDColours are "#rrggbb" values; an empty one keeps the default (normal off, warning amber, critical
+// red, identify blue).
+type LEDColours struct {
+	Normal   string `json:"normal,omitempty"`
+	Warn     string `json:"warn,omitempty"`
+	Crit     string `json:"crit,omitempty"`
+	Identify string `json:"identify,omitempty"`
+	// Brightness is a percentage from 1 to 100; 0 means full.
+	Brightness int `json:"brightness,omitempty"`
 }
 
 // LEDStatus is the agent's answer to led.list.
 type LEDStatus struct {
 	Profile string `json:"profile"`
 	// Supported is false when the profile has no way to drive LEDs on this device; Note says why.
-	Supported bool      `json:"supported"`
-	Note      string    `json:"note,omitempty"`
-	LEDs      []LED     `json:"leds"`
-	Config    LEDConfig `json:"config"`
+	Supported bool   `json:"supported"`
+	Note      string `json:"note,omitempty"`
+	// Colours is true when the LEDs can show colours and brightness, so the dashboard offers those controls.
+	Colours bool      `json:"colours,omitempty"`
+	LEDs    []LED     `json:"leds"`
+	Config  LEDConfig `json:"config"`
 	// Values are the metrics the rules last saw, by metric name.
 	Values map[string]float64 `json:"values,omitempty"`
 }

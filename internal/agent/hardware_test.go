@@ -563,3 +563,31 @@ func TestIdentifyInfo(t *testing.T) {
 		t.Fatalf("blade without PIO: %+v", in)
 	}
 }
+
+func TestBladeColoursAndBrightness(t *testing.T) {
+	w := &fakePixels{}
+	dr := newBladeLEDs(func() bool { return true }, func() (pixelWriter, error) { return w, nil }).(*bladeLEDs)
+	dr.SetColours(api.LEDColours{Warn: "#00ff00", Normal: "#102030", Brightness: 50})
+	if err := dr.Set("blade-top", "restore"); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.last(); got[0] != [3]byte{8, 16, 24} {
+		t.Fatalf("normal colour at half brightness: %v", got)
+	}
+	dr.Set("blade-edge", "slow") // warning: the user's green, not the default amber
+	dr.Restore()
+	if c, _ := dr.bladeColour("slow"); c != [3]byte{0, 255, 0} {
+		t.Fatalf("warn colour: %v", c)
+	}
+	if c, _ := dr.bladeColour("fast"); c != [3]byte{255, 0, 0} {
+		t.Fatalf("an unset colour keeps its default: %v", c)
+	}
+	cfg := api.LEDConfig{Profile: "blade", Colours: &api.LEDColours{Warn: "red"}}
+	if validLEDConfig(&cfg) == nil {
+		t.Fatal("accepted a bad colour")
+	}
+	cfg = api.LEDConfig{Profile: "blade", Colours: &api.LEDColours{Brightness: 150}}
+	if validLEDConfig(&cfg) == nil {
+		t.Fatal("accepted a brightness over 100")
+	}
+}

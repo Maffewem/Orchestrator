@@ -420,3 +420,7 @@ this change still include it; update them. The server also refuses to queue a ba
 - Multiple users with roles, and an audit log
 - Alerts (email, webhook, push) on top of the stored metrics
 - Agent self-update from the dashboard
+
+### Shutting down or restarting a device
+
+On a device's **Settings** tab, once the device is in maintenance mode, admins can **Restart** or **Shut down** the whole machine. Type the device name to confirm. The agent stops Docker (every container gets its stop signal and grace period, and keeps its restart policy), flushes the disks, then asks systemd to reboot or power off. The device shows as *Restarting* until the agent reconnects after boot; maintenance mode is kept unless you tick *Leave maintenance mode automatically once the device is back*. A shut-down device cannot be started again from the dashboard: it needs power, or its blade or BMC. Workers on the device stay down meanwhile, because failover skips devices in maintenance mode. If the Orchestrator server runs on the device, the dashboard goes offline too; a restart brings it back by itself (the container has a restart policy), a standby server must be promoted by hand. Agents need the `power` capability: re-run the install command or update the agent first. The agent must run on the host under systemd (not as a container).

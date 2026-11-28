@@ -80,6 +80,8 @@ type Agent struct {
 	interval time.Duration
 	work     chan api.Command
 	restart  bool // set by an update: exit after reporting
+	// afterReport runs once the result of the current command has been reported (used by device.power).
+	afterReport func()
 
 	cancelMu  sync.Mutex
 	cancelled map[string]bool // command ids the user gave up on
@@ -302,6 +304,10 @@ func (a *Agent) worker(ctx context.Context) {
 			res := a.execute(rctx, c)
 			a.end()
 			a.report(ctx, c.ID, res)
+			if f := a.afterReport; f != nil {
+				a.afterReport = nil
+				f()
+			}
 			if a.restart {
 				// The new binary is in place; systemd (Restart=always) starts it.
 				a.log.Info("restarting to finish the update")
@@ -418,6 +424,8 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		gctx, gcancel := context.WithTimeout(ctx, 30*time.Minute)
 		output, err = a.dockerGC(gctx, c)
 		gcancel()
+	case api.ActionDevicePower:
+		output, err = a.powerAction(c)
 	case api.ActionImageFlash, api.ActionBootGet, api.ActionBootSet:
 		ictx, icancel := context.WithTimeout(ctx, 6*time.Hour) // large images over a slow link
 		output, err = a.imageAction(ictx, c)

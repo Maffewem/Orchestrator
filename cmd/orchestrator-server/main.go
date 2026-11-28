@@ -130,6 +130,8 @@ func runSelfUpdate(args []string) int {
 	container := fs.String("container", "", "name of the server container to replace")
 	image := fs.String("image", "", "image the new container should run")
 	host := fs.String("docker-host", env("DOCKER_HOST", "unix:///var/run/docker.sock"), "Docker engine address")
+	var publish multiFlag
+	fs.Var(&publish, "publish", "extra TCP port to publish, HOST:CONTAINER (repeatable)")
 	fs.Parse(args)
 	d, err := agent.NewDocker(*host)
 	if err != nil || *container == "" || *image == "" {
@@ -137,7 +139,7 @@ func runSelfUpdate(args []string) int {
 		return 2
 	}
 	err = selfupdate.Swap(context.Background(), d, selfupdate.SwapOptions{
-		Container: *container, Image: *image,
+		Container: *container, Image: *image, Publish: publish,
 		Log: func(m string) { fmt.Fprintln(os.Stderr, "self-update:", m) },
 	})
 	if err != nil {
@@ -260,3 +262,9 @@ func importBackup(in, dbPath, password string) error {
 	}
 	return os.Rename(check, pending)
 }
+
+// multiFlag collects a repeatable string flag.
+type multiFlag []string
+
+func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }

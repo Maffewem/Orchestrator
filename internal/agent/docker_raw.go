@@ -78,6 +78,12 @@ func (d *Docker) Health(ctx context.Context, id string) (running bool, health st
 // RecreateFrom creates (without starting) a container called name that copies the settings
 // of the inspected container, running image instead. It returns the new container's ID.
 func (d *Docker) RecreateFrom(ctx context.Context, inspect json.RawMessage, name, image string) (string, error) {
+	return d.RecreateFromWith(ctx, inspect, name, image, nil)
+}
+
+// RecreateFromWith is RecreateFrom that also publishes extra TCP ports, each "host:container"
+// (for example "8443:8443"). A container port that is already published keeps its mapping.
+func (d *Docker) RecreateFromWith(ctx context.Context, inspect json.RawMessage, name, image string, publish []string) (string, error) {
 	var src struct {
 		Config          map[string]any `json:"Config"`
 		HostConfig      map[string]any `json:"HostConfig"`
@@ -94,6 +100,11 @@ func (d *Docker) RecreateFrom(ctx context.Context, inspect json.RawMessage, name
 	body["Image"] = image
 	delete(body, "Hostname") // the old container's ID would stick
 	body["HostConfig"] = src.HostConfig
+	if len(publish) > 0 {
+		if err := addPortBindings(body, src.HostConfig, publish); err != nil {
+			return "", err
+		}
+	}
 
 	first, _ := src.HostConfig["NetworkMode"].(string)
 	if _, ok := src.NetworkSettings.Networks[first]; !ok {
@@ -254,4 +265,30 @@ func (d *Docker) ExecOutput(ctx context.Context, container string, cmd ...string
 	}
 	defer resp.Body.Close()
 	return demux(io.LimitReader(resp.Body, 64<<10))
+}
+
+// addPortBindings adds "host:container" TCP mappings to a create body's HostConfig and ExposedPorts.
+func addPortBindings(body, host map[string]any, publish []string) error {
+	pb, _ := host["PortBindings"].(map[string]any)
+	if pb == nil {
+		pb = map[string]any{}
+	}
+	exposed, _ := body["ExposedPorts"].(map[string]any)
+	if exposed == nil {
+		exposed = map[string]any{}
+	}
+	for _, m := range publish {
+		h, c, ok := strings.Cut(m, ":")
+		if !ok || h == "" || c == "" {
+			return fmt.Errorf("port mapping %q should look like 8443:8443", m)
+		}
+		key := c + "/tcp"
+		if _, have := pb[key]; !have {
+			pb[key] = []any{map[string]any{"HostPort": h}}
+		}
+		exposed[key] = map[string]any{}
+	}
+	host["PortBindings"] = pb
+	body["ExposedPorts"] = exposed
+	return nil
 }

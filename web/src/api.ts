@@ -1066,6 +1066,34 @@ export interface HTTPSView {
   subject?: string;
   expires?: string;
   challenge?: "dns";
+  issuer?: string;
+  sans?: string[];
+  self_signed?: boolean;
+  not_before?: string;
+  container_port?: string;
+  port_known: boolean;
+  published_host?: string;
+  can_publish: boolean;
+  publish_note?: string;
+}
+
+export interface HTTPSTest {
+  listening: boolean;
+  handshake: boolean;
+  error?: string;
+  subject?: string;
+  issuer?: string;
+  sans?: string[];
+  self_signed: boolean;
+  expires?: string;
+  expired: boolean;
+  tested_name: string;
+  name_matches: boolean;
+  trusted: boolean;
+  trust_error?: string;
+  port_published: boolean;
+  port_known: boolean;
+  advice: string[];
 }
 
 export interface BackupDest {
@@ -1334,6 +1362,8 @@ export const api = {
   ssoExchange: (code: string) => request<LoginResult>("POST", "/api/auth/sso/exchange", { code }, null),
   setSSO: (c: SSOConfig) => request<SSOView>("PUT", "/api/settings/sso", c),
   setHTTPS: (b: { mode: string; host: string; addr: string; hsts: boolean; cert_pem?: string; key_pem?: string }) => request<HTTPSView>("PUT", "/api/settings/https", b),
+  testHTTPS: () => request<HTTPSTest>("POST", "/api/settings/https/test"),
+  publishHTTPSPort: () => request<{ status: string; port: string }>("POST", "/api/settings/https/publish-port"),
   serverBackups: () => request<ServerBackups>("GET", "/api/server-backups"),
   createServerBackup: () => request<ServerBackup>("POST", "/api/server-backups"),
   setServerBackupPolicy: (p: ServerBackupPolicy) => request<ServerBackups>("PUT", "/api/server-backups/policy", p),

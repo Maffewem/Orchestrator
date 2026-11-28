@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,5 +69,45 @@ func TestDashboardHTTPS(t *testing.T) {
 	}
 	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "auto", Host: "bad host/"}, nil); code != http.StatusBadRequest {
 		t.Fatalf("bad host: %d", code)
+	}
+}
+
+func TestHTTPSTestEndpointExplainsSelfSigned(t *testing.T) {
+	h := newHarness(t)
+	cert, key := selfSigned(t)
+	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Host: "", Addr: "127.0.0.1:0", CertPEM: cert, KeyPEM: key}, nil); code != http.StatusOK {
+		t.Fatalf("enable: %d", code)
+	}
+	var res httpsTestResult
+	if code := h.do("POST", "/api/settings/https/test", adminToken, nil, &res); code != http.StatusOK {
+		t.Fatalf("test: %d", code)
+	}
+	if !res.Handshake || !res.SelfSigned || res.Trusted || res.Subject != "orch.test" || len(res.SANs) != 1 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	// The harness is reached by 127.0.0.1 or similar, which the certificate doesn't cover.
+	if res.NameMatches {
+		t.Fatalf("name should not match: %+v", res)
+	}
+	joined := ""
+	for _, a := range res.Advice {
+		joined += a + "\n"
+	}
+	if !strings.Contains(joined, "self-signed") || !strings.Contains(joined, "not valid for") {
+		t.Fatalf("advice missing: %q", joined)
+	}
+	var v httpsView
+	h.do("GET", "/api/settings", adminToken, nil, &struct {
+		HTTPS *httpsView `json:"https"`
+	}{&v})
+	if !v.SelfSigned || v.Issuer != "orch.test" || len(v.SANs) != 1 {
+		t.Fatalf("view: %+v", v)
+	}
+	// Without a Docker socket the server can't tell whether the port is published, and says so.
+	if v.PortKnown || v.PublishNote == "" {
+		t.Fatalf("publish state: %+v", v)
+	}
+	if code := h.do("POST", "/api/settings/https/publish-port", adminToken, nil, nil); code != http.StatusBadRequest {
+		t.Fatalf("publish without docker: %d", code)
 	}
 }

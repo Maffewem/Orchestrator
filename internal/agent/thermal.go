@@ -386,7 +386,7 @@ func (f *coolingFan) Info() api.FanInfo {
 func (f *coolingFan) Set(int) error  { return fmt.Errorf("read-only fan") }
 func (f *coolingFan) Release() error { return nil }
 
-// bladeFan drives a Compute Blade fan unit through bladectl, because the fan unit is not a
+// bladeFan drives a Compute Blade fan unit through bladectl (`set fan --percent N`, `set fan --auto`), because the fan unit is not a
 // Linux hwmon device. The command lines are configurable (ORCH_BLADE_FAN_SET with {percent},
 // ORCH_BLADE_FAN_RELEASE) because they could not be checked against real hardware.
 type bladeFan struct {
@@ -396,7 +396,7 @@ type bladeFan struct {
 
 func (f *bladeFan) Info() api.FanInfo {
 	return api.FanInfo{Driver: "bladectl", Name: "Compute Blade fan unit", Controllable: true, Percent: f.last,
-		Note: "Unverified: set and release commands are untested on real hardware"}
+		Note: "Commands match bladectl --help; not yet tried against a running fan unit"}
 }
 
 func (f *bladeFan) run(line string) error {
@@ -497,11 +497,11 @@ func detectFan(root string) fanDriver {
 	if bin, err := exec.LookPath("bladectl"); err == nil {
 		set := os.Getenv("ORCH_BLADE_FAN_SET")
 		if set == "" {
-			set = bin + " fan set-percent {percent}"
+			set = bin + " set fan --percent {percent}"
 		}
 		rel := os.Getenv("ORCH_BLADE_FAN_RELEASE")
 		if rel == "" {
-			rel = "systemctl restart computeblade-agent.service" // no documented way to clear an override; a restart returns to its own curve
+			rel = bin + " set fan --auto"
 		}
 		return &bladeFan{bin: bin, set: set, release: rel, last: -1}
 	}

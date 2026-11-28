@@ -115,7 +115,7 @@ export default function DeploymentPage() {
             <Button
               icon={<Undo2 className="size-4" />}
               onClick={async () => {
-                if (!(await confirmDialog({ title: "Roll back to this version?", message: "It becomes the live version.", confirmLabel: "Roll back" }))) return;
+                if (!(await confirmDialog({ title: "Roll back to this version?", message: "It becomes the live version. If its image was cleaned up, it is rebuilt from the commit (or pulled by its recorded digest).", confirmLabel: "Roll back" }))) return;
                 try {
                   const n = await api.rollbackDeployment(d.id);
                   nav(`/deployments/${n.id}`);

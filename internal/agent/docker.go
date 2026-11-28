@@ -161,6 +161,7 @@ type dockerContainer struct {
 	ID      string            `json:"Id"`
 	Names   []string          `json:"Names"`
 	Image   string            `json:"Image"`
+	ImageID string            `json:"ImageID"`
 	State   string            `json:"State"`
 	Status  string            `json:"Status"`
 	Created int64             `json:"Created"`

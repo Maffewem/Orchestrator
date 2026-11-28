@@ -141,6 +141,7 @@ func routeRole(pattern string) string {
 		"GET /api/users":                          true,
 		"GET /api/server-ha":                      true,
 		"GET /api/devices/{id}/disks":             true,
+		"GET /api/devices/{id}/docker":            true,
 		"GET /api/enrol-tokens":                   true,
 		"GET /api/images":                         true,
 		"GET /api/devices/{id}/boot":              true,

@@ -620,6 +620,7 @@ func (s *Server) deployWith(ctx context.Context, p *store.Project, commit *store
 	if err != nil {
 		return nil, err
 	}
+	s.applyKeepImages(ctx, &spec)
 	if tweak != nil {
 		tweak(&spec)
 	}
@@ -764,6 +765,11 @@ func (s *Server) finishDeployment(ctx context.Context, dev *store.Device, c *api
 	name := c.Target
 	if c.Deploy != nil {
 		name = c.Deploy.Service
+	}
+	if res.OK && strings.HasPrefix(res.Output, "sha256:") && len(res.Output) < 100 {
+		if err := s.store.SetDeploymentDigest(ctx, c.Target, res.Output); err != nil {
+			s.log.Error("record image digest", "err", err)
+		}
 	}
 	if res.OK {
 		s.event(ctx, dev.ID, "info", "deployment.succeeded", fmt.Sprintf("%s deployed to %s", name, dev.Name))

@@ -5,6 +5,7 @@ import { bytes, pct, usePoll } from "../lib";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, Meter, Modal, WarnNote, inputClass } from "./ui";
 import { confirmDialog, notify } from "./dialogs";
 import { waitFor } from "./ContainerTable";
+import DockerStorage from "./DockerStorage";
 import { BootCard, FlashDialog, ImageLibrary } from "./Rebuild";
 
 type Dialog =
@@ -93,6 +94,8 @@ export default function Disks({ d }: { d: Device }) {
           )}
         </Card>
       )}
+
+      <DockerStorage d={d} />
 
       <ImageLibrary />
       <BootCard d={d} />

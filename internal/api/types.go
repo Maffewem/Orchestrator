@@ -141,6 +141,7 @@ const (
 	CapImages           = "images"             // image.flash, boot.get and boot.set (gold images, Raspberry Pi boot order)
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
+	CapDockerGC         = "docker-gc"          // docker.report and docker.prune, and DeploySpec.KeepImages (old worker images trimmed after a deploy)
 )
 
 // DockerInfo summarises the container engine on a device.
@@ -615,6 +616,12 @@ type DeploySpec struct {
 	Dedicated *DedicatedIP `json:"dedicated,omitempty"`
 	// Compose, when set, makes this a Compose stack: Service is the stack (project) name and Image is unused.
 	Compose *ComposeSpec `json:"compose,omitempty"`
+	// ImageDigest is the content digest (sha256:...) the pulled Image resolved to, recorded after
+	// a successful deployment so a rollback can pull exactly that version while the registry has it.
+	ImageDigest string `json:"image_digest,omitempty"`
+	// KeepImages, when above zero, trims older images of this worker's own build after a
+	// successful deploy, leaving the newest KeepImages (the running one is never removed).
+	KeepImages int `json:"keep_images,omitempty"`
 	// Reuse lets the agent skip the build when Image already exists on the device (rollbacks).
 	Reuse bool `json:"reuse,omitempty"`
 	// Cloudflare, when set, makes this a deployment to Cloudflare Pages or Workers. The control
@@ -795,4 +802,57 @@ func LooksLikeComposeFile(p string) bool {
 		return false
 	}
 	return strings.Contains(b, "compose") || strings.Contains(b, "stack")
+}
+
+// Docker storage housekeeping. Orchestrator builds an image per commit and pulls new tags over
+// old ones, so a device collects images; these types describe what is there and what a prune did.
+const (
+	// ActionDockerReport returns a DockerStorage as JSON and never changes anything.
+	ActionDockerReport = "docker.report"
+	// ActionDockerPrune removes unused images and build cache and returns a DockerPruneResult as
+	// JSON. Args: keep (newest images per worker to keep), trim=1, dangling=1, unused=1,
+	// build_cache=1, cache_hours (0 = all of it).
+	ActionDockerPrune = "docker.prune"
+)
+
+// DockerImageVersion is one tagged image of a worker built on the device.
+type DockerImageVersion struct {
+	Tag       string `json:"tag"`
+	ID        string `json:"id"`
+	Size      int64  `json:"size"`
+	Created   int64  `json:"created"`
+	InUse     bool   `json:"in_use"`
+	Removable bool   `json:"removable"` // a prune with the current keep setting would remove it
+}
+
+// DockerImageGroup is every built image of one worker, newest first.
+type DockerImageGroup struct {
+	Repo     string               `json:"repo"`
+	Worker   string               `json:"worker"`
+	Orphaned bool                 `json:"orphaned"` // no container of this name exists on the device
+	Versions []DockerImageVersion `json:"versions"`
+}
+
+// DockerStorage is what a device's Docker engine holds.
+type DockerStorage struct {
+	RootDir        string             `json:"root_dir"`
+	Keep           int                `json:"keep"`
+	Images         int                `json:"images"`
+	ImagesSize     int64              `json:"images_size"`
+	LayersSize     int64              `json:"layers_size"` // shared layers counted once
+	Dangling       int                `json:"dangling"`
+	DanglingSize   int64              `json:"dangling_size"`
+	Unused         int                `json:"unused"` // tagged images no container uses, built or pulled
+	UnusedSize     int64              `json:"unused_size"`
+	Workers        []DockerImageGroup `json:"workers"`
+	BuildCache     int64              `json:"build_cache"`
+	BuildCacheFree int64              `json:"build_cache_reclaimable"`
+	Reclaimable    int64              `json:"reclaimable"` // dangling + removable worker images + reclaimable cache (an estimate)
+}
+
+// DockerPruneResult is what a prune did.
+type DockerPruneResult struct {
+	ImagesRemoved int      `json:"images_removed"`
+	Reclaimed     int64    `json:"reclaimed"`
+	Steps         []string `json:"steps"`
 }

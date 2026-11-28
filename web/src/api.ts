@@ -182,6 +182,36 @@ export interface DiskShare {
   used_bytes?: number;
   persistent?: boolean;
 }
+export interface DockerGCPolicy {
+  keep: number;
+  max_gb: number;
+  mode: "off" | "daily" | "weekly";
+  time: string;
+  weekday: number;
+  tz: string;
+  dangling: boolean;
+  build_cache: boolean;
+  cache_days: number;
+  next_run?: string;
+}
+export interface DockerImageVersion { tag: string; id: string; size: number; created: number; in_use: boolean; removable: boolean }
+export interface DockerImageGroup { repo: string; worker: string; orphaned: boolean; versions: DockerImageVersion[] }
+export interface DockerStorage {
+  root_dir: string;
+  keep: number;
+  images: number;
+  images_size: number;
+  layers_size: number;
+  dangling: number;
+  dangling_size: number;
+  unused: number;
+  unused_size: number;
+  workers: DockerImageGroup[];
+  build_cache: number;
+  build_cache_reclaimable: number;
+  reclaimable: number;
+}
+
 export interface DiskReport {
   disks: Disk[];
   shares: DiskShare[];
@@ -674,6 +704,7 @@ export interface Settings {
   sso: SSOView;
   https: HTTPSView;
   temperature: { warn_c: number; crit_c: number };
+  docker_gc: DockerGCPolicy;
   security: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
@@ -1353,6 +1384,10 @@ export const api = {
   disks: (deviceId: string) => request<DiskReport>("GET", `/api/devices/${deviceId}/disks`),
   diskAction: (deviceId: string, action: "format" | "partition" | "mount" | "unmount" | "share", args: Record<string, string>) =>
     request<Command>("POST", `/api/devices/${deviceId}/disks/${action}`, args),
+  dockerStorage: (deviceId: string) => request<DockerStorage>("GET", `/api/devices/${deviceId}/docker`),
+  dockerPrune: (deviceId: string, body: { trim: boolean; dangling: boolean; unused: boolean; build_cache: boolean; cache_days: number }) =>
+    request<Command>("POST", `/api/devices/${deviceId}/docker/prune`, { ...body, confirm: "prune" }),
+  setDockerGC: (b: Omit<DockerGCPolicy, "next_run">) => request<DockerGCPolicy>("PUT", "/api/settings/docker-gc", b),
   enrolTokens: () => request<EnrolToken[]>("GET", "/api/enrol-tokens"),
   createEnrolToken: (body: { label: string; ttl_hours: number; max_uses: number }) => request<EnrolToken>("POST", "/api/enrol-tokens", body),
   revokeEnrolToken: (id: string) => request<void>("DELETE", `/api/enrol-tokens/${id}`),

@@ -20,21 +20,24 @@ type ImageInfo struct {
 	Labels map[string]string `json:"-"`
 	// RepoTags are the name:tag references pointing at the image (empty when untagged).
 	RepoTags []string `json:"-"`
+	// RepoDigests are the name@sha256:... references the image was pulled by.
+	RepoDigests []string `json:"-"`
 }
 
 // ImageInspect describes a local image by name or ID.
 func (d *Docker) ImageInspect(ctx context.Context, ref string) (*ImageInfo, error) {
 	var v struct {
-		ID       string   `json:"Id"`
-		RepoTags []string `json:"RepoTags"`
-		Config   struct {
+		ID          string   `json:"Id"`
+		RepoTags    []string `json:"RepoTags"`
+		RepoDigests []string `json:"RepoDigests"`
+		Config      struct {
 			Labels map[string]string `json:"Labels"`
 		} `json:"Config"`
 	}
 	if err := d.call(ctx, http.MethodGet, "/images/"+ref+"/json", nil, nil, &v); err != nil {
 		return nil, err
 	}
-	return &ImageInfo{ID: v.ID, Labels: v.Config.Labels, RepoTags: v.RepoTags}, nil
+	return &ImageInfo{ID: v.ID, Labels: v.Config.Labels, RepoTags: v.RepoTags, RepoDigests: v.RepoDigests}, nil
 }
 
 // ContainerNameOf resolves a container ID or name to its ID, name and image.

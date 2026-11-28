@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -78,11 +79,12 @@ func (s *Server) view(d *store.Device) DeviceView {
 			raise("warning", fmt.Sprintf("CPU is heavily loaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
 		}
 	}
+	warn, crit := s.tempThresholds(context.Background())
 	switch t := d.Metrics.TempC; {
-	case t >= 85:
-		raise("critical", fmt.Sprintf("Temperature is %.0f°C", t))
-	case t >= 80:
-		raise("warning", fmt.Sprintf("Temperature is %.0f°C", t))
+	case t >= crit:
+		raise("critical", fmt.Sprintf("Temperature is %.0f°C (critical at %.0f°C)", t, crit))
+	case t >= warn:
+		raise("warning", fmt.Sprintf("Temperature is %.0f°C (warning at %.0f°C)", t, warn))
 	}
 
 	// Container failures that point at the device rather than the app: crash loops and kills
@@ -725,6 +727,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"cloudflare":                 s.cloudflareStatus(r.Context()),
 		"ssl_mode":                   s.sslMode(r.Context()),
 		"security":                   s.securityView(r.Context()),
+		"temperature":                s.tempView(r.Context()),
 		"sso":                        s.ssoView(r.Context()),
 		"https":                      s.httpsView(r.Context()),
 		"github": map[string]any{

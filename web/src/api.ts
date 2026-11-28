@@ -80,6 +80,7 @@ export interface Metrics {
   load15: number;
   uptime_seconds: number;
   temp_c?: number;
+  sensors?: { name: string; c: number }[];
 }
 
 export interface Port {
@@ -509,6 +510,7 @@ export interface MetricSample {
   mem: number;
   disk: number;
   load1: number;
+  temp: number;
 }
 
 export interface Alert {
@@ -622,6 +624,7 @@ export interface Settings {
   ssl_mode: "http" | "dns";
   sso: SSOView;
   https: HTTPSView;
+  temperature: { warn_c: number; crit_c: number };
   security: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean };
   join_token: string;
   heartbeat_interval_seconds: number;
@@ -1323,6 +1326,7 @@ export const api = {
   connectivity: () => request<ConnView>("GET", "/api/connectivity"),
   setAgentURLs: (urls: string[]) => request<{ agent_urls: string[] }>("PUT", "/api/settings/agent-urls", { urls }),
   setSSLMode: (mode: "http" | "dns") => request<{ ssl_mode: string }>("PUT", "/api/settings/ssl", { mode }),
+  setTemperature: (b: { warn_c: number; crit_c: number }) => request<Settings["temperature"]>("PUT", "/api/settings/temperature", b),
   setSecurity: (b: { session_hours: number; min_password: number; force_https: boolean; require_https_agents: boolean }) => request<Settings["security"]>("PUT", "/api/settings/security", b),
   createDeviceSetup: (b: { proxy: boolean; tunnel_token?: string; tunnel_via?: "" | "proxy"; maintenance: boolean; maintenance_note?: string }) =>
     request<{ id: string }>("POST", "/api/device-setups", b),

@@ -410,6 +410,7 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/server-ha/promote", s.handleHAPromote)
 	mux.Handle("GET "+moveBundlePath, s.agentAuth(s.handleMoveBundle))
 	admin("PUT /api/settings/security", s.handleSetSecurity)
+	admin("PUT /api/settings/temperature", s.handleSetTemperature)
 	admin("PUT /api/settings/sso", s.handleSetSSO)
 	admin("GET /api/backup-oauth", s.handleGetBackupOAuth)
 	admin("PUT /api/backup-oauth", s.handleSetBackupOAuth)

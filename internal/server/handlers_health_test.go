@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,26 @@ func TestDeviceViewHealthChecks(t *testing.T) {
 		if c.v.Health != c.health {
 			t.Errorf("%s: health %q, want %q (%v)", c.name, c.v.Health, c.health, c.v.Issues)
 		}
+	}
+}
+
+func TestTemperatureThresholdsAreConfigurable(t *testing.T) {
+	st, _ := store.Open(":memory:")
+	s := &Server{store: st, cfg: Config{HeartbeatInterval: time.Second}}
+	ctx := context.Background()
+	if w, c := s.tempThresholds(ctx); w != 80 || c != 85 {
+		t.Fatalf("defaults %v %v", w, c)
+	}
+	s.store.SetSetting(ctx, settingTempWarn, "60")
+	s.store.SetSetting(ctx, settingTempCrit, "70")
+	d := &store.Device{LastSeen: time.Now(), Metrics: api.Metrics{TempC: 65}}
+	d.Host.Docker = &api.DockerInfo{}
+	if v := s.view(d); v.Health != "warning" {
+		t.Fatalf("health %q, want warning (%v)", v.Health, v.Issues)
+	}
+	d.Metrics.TempC = 71
+	if v := s.view(d); v.Health != "critical" {
+		t.Fatalf("health %q, want critical", v.Health)
 	}
 }
 

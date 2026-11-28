@@ -129,8 +129,10 @@ func TestDiscoverWaitsForRepeatedFailures(t *testing.T) {
 	ts := fakeServer(t, priv, &beats)
 	_, port, _ := net.SplitHostPort(strings.TrimPrefix(ts.URL, "http://"))
 	a := discoveryAgent(t, priv.Public().(ed25519.PublicKey), port)
-	if a.maybeDiscover(t.Context()) || a.maybeDiscover(t.Context()) {
-		t.Fatal("discovery ran before three failed heartbeats")
+	for range 2 {
+		if a.maybeDiscover(t.Context()) {
+			t.Fatal("discovery ran before three failed heartbeats")
+		}
 	}
 	if !a.maybeDiscover(t.Context()) {
 		t.Fatal("discovery did not run on the third failure")

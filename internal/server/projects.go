@@ -262,6 +262,11 @@ func (s *Server) validateProject(ctx context.Context, in *projectInput) error {
 			if strings.Contains(pv.Context, "..") {
 				return errors.New("paths must stay inside the repository")
 			}
+			for _, f := range []string{pv.Context, pv.Build, pv.Start} {
+				if strings.ContainsAny(f, "\n\r\x00") { // build and start commands become lines of a generated Dockerfile
+					return errors.New("preview build settings must be a single line")
+				}
+			}
 			if err := cleanWatch(&pv.Watch); err != nil {
 				return err
 			}

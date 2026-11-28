@@ -298,6 +298,11 @@ func (s *Server) handleSSOStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q.Set("state", state)
+	// Bind the flow to this browser. Without it, an attacker could start a sign-in, stop before the
+	// callback and get a victim to open the callback link, signing the victim's browser in as the
+	// attacker (login CSRF). The cookie is only sent to the sign-in endpoints and carries no session.
+	http.SetCookie(w, &http.Cookie{Name: ssoCookie, Value: state, Path: "/api/auth/sso/", MaxAge: 600,
+		HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode})
 	sep := "?"
 	if strings.Contains(base, "?") {
 		sep = "&"
@@ -314,9 +319,20 @@ type ssoIdentity struct {
 	role     string
 }
 
+// ssoCookie holds the state of the sign-in a browser started; see handleSSOStart.
+const ssoCookie = "orch_sso"
+
 func (s *Server) handleSSOCallback(w http.ResponseWriter, r *http.Request) {
 	provider := r.PathValue("provider")
-	flow, ok := s.sso.takeFlow(r.URL.Query().Get("state"))
+	state := r.URL.Query().Get("state")
+	if ck, err := r.Cookie(ssoCookie); err != nil || !tokenEqual(ck.Value, state) {
+		// Another browser started this sign-in (or the cookie expired). Drop the flow so it can't be replayed.
+		s.sso.takeFlow(state)
+		ssoFail(w, r, "this sign-in was started in a different browser or has expired. Start again from the sign-in page")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: ssoCookie, Path: "/api/auth/sso/", MaxAge: -1, HttpOnly: true, Secure: requestIsHTTPS(r), SameSite: http.SameSiteLaxMode})
+	flow, ok := s.sso.takeFlow(state)
 	if !ok || flow.provider != provider {
 		ssoFail(w, r, "the sign-in expired or was already used. Try again")
 		return

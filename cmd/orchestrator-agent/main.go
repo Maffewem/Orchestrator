@@ -55,6 +55,12 @@ func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	cfg.Logger = log
 
+	release, err := agent.LockState(cfg.StatePath)
+	if err != nil {
+		log.Error("start agent", "err", err)
+		os.Exit(1)
+	}
+	defer release()
 	a, err := agent.New(cfg)
 	if err != nil {
 		log.Error("start agent", "err", err)

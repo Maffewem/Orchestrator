@@ -419,7 +419,13 @@ func (s *Server) handleCloseStream(w http.ResponseWriter, r *http.Request) {
 // handleAgentStreamPoll hands the agent the streams it should open.
 func (s *Server) handleAgentStreamPoll(w http.ResponseWriter, r *http.Request) {
 	d := deviceFrom(r)
-	writeJSON(w, http.StatusOK, api.StreamPoll{Streams: s.streams.claim(r.Context(), d.ID)})
+	claimed := s.streams.claim(r.Context(), d.ID)
+	if s.identity != nil {
+		for i := range claimed {
+			claimed[i].Sig = api.SignText(s.identity, api.StreamSigningText(d.ID, claimed[i]))
+		}
+	}
+	writeJSON(w, http.StatusOK, api.StreamPoll{Streams: claimed})
 }
 
 func (s *Server) agentStream(w http.ResponseWriter, r *http.Request) (*stream, bool) {

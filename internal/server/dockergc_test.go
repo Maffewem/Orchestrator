@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -69,7 +70,7 @@ func TestDockerPruneIsAdminOnlyAndConfirmed(t *testing.T) {
 func TestKeepImagesOnlyForBuiltWorkers(t *testing.T) {
 	s := &Server{}
 	spec := api.DeploySpec{Image: "nginx"}
-	s.applyKeepImages(nil, &spec) //nolint
+	s.applyKeepImages(context.Background(), &spec)
 	if spec.KeepImages != 0 {
 		t.Errorf("pulled image got keep %d", spec.KeepImages)
 	}

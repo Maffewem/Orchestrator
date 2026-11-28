@@ -126,14 +126,32 @@ func (s *Server) handleDiskAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, scrubCommand(cmd))
 }
 
+// secretArgs are command arguments that only the agent needs: SMB passwords, Cloudflare Tunnel
+// tokens and the Cloudflare API token handed to the device proxy. They never leave the server in
+// an API response, whoever asks.
+var secretArgs = []string{"password", "token", "cloudflare_token", "join_token"}
+
 func scrubCommand(c *api.Command) *api.Command {
-	if c == nil || c.Args["password"] == "" {
+	if c == nil {
+		return c
+	}
+	has := false
+	for _, k := range secretArgs {
+		if c.Args[k] != "" {
+			has = true
+		}
+	}
+	if !has {
 		return c
 	}
 	cp := *c
 	cp.Args = map[string]string{}
 	for k, v := range c.Args {
-		if k != "password" {
+		secret := false
+		for _, sk := range secretArgs {
+			secret = secret || k == sk
+		}
+		if !secret {
 			cp.Args[k] = v
 		}
 	}

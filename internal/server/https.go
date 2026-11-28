@@ -175,7 +175,7 @@ func (s *Server) applyHTTPS(cfg HTTPSConfig) error {
 		st.err = "could not listen on " + cfg.Addr + ": " + err.Error()
 		return errors.New(st.err)
 	}
-	srv := &http.Server{Handler: s.Handler(), TLSConfig: tlsConf, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: s.Handler(), TLSConfig: tlsConf, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	st.srv, st.ln = srv, ln
 	go func() {
 		if err := srv.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {

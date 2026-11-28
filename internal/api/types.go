@@ -37,6 +37,15 @@ type HostInfo struct {
 	Tunnel *TunnelInfo `json:"tunnel,omitempty"`
 	// Power is the supply a Compute Blade reports (only sent while its LED profile is "blade").
 	Power *PowerSource `json:"power,omitempty"`
+	// Identify says whether Identify can flash an LED on this device, and why not when it cannot.
+	Identify *IdentifyInfo `json:"identify,omitempty"`
+}
+
+// IdentifyInfo is the agent's own answer to "can you flash an LED?", from what it finds on the device.
+type IdentifyInfo struct {
+	Available bool   `json:"available"`
+	Method    string `json:"method,omitempty"` // what flashes, when available
+	Reason    string `json:"reason,omitempty"` // why not, when unavailable
 }
 
 // TunnelInfo is what the agent knows about its cloudflared container.

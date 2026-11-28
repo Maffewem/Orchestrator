@@ -198,8 +198,12 @@ func (p *rp1PIO) Write(px [][3]byte) error {
 func (p *rp1PIO) Close() error {
 	fd := p.f.Fd()
 	if p.sm != 0xffff {
-		p.Write([][3]byte{{}, {}})
-		time.Sleep(5 * time.Millisecond) // let the last bits leave the FIFO
+		// Send the "off" frame twice with a latch gap between, so a frame that raced the previous
+		// one is not lost.
+		for i := 0; i < 2; i++ {
+			p.Write([][3]byte{{}, {}})
+			time.Sleep(5 * time.Millisecond) // let the last bits leave and the LEDs latch
+		}
 		en := pioSetEnabled{mask: 1 << p.sm}
 		ioctl2(fd, reqSMSetEnabled, unsafe.Pointer(&en))
 		rm := pioRemoveProgram{numInstrs: uint16(len(ws2812Program)), origin: p.origin}

@@ -121,3 +121,46 @@ func TestOOMKilledLoopNamesMemoryLimit(t *testing.T) {
 		t.Fatalf("issues %v", v.Issues)
 	}
 }
+
+func killedDevice(status string) *store.Device {
+	d := &store.Device{ID: "d1", LastSeen: time.Now(), Containers: []api.Container{{ID: "c1", Name: "paperless", Image: "ghcr.io/paperless-ngx/paperless-ngx", State: "exited", Status: status}}}
+	d.Host.CPUs = 4
+	d.Host.Docker = &api.DockerInfo{}
+	d.Metrics = api.Metrics{MemoryTotal: 4 << 30, MemoryUsed: 3000 << 20}
+	return d
+}
+
+func TestExit137ExplainedAndAcknowledged(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}, wstats: &workerStats{workers: map[string]*workerAcc{}}}
+	s.wstats.workers["d1|paperless"] = &workerAcc{latest: api.ContainerStats{MemLimit: 1 << 30, MemUsed: 900 << 20}}
+	d := killedDevice("Exited (137) 2 minutes ago")
+	v := s.view(d)
+	if v.Health != "warning" || len(v.ContainerIssues) != 1 {
+		t.Fatalf("health %q issues %+v", v.Health, v.ContainerIssues)
+	}
+	ci := v.ContainerIssues[0]
+	if ci.SuggestMB != 2048 || ci.MemLimit != 1<<30 || !strings.Contains(ci.Cause, "out-of-memory") || !strings.Contains(ci.Cause, "swap") {
+		t.Fatalf("issue %+v", ci)
+	}
+	s.dismiss(context.Background(), "d1", "c1", "paperless", "ack", "Matthew")
+	v = s.view(d)
+	if v.Health != "ok" || len(v.ContainerIssues) != 1 || !v.ContainerIssues[0].Acked {
+		t.Fatalf("after ack: health %q %+v", v.Health, v.ContainerIssues)
+	}
+	// Running again clears the acknowledgement, so the next kill alerts afresh.
+	d.Containers[0].State = "running"
+	s.view(d)
+	d.Containers[0].State = "exited"
+	if v = s.view(d); v.Health != "warning" {
+		t.Fatalf("a new kill should alert again, got %q", v.Health)
+	}
+}
+
+func TestExit137FromRequestedStopIsNotAnAlert(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}}
+	d := killedDevice("Exited (137) 5 seconds ago")
+	s.markStopped(context.Background(), "d1", d.Containers[0])
+	if v := s.view(d); v.Health != "ok" || len(v.ContainerIssues) != 0 {
+		t.Fatalf("health %q issues %+v", v.Health, v.ContainerIssues)
+	}
+}

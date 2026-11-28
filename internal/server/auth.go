@@ -109,6 +109,7 @@ func routeRole(pattern string) string {
 	operator := map[string]bool{
 		"POST /api/devices/{id}/commands":                    true,
 		"POST /api/devices/{id}/network-notice/ack":          true,
+		"POST /api/devices/{id}/container-alerts/ack":        true,
 		"GET /api/commands/{id}":                             true,
 		"POST /api/devices/{id}/containers/{cid}/backup":     true,
 		"PUT /api/devices/{id}/workers/{name}/backup-policy": true,

@@ -13,6 +13,7 @@ import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 import Disks from "../components/Disks";
+import ContainerIssues, { isContainerIssueText } from "../components/ContainerIssues";
 import HardwareMetrics, { CompareCard, PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
 
 export default function DevicePage() {
@@ -362,14 +363,15 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
         {hwHint && <p className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm text-neutral-600">{hwHint}</p>}
-        {d.issues.length > 0 && (
+        {(d.issues.length > 0 || (d.container_issues?.length ?? 0) > 0) && (
           <Card className="border-amber-200 bg-amber-50/50">
             <CardHeader title="Needs attention" />
-            <ul className="space-y-1 px-5 py-3 text-sm">
-              {d.issues.map((i) => (
+            <ul className="space-y-1 px-5 py-3 text-sm empty:hidden">
+              {d.issues.filter((i) => !(d.container_issues?.length && isContainerIssueText(i))).map((i) => (
                 <li key={i}>• {i}</li>
               ))}
             </ul>
+            <ContainerIssues d={d} onChanged={onChanged} />
             {d.network_notice && (
               <div className="flex flex-wrap items-center gap-3 border-t border-amber-200 px-5 py-3 text-sm">
                 <p className="min-w-0 flex-1 text-neutral-600">

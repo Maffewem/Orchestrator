@@ -25,13 +25,15 @@ type DeviceView struct {
 	Proxy string `json:"proxy"`
 	// Link is how the agent reaches this server: https | http | unknown.
 	Link string `json:"agent_link"`
+	// ContainerIssues explains each failing container, with the numbers behind it and what to do.
+	ContainerIssues []ContainerIssue `json:"container_issues"`
 	// NetworkNotice is a change to the device's addresses or to the address it reaches the server
 	// at, shown until someone acknowledges it.
 	NetworkNotice *NetNotice `json:"network_notice,omitempty"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, Proxy: proxyState(d), Link: s.agentLink(d.ID)}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, ContainerIssues: []ContainerIssue{}, Proxy: proxyState(d), Link: s.agentLink(d.ID)}
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"
@@ -92,8 +94,8 @@ func (s *Server) view(d *store.Device) DeviceView {
 	}
 
 	// Container failures that point at the device rather than the app: crash loops and kills
-	// by the kernel's out-of-memory killer (exit code 137).
-	var looping, killed []string
+	// by the kernel's out-of-memory killer (exit code 137). A container the dashboard stopped on
+	// purpose, or one someone acknowledged, is listed but does not raise the device's health.
 	marked, unstable := s.markUnstable(d.ID, d.Containers)
 	if len(unstable) > 0 {
 		dc := *d
@@ -101,39 +103,59 @@ func (s *Server) view(d *store.Device) DeviceView {
 		v.Device = &dc
 	}
 	oomed := s.oomKilled(d.ID, marked)
-	for _, c := range d.Containers {
+	isUnstable := map[string]bool{}
+	for _, n := range unstable {
+		isUnstable[n] = true
+	}
+	var projects []*store.Project
+	var kinds = map[string]string{}
+	var order []api.Container
+	for _, c := range marked {
+		kind := ""
 		switch {
 		case oomed[c.Name]:
-			// reported below with the advice that fits
+			kind = "oom"
+		case isUnstable[c.Name]:
+			kind = "loop"
 		case c.State == "dead":
-			looping = append(looping, c.Name)
+			kind = "dead"
 		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
-			killed = append(killed, c.Name)
+			kind = "killed"
 		}
-	}
-	var loops []string
-	for _, n := range unstable {
-		if !oomed[n] { // out-of-memory loops are reported below with their own advice
-			loops = append(loops, n)
+		if kind == "" {
+			s.dismissedFor(d.ID, c) // lets a recovered container's old dismissal lapse
+			continue
 		}
-	}
-	if len(loops) > 0 {
-		raise("warning", "Containers restarting repeatedly: "+strings.Join(loops, ", "))
-	}
-	if len(looping) > 0 {
-		raise("warning", "Containers dead: "+strings.Join(looping, ", "))
-	}
-	var oom []string
-	for _, c := range marked {
-		if oomed[c.Name] {
-			oom = append(oom, c.Name)
+		if dm, ok := s.dismissedFor(d.ID, c); ok && dm.Reason == "manual" && kind == "killed" {
+			continue // we stopped it ourselves
 		}
+		kinds[c.Name] = kind
+		order = append(order, c)
 	}
-	if len(oom) > 0 {
-		raise("warning", "Containers killed for running out of memory: "+strings.Join(oom, ", ")+". Raise the memory limit in the project settings, or free memory on the device")
+	if len(order) > 0 && s.store != nil {
+		projects, _ = s.store.ListProjects(context.Background())
 	}
-	if len(killed) > 0 {
-		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(killed, ", "))
+	byKind := map[string][]string{}
+	for _, c := range order {
+		is := s.describeContainerIssue(context.Background(), d, c, kinds[c.Name], projects)
+		if dm, ok := s.dismissedFor(d.ID, c); ok && dm.Reason == "ack" {
+			is.Acked, is.AckedBy = true, dm.By
+		} else {
+			byKind[is.Kind] = append(byKind[is.Kind], c.Name)
+		}
+		v.ContainerIssues = append(v.ContainerIssues, is)
+	}
+	if n := byKind["loop"]; len(n) > 0 {
+		raise("warning", "Containers restarting repeatedly: "+strings.Join(n, ", "))
+	}
+	if n := byKind["dead"]; len(n) > 0 {
+		raise("warning", "Containers dead: "+strings.Join(n, ", "))
+	}
+	if n := byKind["oom"]; len(n) > 0 {
+		raise("warning", "Containers killed for running out of memory: "+strings.Join(n, ", ")+". Raise the memory limit in the project settings, or free memory on the device")
+	}
+	if n := byKind["killed"]; len(n) > 0 {
+		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(n, ", "))
 	}
 	return v
 }
@@ -628,6 +650,9 @@ func (s *Server) handleCreateCommand(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Args = map[string]string{"restart": req.Args["restart"], "retries": req.Args["retries"], "memory_mb": req.Args["memory_mb"], "stop": req.Args["stop"]}
 	}
+	if c := findContainerByID(d, req.Target); c != nil && (req.Action == api.ActionStop || req.Action == api.ActionRemove || (req.Action == api.ActionUpdate && req.Args["stop"] == "1")) {
+		s.markStopped(r.Context(), d.ID, *c)
+	}
 	if req.Action == api.ActionRemove {
 		// The agent removes by name. Orchestrator's own containers and containers of projects that
 		// still exist are never removed from here; deleting the project is the way to do that.
@@ -831,4 +856,13 @@ func cleanLabels(in []string) []string {
 		out = append(out, l)
 	}
 	return out
+}
+
+func findContainerByID(d *store.Device, id string) *api.Container {
+	for i := range d.Containers {
+		if d.Containers[i].ID == id {
+			return &d.Containers[i]
+		}
+	}
+	return nil
 }

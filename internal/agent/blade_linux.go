@@ -159,49 +159,47 @@ func rp1Opener() (pixelWriter, error) {
 	return w, nil
 }
 
-// BladeLEDTest is the quick hardware check: run `sudo orchestrator-agent -blade-led-test`. It tries the
-// PIO setup with several assumed PIO clock speeds (the one thing about the setup that is only a guess),
-// each for a few seconds, and says which attempt is running, so the one that lights the LEDs can be named.
+// BladeLEDTest is the quick hardware check: run `sudo orchestrator-agent -blade-led-test`. It sets up the
+// PIO once at 200 MHz and steps through several frames, naming each, so what the LEDs actually do with
+// each one can be reported back.
 func BladeLEDTest(out interface{ Write([]byte) (int, error) }) error {
 	say := func(f string, a ...any) { fmt.Fprintf(out, f+"\n", a...) }
-	say("Compute Blade LED test. Watch the top and edge LEDs. Each attempt shows the top LED red and the edge LED blue (dimmed) for 3 seconds, then off.")
-	var firstErr error
-	for i, hz := range []int{200_000_000, 150_000_000, 125_000_000, 100_000_000} {
+	say("Compute Blade LED test. Watch the top and edge LEDs and note what each step shows.")
+	w, err := openRP1PIOClock(bladePIODev, bladePin, 200_000_000)
+	if err != nil {
+		say("failed: %v", err)
+		return err
+	}
+	defer w.Close()
+	steps := []struct {
+		name string
+		px   [][3]byte
+	}{
+		{"1: top RED, edge BLUE", [][3]byte{{60, 0, 0}, {0, 0, 60}}},
+		{"2: top BLUE, edge RED (swapped)", [][3]byte{{0, 0, 60}, {60, 0, 0}}},
+		{"3: both GREEN", [][3]byte{{0, 60, 0}, {0, 60, 0}}},
+		{"4: both OFF (all zero)", [][3]byte{{}, {}}},
+		{"5: both very dim white (1,1,1)", [][3]byte{{1, 1, 1}, {1, 1, 1}}},
+		{"6: both OFF again", [][3]byte{{}, {}}},
+		{"7: top RED only, edge off", [][3]byte{{60, 0, 0}, {}}},
+		{"8: both OFF, sent three times", [][3]byte{{}, {}}},
+	}
+	for i, st := range steps {
 		say("")
-		say("Attempt %d: assuming a %d MHz PIO clock ...", i+1, hz/1_000_000)
-		w, err := openRP1PIOClock(bladePIODev, bladePin, hz)
-		if err != nil {
-			say("  failed: %v", err)
-			if firstErr == nil {
-				firstErr = err
+		say("Step %s  (hold 4 seconds)", st.name)
+		n := 1
+		if i == len(steps)-1 {
+			n = 3
+		}
+		for k := 0; k < n; k++ {
+			if err := w.Write(st.px); err != nil {
+				say("  write failed: %v", err)
 			}
-			continue
+			time.Sleep(10 * time.Millisecond)
 		}
-		if err := w.Write([][3]byte{{60, 0, 0}, {0, 0, 60}}); err != nil {
-			say("  write failed: %v", err)
-			w.Close()
-			continue
-		}
-		time.Sleep(20 * time.Millisecond)
-		if empty, err := w.txEmpty(); err != nil {
-			say("  FIFO check failed: %v", err)
-		} else {
-			say("  state machine took the data: %v", empty)
-		}
-		say("  NOW: top LED red? edge LED blue?")
-		time.Sleep(3 * time.Second)
-		err = w.Write([][3]byte{{}, {}})
-		time.Sleep(20 * time.Millisecond)
-		empty, e2 := w.txEmpty()
-		say("  sent the off frame: write error=%v, taken=%v (%v)", err, empty, e2)
-		time.Sleep(2 * time.Second)
-		say("  are both LEDs dark NOW, before the program is closed?")
-		time.Sleep(2 * time.Second)
-		w.Close()
-		say("  off. (3 second pause, both LEDs should be dark)")
-		time.Sleep(3 * time.Second)
+		time.Sleep(4 * time.Second)
 	}
 	say("")
-	say("Done. Tell me which attempt (if any) showed red on top and blue on the edge.")
-	return firstErr
+	say("Done. Tell me what each step looked like (same / changed / which colours).")
+	return nil
 }

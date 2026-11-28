@@ -34,10 +34,12 @@ type DeviceView struct {
 	Power *powerPending `json:"power,omitempty"`
 	// PowerImpact is set on the single-device endpoint: what taking the device down affects.
 	PowerImpact *PowerImpact `json:"power_impact,omitempty"`
+	// IdentifyingUntil is set while the device flashes its LEDs.
+	IdentifyingUntil *time.Time `json:"identifying_until,omitempty"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, ContainerIssues: []ContainerIssue{}, Proxy: proxyState(d), Link: s.agentLink(d.ID)}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, ContainerIssues: []ContainerIssue{}, Proxy: proxyState(d), Link: s.agentLink(d.ID), IdentifyingUntil: s.flashing.get(d.ID)}
 	v.Power = s.loadPower(context.Background(), d.ID)
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
@@ -87,6 +89,10 @@ func (s *Server) view(d *store.Device) DeviceView {
 		}
 	}
 	warn, crit := s.tempThresholds(context.Background())
+	// A blade on a 5 V-only supply can brown out under sustained load (it has about 15 W; PoE+ has 30 W).
+	if p := d.Host.Power; p != nil && p.Source == api.PowerBasic && d.Host.CPUs > 0 && d.Metrics.Load5/float64(d.Host.CPUs) >= 1 {
+		raise("warning", "Heavily loaded while powered by a 5 V-only supply (up to 15 W); PoE+ gives up to 30 W")
+	}
 	switch t := d.Metrics.TempC; {
 	case t >= crit:
 		raise("critical", fmt.Sprintf("Temperature is %.0f°C (critical at %.0f°C)", t, crit))
@@ -118,12 +124,14 @@ func (s *Server) view(d *store.Device) DeviceView {
 	for _, c := range marked {
 		kind := ""
 		switch {
-		case oomed[c.Name]:
+		case oomed[c.Name], c.State == "exited" && c.OOMKilled:
 			kind = "oom"
 		case isUnstable[c.Name]:
 			kind = "loop"
 		case c.State == "dead":
 			kind = "dead"
+		case c.State == "exited" && c.StopRequested:
+			// docker stop / kill / compose down on the device: not a failure, whatever the exit code
 		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
 			kind = "killed"
 		}
@@ -145,7 +153,9 @@ func (s *Server) view(d *store.Device) DeviceView {
 		is := s.describeContainerIssue(context.Background(), d, c, kinds[c.Name], projects)
 		if dm, ok := s.dismissedFor(d.ID, c); ok && dm.Reason == "ack" {
 			is.Acked, is.AckedBy = true, dm.By
-		} else {
+		} else if !(is.Kind == "killed" && c.ExitInspected) {
+			// An exit 137 that Docker did not blame on memory and did not log a stop for is listed
+			// with its explanation but is not a device warning.
 			byKind[is.Kind] = append(byKind[is.Kind], c.Name)
 		}
 		v.ContainerIssues = append(v.ContainerIssues, is)
@@ -160,7 +170,7 @@ func (s *Server) view(d *store.Device) DeviceView {
 		raise("warning", "Containers killed for running out of memory: "+strings.Join(n, ", ")+". Raise the memory limit in the project settings, or free memory on the device")
 	}
 	if n := byKind["killed"]; len(n) > 0 {
-		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(n, ", "))
+		raise("warning", "Containers killed (exit 137, possibly out of memory): "+strings.Join(n, ", "))
 	}
 	return v
 }
@@ -243,7 +253,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.diffContainers(r, d, req.Containers)
 	s.noteNetworkChanges(ctx, d, req.Host)
 
-	s.metrics.add(d.ID, req.Metrics)
+	s.recordHistory(ctx, d.ID, s.metrics.add(d.ID, req.Metrics))
 	s.ingestStats(ctx, d, req.Containers, req.Stats)
 	s.noteStale(ctx, d.Name, d.ID, req.StaleServers)
 

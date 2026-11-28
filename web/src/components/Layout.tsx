@@ -36,6 +36,7 @@ export const settingsSections = [
   ["domains", "Domains"],
   ["backups", "Backup password"],
   ["images", "Image retention"],
+  ["graphs", "Graph history"],
   ["serverbackup", "Server backup"],
   ["mainserver", "Move the server"],
   ["join", "Join token"],

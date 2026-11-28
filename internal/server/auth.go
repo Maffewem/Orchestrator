@@ -149,6 +149,8 @@ func routeRole(pattern string) string {
 		"GET /api/system/update":                  true,
 		"GET /api/github/repos":                   true,
 		"GET /api/server-backups":                 true,
+		"GET /api/devices/{id}/leds":              true,
+		"GET /api/devices/{id}/ssh":               true,
 		"GET /api/server-backups/{name}/download": true,
 	}
 	switch {

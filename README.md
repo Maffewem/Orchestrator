@@ -372,6 +372,14 @@ Google Drive, Dropbox and OneDrive can also be connected with a sign-in button: 
 OAuth app with the provider, enter its client ID and secret under Settings > Server backups, and
 add `<dashboard URL>/api/backup-oauth/callback` as the redirect URI (providers require HTTPS, or
 localhost). The dashboard writes the rclone configuration itself.
+
+Copies are mirrors: the schedule picks which destinations receive each backup (none ticked means
+all enabled ones), they are written in parallel, a failed copy is retried twice, and every copy is
+read back and compared with the SHA-256 of the local file. Each backup shows one row per
+destination (verified, failed, missing), and the activity feed reports a partial mirror as an
+error. From there you can re-sync a missing copy, re-verify all copies, or restore from the copy
+on any destination, even after the local file is gone. Each destination can keep its own number
+of backups, S3 included. Devices need the current agent to report checksums.
 Folders, devices and cloud storage keep the same number of copies as the local retention; expire
 S3 objects with a bucket lifecycle rule.
 

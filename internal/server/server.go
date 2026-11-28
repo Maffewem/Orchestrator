@@ -80,6 +80,7 @@ type Server struct {
 	githubAPI     string
 	cloudflareAPI string
 	metrics       *metricsHistory
+	hist          *deviceHistory
 	wstats        *workerStats
 	logins        limiter
 	gateOK        gateCache // recently verified worker-login credentials; see auth.go
@@ -111,6 +112,7 @@ type Server struct {
 	// previewMu serialises preview syncs so a webhook and the poller can't race.
 	previewMu     sync.Mutex
 	streams       *streamHub
+	flashing      identifyHub // devices that are flashing their LEDs; see hardware.go
 	sso           ssoState
 	https         httpsState
 	ssoGitHubURL  string // overrides https://github.com in tests
@@ -156,7 +158,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.DockerHost == "" {
 		cfg.DockerHost = "unix:///var/run/docker.sock"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), wstats: newWorkerStats(), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted, cfSem: make(chan struct{}, cfMaxConcurrentBuilds)}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), hist: newDeviceHistory(), wstats: newWorkerStats(), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted, cfSem: make(chan struct{}, cfMaxConcurrentBuilds)}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 	s.mig.persist = s.persistMigration
 
@@ -209,6 +211,7 @@ func (s *Server) Run(ctx context.Context) {
 	s.recoverCloudflare(ctx)
 	s.recoverMove(ctx)
 	go s.cfMonitorLoop(ctx)
+	s.primeMetrics(ctx)
 	go s.metricsPruneLoop(ctx)
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
@@ -274,6 +277,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agent/streams/{id}/output", s.agentAuth(s.handleAgentStreamOutput))
 	mux.Handle("GET /api/agent/streams/{id}/input", s.agentAuth(s.handleAgentStreamInput))
 	mux.Handle("GET /api/agent/server-backups/{name}", s.agentAuth(s.handleAgentServerBackup))
+	mux.Handle("PUT /api/agent/server-backups/{name}", s.agentAuth(s.handleAgentServerBackupUpload))
 	mux.Handle("GET /api/agent/images/{id}", s.agentAuth(s.handleAgentImage))
 	mux.Handle("GET /api/agent/update", s.agentAuth(s.handleAgentUpdateInfo))
 
@@ -386,6 +390,15 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/projects/{id}/previews/settings", s.handleSetPreviewSettings)
 	admin("DELETE /api/projects/{id}/previews/{pid}", s.handleDeletePreview)
 	admin("POST /api/devices/{id}/streams", s.handleOpenStream)
+	admin("GET /api/devices/{id}/leds", s.handleListLEDs)
+	admin("POST /api/devices/{id}/leds/identify", s.handleFlashLEDs)
+	admin("PUT /api/devices/{id}/leds/config", s.handleSetLEDConfig)
+	admin("GET /api/devices/{id}/ssh", s.handleSSHStatus)
+	admin("POST /api/devices/{id}/ssh/check", s.handleSSHCheck)
+	admin("PUT /api/devices/{id}/ssh/config", s.handleSSHConfig)
+	admin("POST /api/devices/{id}/ssh/confirm", s.handleSSHConfirm)
+	admin("POST /api/devices/{id}/ssh/keys", s.handleSSHAddKey)
+	admin("POST /api/devices/{id}/ssh/keys/remove", s.handleSSHRemoveKey)
 	admin("GET /api/streams/{id}/output", s.handleStreamOutput)
 	admin("POST /api/streams/{id}/input", s.handleStreamInput)
 	admin("DELETE /api/streams/{id}", s.handleCloseStream)
@@ -424,6 +437,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET "+moveBundlePath, s.agentAuth(s.handleMoveBundle))
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/temperature", s.handleSetTemperature)
+	admin("GET /api/settings/device-metrics", s.handleGetDeviceMetricsSettings)
+	admin("PUT /api/settings/device-metrics", s.handleSetDeviceMetricsSettings)
 	admin("PUT /api/settings/docker-gc", s.handleSetDockerGC)
 	admin("GET /api/devices/{id}/docker", s.handleDockerReport)
 	admin("POST /api/devices/{id}/docker/prune", s.handleDockerPrune)
@@ -432,6 +447,8 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/backup-oauth", s.handleSetBackupOAuth)
 	admin("POST /api/backup-oauth/{provider}/start", s.handleBackupOAuthStart)
 	admin("PUT /api/settings/https", s.handleSetHTTPS)
+	admin("POST /api/settings/https/test", s.handleTestHTTPS)
+	admin("POST /api/settings/https/publish-port", s.handlePublishHTTPSPort)
 	admin("GET /api/server-backups", s.handleListServerBackups)
 	admin("POST /api/server-backups", s.handleCreateServerBackup)
 	admin("PUT /api/server-backups/destinations", s.handleSetBackupDests)
@@ -441,6 +458,8 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/server-backups/{name}/download", s.handleDownloadServerBackup)
 	admin("DELETE /api/server-backups/{name}", s.handleDeleteServerBackup)
 	admin("POST /api/server-backups/{name}/restore", s.handleRestoreServerBackup)
+	admin("POST /api/server-backups/{name}/sync", s.handleSyncServerBackup)
+	admin("POST /api/server-backups/{name}/verify", s.handleVerifyServerBackup)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 

@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,4 +113,44 @@ func (t s3Target) PutFile(ctx context.Context, key, path string) error {
 
 func (t s3Target) Delete(ctx context.Context, key string) error {
 	return t.do(ctx, http.MethodDelete, key, nil, 0, sha256Hex(nil))
+}
+
+// GetFile downloads key into the local file dst.
+func (t s3Target) GetFile(ctx context.Context, key, dst string) error {
+	u, err := t.objectURL(key)
+	if err != nil {
+		return err
+	}
+	payload := sha256Hex(nil)
+	now := time.Now().UTC().Format("20060102T150405Z")
+	hdr := map[string]string{"host": u.Host, "x-amz-content-sha256": payload, "x-amz-date": now}
+	sig := signatureV4(http.MethodGet, u.EscapedPath(), "", hdr, payload, t.SecretKey, t.Region, now)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("x-amz-content-sha256", payload)
+	req.Header.Set("x-amz-date", now)
+	req.Header.Set("Authorization", fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s/%s/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=%s", t.AccessKey, now[:8], t.Region, sig))
+	resp, err := (&http.Client{Timeout: 2 * time.Hour}).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return errors.New("the object is missing from the bucket")
+	}
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("S3 returned HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, resp.Body)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }

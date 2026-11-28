@@ -44,9 +44,10 @@ func (a *Agent) hostInfo() api.HostInfo {
 		CPUs:         runtime.NumCPU(),
 		AgentVersion: Version,
 		InContainer:  InContainer(),
-		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapCompose, api.CapTunnel, api.CapTunnelUpdate, api.CapDiscover, api.CapServerInstall, api.CapStats, api.CapFence, api.CapDisks, api.CapImages, api.CapLimits, api.CapDockerGC, api.CapHWMetrics, api.CapPower},
+		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapFileFetch, api.CapCompose, api.CapTunnel, api.CapTunnelUpdate, api.CapDiscover, api.CapServerInstall, api.CapStats, api.CapFence, api.CapDisks, api.CapImages, api.CapLimits, api.CapDockerGC, api.CapHWMetrics, api.CapPower},
 		Server:       strings.TrimRight(a.server(), "/"),
 	}
+	h.Capabilities = append(h.Capabilities, hardwareCaps()...)
 	if runtime.GOOS == "linux" && !h.InContainer {
 		// A dedicated address needs the agent to speak on the device's own LAN.
 		h.Capabilities = append(h.Capabilities, api.CapDedicatedIP, api.CapDedicatedVLAN, api.CapDedicatedDHCPRaw, api.CapDedicatedRelease)
@@ -68,6 +69,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 	h.ServerVia = a.serverVia()
 	h.Network = a.network()
 	h.Tunnel = a.tunnelInfo()
+	h.Power = a.powerSource()
 	return h
 }
 

@@ -82,7 +82,17 @@ export default function WorkerOverview({ w, addresses, canBackup }: { w: FleetCo
   const mainUrl = prod?.enabled ? `https://${prod.hostname}` : eps[0] ? `http://${eps[0]}` : null;
   const own = w.networks?.find((n) => n.name.startsWith("orch-lan-") && n.ip);
   const env = p?.runtime.env.filter((e) => e.trim() && !e.trimStart().startsWith("#")).map((e) => e.split("=")[0]) ?? [];
-  const publishedPorts = p?.runtime.ports ?? [];
+  // Ports configured on the project, plus those the live container actually publishes (an adopted
+  // or self-managed container such as the server itself has none configured).
+  const publishedPorts = [...(p?.runtime.ports ?? [])];
+  const seenPublic = new Set(publishedPorts.map((x) => x.split(":")[0].replace(/\/.*/, "")));
+  for (const x of w.ports ?? []) {
+    if (!x.public_port) continue;
+    const label = `${x.public_port}:${x.private_port}${x.type && x.type !== "tcp" ? `/${x.type}` : ""}`;
+    if (seenPublic.has(String(x.public_port)) || publishedPorts.includes(label)) continue;
+    seenPublic.add(String(x.public_port));
+    publishedPorts.push(label);
+  }
   const mode = policy.data?.mode ?? "off";
   const samples = metrics.data ?? [];
   const m = device.data?.metrics;

@@ -116,17 +116,22 @@ func TestServerBackupDestinations(t *testing.T) {
 		gotMu sync.Mutex // the fake S3 runs on the server's goroutines
 		got   struct{ path, auth string }
 	)
+	objs := map[string][]byte{}
 	seen := func() struct{ path, auth string } {
 		gotMu.Lock()
 		defer gotMu.Unlock()
 		return got
 	}
 	s3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPut {
-			gotMu.Lock()
+		gotMu.Lock()
+		defer gotMu.Unlock()
+		switch r.Method {
+		case http.MethodPut:
 			got.path, got.auth = r.URL.Path, r.Header.Get("Authorization")
-			gotMu.Unlock()
-			io.Copy(io.Discard, r.Body)
+			objs[r.URL.Path], _ = io.ReadAll(r.Body)
+		case http.MethodGet:
+			w.Write(objs[r.URL.Path])
+			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -176,4 +181,98 @@ func TestServerBackupDestinations(t *testing.T) {
 	if g := seen(); !strings.HasPrefix(g.path, "/bk/orch2/") || !strings.Contains(g.auth, "Credential=AK/") {
 		t.Fatalf("s3 request: %+v", g)
 	}
+}
+
+func TestMirrorVerifyResyncAndRestore(t *testing.T) {
+	old := mirrorBackoff
+	mirrorBackoff = []time.Duration{10 * time.Millisecond}
+	defer func() { mirrorBackoff = old }()
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "orch.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	restarted := make(chan struct{}, 1)
+	srv, _, _ := New(context.Background(), st, Config{AdminToken: adminToken, HeartbeatInterval: time.Second, BackupDir: dir, DBPath: dbPath, Restart: func() { restarted <- struct{}{} }})
+	h := &harness{t: t, srv: srv, st: st}
+	h.ts = newTestServer(t, srv)
+	ctx := context.Background()
+
+	good, other := filepath.Join(dir, "good"), filepath.Join(dir, "other")
+	blocker := filepath.Join(dir, "blocker") // a file, so a folder inside it cannot be created
+	os.WriteFile(blocker, []byte("x"), 0o600)
+	bad := filepath.Join(blocker, "mirror")
+	h.do("PUT", "/api/server-backups/destinations", adminToken, []BackupDest{
+		{ID: "good", Kind: "folder", Name: "good", Enabled: true, Path: good},
+		{ID: "other", Kind: "folder", Name: "other", Enabled: true, Path: other},
+		{ID: "bad", Kind: "folder", Name: "bad", Enabled: true, Path: bad},
+	}, nil)
+	// A schedule can pick destinations: "other" is left out.
+	pol := srv.serverBackupPolicy(ctx)
+	pol.Destinations = []string{"good", "bad"}
+	h.do("PUT", "/api/server-backups/policy", adminToken, pol, nil)
+
+	var b serverBackup
+	h.do("POST", "/api/server-backups", adminToken, nil, &b)
+	waitFor := func(what string, cond func(serverBackup) bool) serverBackup {
+		t.Helper()
+		for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(30 * time.Millisecond) {
+			for _, x := range srv.backupsWithCopies(ctx) {
+				if x.Name == b.Name && cond(x) {
+					return x
+				}
+			}
+		}
+		t.Fatalf("timed out waiting for %s: %+v", what, srv.backupsWithCopies(ctx))
+		return serverBackup{}
+	}
+	v := waitFor("partial mirror", func(x serverBackup) bool {
+		return x.Wanted == 2 && len(x.Copies) == 2 && (x.Copies[0].Status == "ok" || x.Copies[0].Status == "failed") && (x.Copies[1].Status == "ok" || x.Copies[1].Status == "failed")
+	})
+	if v.Mirrored != 1 {
+		t.Fatalf("expected 1 of 2 mirrored: %+v", v)
+	}
+	for _, c := range v.Copies {
+		if c.DestID == "good" && (c.Status != "ok" || !c.Verified) {
+			t.Fatalf("good copy not verified: %+v", c)
+		}
+		if c.DestID == "bad" && c.Status != "failed" {
+			t.Fatalf("bad copy should fail: %+v", c)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(other, b.Name)); err == nil {
+		t.Fatal("unselected destination received a copy")
+	}
+
+	// Fix the broken mirror and re-sync only what is missing.
+	os.Remove(blocker)
+	h.do("POST", "/api/server-backups/"+b.Name+"/sync", adminToken, nil, nil)
+	v = waitFor("re-sync", func(x serverBackup) bool { return x.Mirrored == 2 })
+	if v.SHA256 == "" {
+		t.Fatal("no checksum recorded")
+	}
+
+	// A damaged copy is caught by verification.
+	os.WriteFile(filepath.Join(good, b.Name), []byte("damaged"), 0o600)
+	h.do("POST", "/api/server-backups/"+b.Name+"/verify", adminToken, nil, nil)
+	waitFor("damage detected", func(x serverBackup) bool { return x.Mirrored == 1 })
+
+	// With the local file gone, restore from the good mirror.
+	os.Remove(filepath.Join(srv.serverBackupDir(), b.Name))
+	if code := h.do("POST", "/api/server-backups/"+b.Name+"/restore?from=good", adminToken, nil, nil); code != http.StatusBadGateway {
+		t.Fatalf("restore from a damaged copy should be refused: %d", code)
+	}
+	if code := h.do("POST", "/api/server-backups/"+b.Name+"/restore?from=bad", adminToken, nil, nil); code != http.StatusAccepted {
+		t.Fatalf("restore from a mirror: %d", code)
+	}
+	select {
+	case <-restarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no restart after restore")
+	}
+	// The re-sync rebuilds the missing local file and the damaged mirror.
+	h.do("POST", "/api/server-backups/"+b.Name+"/sync", adminToken, nil, nil)
+	waitFor("local file back and mirrors whole", func(x serverBackup) bool { return x.Local && x.Mirrored == 2 })
 }

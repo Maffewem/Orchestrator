@@ -29,6 +29,8 @@ type Self struct {
 	SocketBind string
 	// Mounts are the container's mounts; they tell where its folders really live on the host.
 	Mounts []Mount
+	// Ports are the container's published ports, host port by container port ("8080/tcp" -> "8080").
+	Ports map[string]string
 }
 
 // Mount is one mount of the server container.
@@ -62,10 +64,18 @@ func Identify(ctx context.Context, d *agent.Docker) (*Self, error) {
 		return nil, err
 	}
 	var v struct {
-		Mounts []Mount `json:"Mounts"`
+		Mounts     []Mount `json:"Mounts"`
+		HostConfig struct {
+			PortBindings map[string][]struct{ HostIp, HostPort string } `json:"PortBindings"`
+		} `json:"HostConfig"`
 	}
 	json.Unmarshal(raw, &v)
-	s := &Self{ID: id, Name: name, ImageID: imageID, ImageRef: ref, SocketBind: socketPath, Mounts: v.Mounts}
+	s := &Self{ID: id, Name: name, ImageID: imageID, ImageRef: ref, SocketBind: socketPath, Mounts: v.Mounts, Ports: map[string]string{}}
+	for k, bs := range v.HostConfig.PortBindings {
+		for _, b := range bs {
+			s.Ports[k] = b.HostPort
+		}
+	}
 	for _, m := range v.Mounts {
 		if m.Destination == socketPath {
 			s.SocketBind = m.Source
@@ -144,11 +154,21 @@ func Check(ctx context.Context, d *agent.Docker, s *Self) (*Latest, error) {
 
 // StartHelper launches the updater from the new image. It returns as soon as the helper
 // is started; the server is stopped by the helper a moment later.
-func StartHelper(ctx context.Context, d *agent.Docker, s *Self, newImageID string) error {
+//
+// publish lists extra TCP ports ("host:container") the new container must publish; ports the
+// container already publishes are always carried over unchanged.
+func StartHelper(ctx context.Context, d *agent.Docker, s *Self, newImageID string, publish []string, unpublish []string) error {
 	const helper = "orchestrator-updater"
 	d.RemoveIfExists(ctx, helper)
+	args := []string{"self-update", "-container", s.Name, "-image", s.ImageRef}
+	for _, p := range publish {
+		args = append(args, "-publish", p)
+	}
+	for _, p := range unpublish {
+		args = append(args, "-unpublish", p)
+	}
 	id, err := d.CreateHelper(ctx, helper, newImageID,
-		[]string{"self-update", "-container", s.Name, "-image", s.ImageRef},
+		args,
 		[]string{s.SocketBind + ":" + socketPath})
 	if err != nil {
 		return err
@@ -162,6 +182,8 @@ type SwapOptions struct {
 	Image     string        // image reference to run
 	Timeout   time.Duration // how long the new container has to become healthy
 	Stable    time.Duration // without a healthcheck: how long it must stay running
+	Publish   []string      // extra TCP ports to publish, "host:container"
+	Unpublish []string      // container ports whose mapping is dropped
 	Log       func(string)
 }
 
@@ -231,7 +253,7 @@ func Swap(ctx context.Context, d *agent.Docker, o SwapOptions) error {
 	}
 
 	logf("starting the new version")
-	id, err := d.RecreateFrom(ctx, inspect, o.Container, o.Image)
+	id, err := d.RecreateFromWith(ctx, inspect, o.Container, o.Image, o.Publish, o.Unpublish)
 	if err != nil {
 		return rollback(fmt.Errorf("create: %w", err))
 	}

@@ -95,6 +95,9 @@ type Agent struct {
 	stats statsState // per-container samples waiting for the next heartbeat
 
 	leases leaseTable // DHCP addresses held for workers with a dedicated address
+
+	devhwOnce sync.Once
+	devhw     *hardware // LED and SSH controllers (see hardware_linux.go)
 }
 
 var errUnauthorized = errors.New("control plane rejected the agent token")
@@ -142,6 +145,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.streamLoop(ctx)
 	go a.statsLoop(ctx)
 	go a.dedicatedLoop(ctx)
+	a.startHardware(ctx)
 
 	backoff := time.Second
 	for {
@@ -406,7 +410,11 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		output, err = a.installServer(ictx, c.Args)
 		icancel()
 	case api.ActionFileStore:
-		err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
+		output, err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
+	case api.ActionFileFetch:
+		fctx, fcancel := context.WithTimeout(ctx, 30*time.Minute)
+		output, err = a.fetchServerBackup(fctx, c.Args["name"], c.Args["dir"], c.Args["mode"])
+		fcancel()
 	case api.ActionStackStart, api.ActionStackStop, api.ActionStackDown:
 		sctx, scancel := context.WithTimeout(ctx, 10*time.Minute)
 		output, err = a.stackAction(sctx, c.Action, c.Target, c.Args["volumes"])
@@ -440,7 +448,13 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		}
 		bcancel()
 	default:
-		err = fmt.Errorf("unsupported action %q", c.Action)
+		hctx, hcancel := context.WithTimeout(ctx, 2*time.Minute)
+		var handled bool
+		handled, output, err = a.hardwareCommand(hctx, c)
+		hcancel()
+		if !handled {
+			err = fmt.Errorf("unsupported action %q", c.Action)
+		}
 	}
 	if err != nil {
 		return api.CommandResult{Output: output, Error: redact(err.Error())}

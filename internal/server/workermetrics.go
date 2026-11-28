@@ -875,6 +875,9 @@ func (s *Server) metricsPruneLoop(ctx context.Context) {
 		if err := s.store.PruneMetricsBefore(ctx, time.Now().Add(-(maxRetentionDays+1)*24*time.Hour)); err != nil && ctx.Err() == nil {
 			s.log.Warn("prune metrics", "err", err)
 		}
+		if err := s.pruneDeviceHistory(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("prune device history", "err", err)
+		}
 		select {
 		case <-ctx.Done():
 			return

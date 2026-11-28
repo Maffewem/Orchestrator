@@ -211,7 +211,7 @@ const CANDIDATES: Candidate[] = [
 
 export function CompareCard({ s, m }: { s: MetricSample[]; m: Metrics }) {
   const avail = CANDIDATES.filter((c) => c.has(s, m));
-  const [picked, setPicked] = useState<string[]>(() => ["cpu", "temp", "iowait", "uv"].filter((id) => avail.some((c) => c.id === id)).slice(0, 3));
+  const [picked, setPicked] = useState<string[]>(() => ["temp", "uv", "clock"].filter((id) => avail.some((c) => c.id === id)).concat(avail.some((c) => c.id === "uv") ? [] : ["cpu"]).slice(0, 3));
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
   const series = avail
     .filter((c) => picked.includes(c.id))
@@ -222,24 +222,24 @@ export function CompareCard({ s, m }: { s: MetricSample[]; m: Metrics }) {
     });
   return (
     <Card>
-      <CardHeader title="Compare" subtitle="Overlay metrics to see what happened at the same moment. Pick as many as you like." />
-      <div className="space-y-4 p-5">
-        <div className="flex flex-wrap gap-2">
+      <CardHeader title="Compare" subtitle="Overlay metrics to see what happened at the same moment." />
+      <div className="space-y-3 p-5">
+        {series.length > 0 ? <LineChart height={180} fill={false} series={series} unit="%" /> : <p className="py-10 text-center text-sm text-neutral-500">Pick at least one metric below.</p>}
+        <div className="flex flex-wrap gap-1.5 border-t border-neutral-100 pt-3">
           {avail.map((c) => (
             <button
               key={c.id}
               type="button"
               aria-pressed={picked.includes(c.id)}
               onClick={() => toggle(c.id)}
-              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm ${picked.includes(c.id) ? "border-neutral-900 bg-neutral-50 font-medium" : "border-neutral-200 text-neutral-600"}`}
+              className={`inline-flex min-h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs ${picked.includes(c.id) ? "border-neutral-900 bg-neutral-50 font-medium" : "border-neutral-200 text-neutral-500"}`}
             >
-              <span className="size-2 rounded-full" style={{ background: c.color, opacity: picked.includes(c.id) ? 1 : 0.35 }} />
+              <span className="size-1.5 rounded-full" style={{ background: c.color, opacity: picked.includes(c.id) ? 1 : 0.35 }} />
               {c.label}
             </button>
           ))}
         </div>
-        {series.length > 0 ? <LineChart height={160} series={series} unit="%" /> : <p className="text-sm text-neutral-500">Pick at least one metric.</p>}
-        <p className="text-xs text-neutral-500">Percentages are shown as they are. Everything else (temperature, load, speeds, clock) is drawn as a share of its own highest value in the last hour, so the shapes line up; the legend shows the real latest value.</p>
+        <p className="text-xs text-neutral-500">Each line is scaled to its own range (percentages as they are, the rest as a share of the hour's highest value). The legend shows the real latest value.</p>
       </div>
     </Card>
   );

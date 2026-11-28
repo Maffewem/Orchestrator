@@ -429,13 +429,16 @@ export function LineChart({
   max = 100,
   unit = "%",
   format,
+  fill = true,
 }: {
-  series: { label: string; color: string; values: number[] }[];
+  series: { label: string; color: string; values: number[]; /** Shown in the legend instead of the formatted last value (for scaled series). */ shown?: string }[];
   height?: number;
   max?: number;
   unit?: string;
   /** Formats the latest value in the legend; the default is two decimals plus the unit. */
   format?: (v: number) => string;
+  /** Shade the area under each line; switch off when several lines overlap. */
+  fill?: boolean;
 }) {
   const w = 600;
   const n = Math.max(2, ...series.map((s) => s.values.length));
@@ -453,7 +456,7 @@ export function LineChart({
           const pts = s.values.map((v, i) => `${x(i + offset)},${y(v)}`).join(" ");
           return (
             <g key={s.label}>
-              <polygon points={`${x(offset)},${height} ${pts} ${x(n - 1)},${height}`} fill={s.color} opacity={0.08} />
+              {fill && <polygon points={`${x(offset)},${height} ${pts} ${x(n - 1)},${height}`} fill={s.color} opacity={0.08} />}
               <polyline points={pts} fill="none" stroke={s.color} strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
             </g>
           );
@@ -465,7 +468,7 @@ export function LineChart({
             <span className="size-2 rounded-full" style={{ background: s.color }} />
             {s.label}
             <span className="font-medium text-neutral-900 tabular-nums">
-              {s.values.length ? (format ? format(s.values[s.values.length - 1]) : `${s.values[s.values.length - 1].toFixed(unit === "%" ? 0 : 2)}${unit}`) : "—"}
+              {s.shown ?? (s.values.length ? (format ? format(s.values[s.values.length - 1]) : `${s.values[s.values.length - 1].toFixed(unit === "%" ? 0 : 2)}${unit}`) : "—")}
             </span>
           </span>
         ))}

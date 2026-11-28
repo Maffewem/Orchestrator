@@ -87,6 +87,10 @@ func (s *Server) view(d *store.Device) DeviceView {
 		raise("warning", fmt.Sprintf("Temperature is %.0f°C (warning at %.0f°C)", t, warn))
 	}
 
+	for _, w := range s.hardwareIssues(d.ID, d.Metrics) {
+		raise("warning", w)
+	}
+
 	// Container failures that point at the device rather than the app: crash loops and kills
 	// by the kernel's out-of-memory killer (exit code 137).
 	var looping, killed []string

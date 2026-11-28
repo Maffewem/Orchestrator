@@ -81,6 +81,45 @@ export interface Metrics {
   uptime_seconds: number;
   temp_c?: number;
   sensors?: { name: string; c: number }[];
+  iowait_percent?: number;
+  swap_used?: number;
+  swap_total?: number;
+  oom_kills?: number;
+  clock_mhz?: number;
+  max_clock_mhz?: number;
+  disks?: DiskIO[];
+  nets?: NetIO[];
+  power?: PowerInfo;
+}
+
+export interface DiskIO {
+  name: string;
+  read_bps: number;
+  write_bps: number;
+  read_iops: number;
+  write_iops: number;
+  busy: number;
+}
+
+export interface NetIO {
+  name: string;
+  rx_bps: number;
+  tx_bps: number;
+  errors?: number;
+  wireless?: boolean;
+  signal_dbm?: number;
+}
+
+export interface PowerInfo {
+  raw: number;
+  under_voltage?: boolean;
+  freq_capped?: boolean;
+  throttled?: boolean;
+  temp_limit?: boolean;
+  since_under_voltage?: boolean;
+  since_freq_capped?: boolean;
+  since_throttled?: boolean;
+  since_temp_limit?: boolean;
 }
 
 export interface Port {
@@ -511,6 +550,16 @@ export interface MetricSample {
   disk: number;
   load1: number;
   temp: number;
+  iowait?: number;
+  swap?: number;
+  swap_used?: number;
+  oom?: number;
+  clock?: number;
+  max_clock?: number;
+  power?: number;
+  has_power?: boolean;
+  disks?: DiskIO[];
+  nets?: NetIO[];
 }
 
 export interface Alert {

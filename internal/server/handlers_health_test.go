@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -84,5 +85,18 @@ func TestRestartLoopMarksContainerUnstable(t *testing.T) {
 	}
 	if d.Containers[0].Unstable {
 		t.Error("stored device was modified")
+	}
+}
+
+func TestOOMKilledLoopNamesMemoryLimit(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}, wstats: &workerStats{workers: map[string]*workerAcc{}}}
+	now := time.Now().Unix()
+	s.wstats.workers["d1|paperless"] = &workerAcc{restarts: []int64{now - 90, now - 60, now - 30}, latest: api.ContainerStats{OOMKilled: true}}
+	d := &store.Device{ID: "d1", LastSeen: time.Now(), Containers: []api.Container{{Name: "paperless", State: "running"}}}
+	d.Host.CPUs = 4
+	d.Host.Docker = &api.DockerInfo{}
+	v := s.view(d)
+	if len(v.Issues) != 1 || !strings.Contains(v.Issues[0], "out of memory") || !strings.Contains(v.Issues[0], "memory limit") {
+		t.Fatalf("issues %v", v.Issues)
 	}
 }

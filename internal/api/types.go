@@ -137,6 +137,7 @@ const (
 	CapDedicatedVLAN    = "dedicated-vlan"     // DedicatedIP.VLAN (an older agent would ignore it and use the untagged network)
 	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
 	CapDisks            = "disks"              // disk.list/format/partition/mount/unmount and share.mount/unmount
+	CapLimits           = "limits"             // container.update, and DeploySpec.MaxRetries / MemoryMB
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
 )
@@ -322,8 +323,12 @@ const (
 	ActionStart   = "container.start"
 	ActionStop    = "container.stop"
 	ActionRestart = "container.restart"
-	ActionLogs    = "container.logs"
-	ActionDeploy  = "deploy"
+	// ActionUpdate changes a running container's restart policy and memory limit in place
+	// (docker update, no recreate): Args["restart"], ["retries"], ["memory_mb"] (0 = unchanged),
+	// and ["stop"]="1" to stop it afterwards.
+	ActionUpdate = "container.update"
+	ActionLogs   = "container.logs"
+	ActionDeploy = "deploy"
 	// ActionBackup streams a container's config and data to the control plane; Args["backup_id"].
 	ActionBackup = "container.backup"
 	// ActionRestore writes a backup's data back into the existing container; Args["backup_id"].
@@ -422,15 +427,17 @@ type DiskShare struct {
 // ContainerSpec is a running container's configuration, translated into what a DeploySpec can
 // express. Anything the translation cannot carry over is named in Unsupported.
 type ContainerSpec struct {
-	Name    string            `json:"name"`
-	Image   string            `json:"image"`
-	Env     []string          `json:"env,omitempty"`
-	Command []string          `json:"command,omitempty"`
-	Ports   []string          `json:"ports,omitempty"`
-	Volumes []string          `json:"volumes,omitempty"`
-	Labels  map[string]string `json:"labels,omitempty"`
-	Restart string            `json:"restart,omitempty"`
-	Network string            `json:"network,omitempty"`
+	Name       string            `json:"name"`
+	Image      string            `json:"image"`
+	Env        []string          `json:"env,omitempty"`
+	Command    []string          `json:"command,omitempty"`
+	Ports      []string          `json:"ports,omitempty"`
+	Volumes    []string          `json:"volumes,omitempty"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Restart    string            `json:"restart,omitempty"`
+	MaxRetries int               `json:"max_retries,omitempty"`
+	MemoryMB   int               `json:"memory_mb,omitempty"`
+	Network    string            `json:"network,omitempty"`
 	// Unsupported lists settings that a redeploy would lose (privileged mode, devices, limits, ...).
 	Unsupported []string `json:"unsupported,omitempty"`
 }
@@ -485,6 +492,10 @@ type DeploySpec struct {
 	Command []string `json:"command,omitempty"`
 	// Restart is a Docker restart policy name: no, always, unless-stopped, on-failure.
 	Restart string `json:"restart,omitempty"`
+	// MaxRetries caps restarts for the on-failure policy (0 = Docker's default, unlimited).
+	MaxRetries int `json:"max_retries,omitempty"`
+	// MemoryMB is a hard memory limit in MiB (swap is limited to the same); 0 means no limit.
+	MemoryMB int `json:"memory_mb,omitempty"`
 	// Build, when set, builds Image on the device instead of pulling it.
 	Build *BuildSpec `json:"build,omitempty"`
 	// Labels are added to the container.

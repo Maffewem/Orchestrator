@@ -205,6 +205,15 @@ export default function ContainerTable({
               <MoreHorizontal className="size-4" />
             </summary>
             <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-neutral-200 bg-white p-1 text-sm shadow-lg" onClick={(e) => { (e.currentTarget.parentElement as HTMLDetailsElement).open = false; }}>
+              {canOperate && c.unstable && !system && (
+                <button
+                  className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-neutral-100"
+                  title="Sets the restart policy to Never and stops the container, so Docker stops restarting it. Start it again or redeploy to bring it back."
+                  onClick={() => run(dev, c, "container.update", { restart: "no", stop: "1" })}
+                >
+                  <Square className="size-3.5" /> Stop restarting
+                </button>
+              )}
               {canOperate && (
                 <button className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-neutral-100" onClick={() => backup(dev, c)}>
                   <Archive className="size-3.5" /> Back up

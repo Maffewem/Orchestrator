@@ -24,20 +24,23 @@ type inspectDoc struct {
 	} `json:"Config"`
 	HostConfig struct {
 		PortBindings  map[string][]struct{ HostIp, HostPort string } `json:"PortBindings"`
-		RestartPolicy struct{ Name string }                          `json:"RestartPolicy"`
-		NetworkMode   string                                         `json:"NetworkMode"`
-		Privileged    bool                                           `json:"Privileged"`
-		CapAdd        []string                                       `json:"CapAdd"`
-		CapDrop       []string                                       `json:"CapDrop"`
-		Devices       []any                                          `json:"Devices"`
-		ExtraHosts    []string                                       `json:"ExtraHosts"`
-		Memory        int64                                          `json:"Memory"`
-		NanoCpus      int64                                          `json:"NanoCpus"`
-		Tmpfs         map[string]string                              `json:"Tmpfs"`
-		Sysctls       map[string]string                              `json:"Sysctls"`
-		SecurityOpt   []string                                       `json:"SecurityOpt"`
-		PidMode       string                                         `json:"PidMode"`
-		ReadonlyRoot  bool                                           `json:"ReadonlyRootfs"`
+		RestartPolicy struct {
+			Name              string
+			MaximumRetryCount int
+		} `json:"RestartPolicy"`
+		NetworkMode  string            `json:"NetworkMode"`
+		Privileged   bool              `json:"Privileged"`
+		CapAdd       []string          `json:"CapAdd"`
+		CapDrop      []string          `json:"CapDrop"`
+		Devices      []any             `json:"Devices"`
+		ExtraHosts   []string          `json:"ExtraHosts"`
+		Memory       int64             `json:"Memory"`
+		NanoCpus     int64             `json:"NanoCpus"`
+		Tmpfs        map[string]string `json:"Tmpfs"`
+		Sysctls      map[string]string `json:"Sysctls"`
+		SecurityOpt  []string          `json:"SecurityOpt"`
+		PidMode      string            `json:"PidMode"`
+		ReadonlyRoot bool              `json:"ReadonlyRootfs"`
 	} `json:"HostConfig"`
 	Mounts []struct {
 		Type        string `json:"Type"`
@@ -75,9 +78,13 @@ func (d *Docker) InspectSpec(ctx context.Context, id string) (api.ContainerSpec,
 
 func specFromInspect(c inspectDoc, img imageDoc) api.ContainerSpec {
 	spec := api.ContainerSpec{
-		Name:    strings.TrimPrefix(c.Name, "/"),
-		Image:   c.Config.Image,
-		Restart: c.HostConfig.RestartPolicy.Name,
+		Name:       strings.TrimPrefix(c.Name, "/"),
+		Image:      c.Config.Image,
+		Restart:    c.HostConfig.RestartPolicy.Name,
+		MaxRetries: c.HostConfig.RestartPolicy.MaximumRetryCount,
+	}
+	if c.HostConfig.Memory > 0 {
+		spec.MemoryMB = int((c.HostConfig.Memory + (1 << 20) - 1) >> 20)
 	}
 	var unsupported []string
 	note := func(cond bool, what string) {
@@ -169,7 +176,6 @@ func specFromInspect(c inspectDoc, img imageDoc) api.ContainerSpec {
 	note(len(h.CapDrop) > 0, "dropped capabilities")
 	note(len(h.Devices) > 0, "device mappings")
 	note(len(h.ExtraHosts) > 0, "extra hosts")
-	note(h.Memory > 0, "memory limit")
 	note(h.NanoCpus > 0, "CPU limit")
 	note(len(h.Tmpfs) > 0, "tmpfs mounts")
 	note(len(h.Sysctls) > 0, "sysctls")

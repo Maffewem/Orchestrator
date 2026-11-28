@@ -882,3 +882,20 @@ func (s *Server) metricsPruneLoop(ctx context.Context) {
 		}
 	}
 }
+
+// oomKilled names the containers whose last stop was the kernel's out-of-memory killer and that
+// are not healthily running now (stopped, or restart-looping).
+func (s *Server) oomKilled(deviceID string, cs []api.Container) map[string]bool {
+	out := map[string]bool{}
+	if s.wstats == nil {
+		return out
+	}
+	s.wstats.mu.Lock()
+	defer s.wstats.mu.Unlock()
+	for _, c := range cs {
+		if acc := s.wstats.workers[deviceID+"|"+c.Name]; acc != nil && acc.latest.OOMKilled && (c.State != "running" || c.Unstable) {
+			out[c.Name] = true
+		}
+	}
+	return out
+}

@@ -300,6 +300,10 @@ export interface Runtime {
   env: string[];
   command?: string[];
   restart: string;
+  /** Restart cap for the "on-failure" policy; 0 or absent is unlimited. */
+  max_retries?: number;
+  /** Hard memory limit in MiB; 0 or absent is none. */
+  memory_mb?: number;
   volumes?: string[];
   labels?: Record<string, string>;
   network?: string;

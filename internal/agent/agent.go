@@ -324,6 +324,14 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		// brought up for it on another device.
 		a.releaseHostAccess(cctx, c.Target)
 		err = a.docker.Stop(cctx, c.Target)
+	case api.ActionUpdate:
+		retries, _ := strconv.Atoi(c.Args["retries"])
+		mem, _ := strconv.Atoi(c.Args["memory_mb"])
+		err = a.docker.Update(cctx, c.Target, c.Args["restart"], retries, mem)
+		if err == nil && c.Args["stop"] == "1" {
+			a.releaseHostAccess(cctx, c.Target)
+			err = a.docker.Stop(cctx, c.Target)
+		}
 	case api.ActionRestart:
 		err = a.docker.Restart(cctx, c.Target)
 	case api.ActionLogs:

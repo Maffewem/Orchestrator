@@ -44,7 +44,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 		CPUs:         runtime.NumCPU(),
 		AgentVersion: Version,
 		InContainer:  InContainer(),
-		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapCompose, api.CapTunnel, api.CapTunnelUpdate, api.CapDiscover, api.CapServerInstall, api.CapStats, api.CapFence, api.CapDisks},
+		Capabilities: []string{api.CapBackup, api.CapUpdate, api.CapProxy, api.CapProxyDNS, api.CapPreview, api.CapStream, api.CapInspect, api.CapFileStore, api.CapCompose, api.CapTunnel, api.CapTunnelUpdate, api.CapDiscover, api.CapServerInstall, api.CapStats, api.CapFence, api.CapDisks, api.CapLimits},
 		Server:       strings.TrimRight(a.server(), "/"),
 	}
 	if runtime.GOOS == "linux" && !h.InContainer {

@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
@@ -234,9 +235,65 @@ func (d *Docker) Containers(ctx context.Context) ([]api.Container, error) {
 	}
 	out := make([]api.Container, 0, len(raw))
 	for _, c := range raw {
-		out = append(out, c.toAPI())
+		ac := c.toAPI()
+		if c.State == "exited" && (strings.Contains(c.Status, "(137)") || strings.Contains(c.Status, "(143)")) {
+			d.inspectExit(ctx, c.ID, &ac)
+		}
+		out = append(out, ac)
 	}
 	return out, nil
+}
+
+type exitInfo struct{ oom, stop bool }
+
+var exitCache sync.Map // container ID + finish time -> exitInfo
+
+// inspectExit finds out why a container exited with 137 or 143: Docker's OOMKilled flag, and whether
+// Docker logged a stop or kill request in the seconds before it died. Results are cached per exit.
+func (d *Docker) inspectExit(ctx context.Context, id string, out *api.Container) {
+	var in struct {
+		State struct {
+			OOMKilled  bool   `json:"OOMKilled"`
+			FinishedAt string `json:"FinishedAt"`
+		} `json:"State"`
+	}
+	if err := d.call(ctx, http.MethodGet, "/containers/"+id+"/json", nil, nil, &in); err != nil {
+		return
+	}
+	key := id + "|" + in.State.FinishedAt
+	if v, ok := exitCache.Load(key); ok {
+		x := v.(exitInfo)
+		out.ExitInspected, out.OOMKilled, out.StopRequested = true, x.oom, x.stop
+		return
+	}
+	x := exitInfo{oom: in.State.OOMKilled}
+	if fin, err := time.Parse(time.RFC3339Nano, in.State.FinishedAt); err == nil && fin.Year() > 1 {
+		x.stop = d.stopLogged(ctx, id, fin)
+	}
+	exitCache.Store(key, x)
+	out.ExitInspected, out.OOMKilled, out.StopRequested = true, x.oom, x.stop
+}
+
+// stopLogged reports whether Docker's event log has a stop or kill for the container in the minute
+// before it died (a stop that times out sends SIGTERM, then SIGKILL, so the exit code is 137).
+func (d *Docker) stopLogged(ctx context.Context, id string, finished time.Time) bool {
+	f, _ := json.Marshal(map[string][]string{"container": {id}, "type": {"container"}, "event": {"stop", "kill"}})
+	q := url.Values{
+		"since":   {strconv.FormatInt(finished.Add(-time.Minute).Unix(), 10)},
+		"until":   {strconv.FormatInt(finished.Add(5*time.Second).Unix(), 10)},
+		"filters": {string(f)},
+	}
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	resp, err := d.request(cctx, http.MethodGet, "/events", q, nil)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	var ev struct {
+		Action string `json:"Action"`
+	}
+	return json.NewDecoder(resp.Body).Decode(&ev) == nil && ev.Action != ""
 }
 
 // ContainerByName returns the ID of the container with exactly this name, or "".

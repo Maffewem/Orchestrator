@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Route, Routes, useNavigate, useParams } from "react-router";
 import { Trash2 } from "lucide-react";
-import { api, type Device, type Migration, type Project, type TunnelRoute, type TunnelView } from "../api";
+import { api, type Device, type DeviceRange, type Migration, type Project, type TunnelRoute, type TunnelView } from "../api";
 import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
@@ -15,6 +15,15 @@ import { confirmDialog } from "../components/dialogs";
 import Disks from "../components/Disks";
 import ContainerIssues, { isContainerIssueText } from "../components/ContainerIssues";
 import HardwareMetrics, { CompareCard, PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
+
+const ranges: { key: DeviceRange; long: string }[] = [
+  { key: "1h", long: "the last hour" },
+  { key: "6h", long: "the last 6 hours (1-minute averages)" },
+  { key: "24h", long: "the last 24 hours (1-minute averages)" },
+  { key: "7d", long: "the last 7 days (5-minute averages)" },
+  { key: "30d", long: "the last 30 days (hourly averages)" },
+  { key: "90d", long: "the last 90 days (hourly averages)" },
+];
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -326,7 +335,24 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
       setAcking(false);
     }
   };
-  const samples = usePoll(() => api.deviceMetrics(d.id), 5000, [d.id]);
+  const [range, setRange] = useState<DeviceRange>(() => {
+    try {
+      const r = localStorage.getItem("orch.deviceRange");
+      return ranges.some((x) => x.key === r) ? (r as DeviceRange) : "1h";
+    } catch {
+      return "1h";
+    }
+  });
+  const pickRange = (r: DeviceRange) => {
+    setRange(r);
+    try {
+      localStorage.setItem("orch.deviceRange", r);
+    } catch {
+      /* remembering the choice is optional */
+    }
+  };
+  const rangeText = ranges.find((x) => x.key === range)!.long;
+  const samples = usePoll(() => api.deviceMetrics(d.id, range), range === "1h" ? 5000 : 60000, [d.id, range]);
   const thresholds = usePoll(async () => (await api.settings()).temperature, 60000);
   const s = samples.data ?? [];
   const m = d.metrics;
@@ -383,6 +409,21 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             {ackError && <div className="px-5 pb-3"><ErrorNote>{ackError}</ErrorNote></div>}
           </Card>
         )}
+        <div role="radiogroup" aria-label="Time range" className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 text-sm">
+          <span className="shrink-0 text-neutral-500">Range</span>
+          {ranges.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              role="radio"
+              aria-checked={range === r.key}
+              onClick={() => pickRange(r.key)}
+              className={`min-h-8 shrink-0 rounded-md border px-2.5 ${range === r.key ? "border-neutral-900 bg-neutral-100 font-medium" : "border-neutral-200 bg-white text-neutral-600"}`}
+            >
+              {r.key}
+            </button>
+          ))}
+        </div>
         <div role="tablist" aria-label="Graphs" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
           {graphs.map((g) => (
             <button
@@ -400,7 +441,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
         {graph === "perf" && (
           <>
         <Card>
-          <CardHeader title="Performance" subtitle="Live samples from the agent (last hour)." />
+          <CardHeader title="Performance" subtitle={range === "1h" ? "Live samples from the agent (last hour)." : `Averages over ${rangeText}.`} />
           <div className="space-y-6 p-5">
             <div className="grid grid-cols-3 gap-6">
               <Meter label={`CPU · ${d.host.cpus ? `${d.host.cpus} ${d.host.cpus === 1 ? "core" : "cores"}` : "—"}`} value={m.cpu_percent} />
@@ -422,7 +463,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
         )}
         {graph === "temp" && s.some((x) => x.temp > 0) && (
           <Card>
-            <CardHeader title="Temperature" subtitle={thresholds.data ? `Hottest sensor, last hour. Alerts at ${thresholds.data.warn_c}°C (warning) and ${thresholds.data.crit_c}°C (critical).` : "Hottest sensor, last hour."} />
+            <CardHeader title="Temperature" subtitle={thresholds.data ? `Hottest sensor in each point, ${rangeText}. Alerts at ${thresholds.data.warn_c}°C (warning) and ${thresholds.data.crit_c}°C (critical).` : `Hottest sensor in each point, ${rangeText}.`} />
             <div className="p-5">
               <LineChart
                 max={Math.max(100, Math.ceil(((thresholds.data?.crit_c ?? 85) + 5) / 10) * 10)}

@@ -80,6 +80,7 @@ type Server struct {
 	githubAPI     string
 	cloudflareAPI string
 	metrics       *metricsHistory
+	hist          *deviceHistory
 	wstats        *workerStats
 	logins        limiter
 	gateOK        gateCache // recently verified worker-login credentials; see auth.go
@@ -156,7 +157,7 @@ func New(ctx context.Context, st *store.Store, cfg Config) (*Server, string, err
 	if cfg.DockerHost == "" {
 		cfg.DockerHost = "unix:///var/run/docker.sock"
 	}
-	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), wstats: newWorkerStats(), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted, cfSem: make(chan struct{}, cfMaxConcurrentBuilds)}
+	s := &Server{store: st, cfg: cfg, log: cfg.Logger, githubAPI: cfg.GitHubAPI, cloudflareAPI: "https://api.cloudflare.com/client/v4", metrics: newMetricsHistory(720), hist: newDeviceHistory(), wstats: newWorkerStats(), polled: map[string]string{}, up: newUpdateState(), streams: newStreamHub(), trusted: trusted, cfSem: make(chan struct{}, cfMaxConcurrentBuilds)}
 	s.docker, _ = agent.NewDocker(cfg.DockerHost)
 	s.mig.persist = s.persistMigration
 
@@ -209,6 +210,7 @@ func (s *Server) Run(ctx context.Context) {
 	s.recoverCloudflare(ctx)
 	s.recoverMove(ctx)
 	go s.cfMonitorLoop(ctx)
+	s.primeMetrics(ctx)
 	go s.metricsPruneLoop(ctx)
 	go s.pollLoop(ctx)
 	go s.updateLoop(ctx)
@@ -423,6 +425,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET "+moveBundlePath, s.agentAuth(s.handleMoveBundle))
 	admin("PUT /api/settings/security", s.handleSetSecurity)
 	admin("PUT /api/settings/temperature", s.handleSetTemperature)
+	admin("GET /api/settings/device-metrics", s.handleGetDeviceMetricsSettings)
+	admin("PUT /api/settings/device-metrics", s.handleSetDeviceMetricsSettings)
 	admin("PUT /api/settings/docker-gc", s.handleSetDockerGC)
 	admin("GET /api/devices/{id}/docker", s.handleDockerReport)
 	admin("POST /api/devices/{id}/docker/prune", s.handleDockerPrune)

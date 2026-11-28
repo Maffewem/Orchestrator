@@ -239,6 +239,8 @@ export interface ContainerIssue {
   swap_used?: number;
   /** A memory limit (MiB) worth trying in the project settings. */
   suggest_mb?: number;
+  /** Which setting the suggestion is, its current value and why this number. */
+  suggest_why?: string;
   acked?: boolean;
   acked_by?: string;
   restarts?: number;
@@ -595,6 +597,18 @@ export interface Overview {
   containers: { total: number; running: number; stopped: number };
   cloudflare: { projects: number; live: number; failing: number; requests: number; errors: number };
   recent_events: Event[];
+}
+
+/** How far back a device graph looks. 1h is live (every heartbeat); longer ranges are stored averages. */
+export type DeviceRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d";
+
+export interface DeviceMetricsSettings {
+  retention_days: number;
+  choices: number[];
+  rows: number;
+  bytes: number;
+  /** Estimated bytes per device at each choice. */
+  per_device_bytes: number[];
 }
 
 export interface MetricSample {
@@ -1376,7 +1390,9 @@ export const api = {
   alerts: () => request<Alert[]>("GET", "/api/alerts"),
   devices: () => request<Device[]>("GET", "/api/devices"),
   device: (id: string) => request<Device>("GET", `/api/devices/${id}`),
-  deviceMetrics: (id: string) => request<MetricSample[]>("GET", `/api/devices/${id}/metrics`),
+  deviceMetrics: (id: string, range: DeviceRange = "1h") => request<MetricSample[]>("GET", `/api/devices/${id}/metrics${range === "1h" ? "" : `?range=${range}`}`),
+  deviceMetricsSettings: () => request<DeviceMetricsSettings>("GET", "/api/settings/device-metrics"),
+  setDeviceMetricsSettings: (retention_days: number) => request<DeviceMetricsSettings>("PUT", "/api/settings/device-metrics", { retention_days }),
   workerMetrics: (deviceId: string, name: string, range: MetricsRange) =>
     request<WorkerMetrics>("GET", `/api/devices/${deviceId}/workers/${encodeURIComponent(name)}/metrics?range=${range}`),
   workerMetricPrefs: (deviceId: string, name: string) =>

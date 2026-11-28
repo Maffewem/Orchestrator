@@ -139,7 +139,7 @@ func TestExit137ExplainedAndAcknowledged(t *testing.T) {
 		t.Fatalf("health %q issues %+v", v.Health, v.ContainerIssues)
 	}
 	ci := v.ContainerIssues[0]
-	if ci.SuggestMB != 2048 || ci.MemLimit != 1<<30 || !strings.Contains(ci.Cause, "out-of-memory") || !strings.Contains(ci.Cause, "swap") {
+	if ci.SuggestMB != 2048 || ci.SuggestWhy == "" || ci.MemLimit != 1<<30 || !strings.Contains(ci.Cause, "out-of-memory") || !strings.Contains(ci.Cause, "swap") {
 		t.Fatalf("issue %+v", ci)
 	}
 	s.dismiss(context.Background(), "d1", "c1", "paperless", "ack", "Matthew")
@@ -162,5 +162,46 @@ func TestExit137FromRequestedStopIsNotAnAlert(t *testing.T) {
 	s.markStopped(context.Background(), "d1", d.Containers[0])
 	if v := s.view(d); v.Health != "ok" || len(v.ContainerIssues) != 0 {
 		t.Fatalf("health %q issues %+v", v.Health, v.ContainerIssues)
+	}
+}
+
+func TestExit137ClassifiedFromDockersOwnRecord(t *testing.T) {
+	s := &Server{cfg: Config{HeartbeatInterval: time.Second}, wstats: &workerStats{workers: map[string]*workerAcc{}}}
+	status := "Exited (137) 2 minutes ago"
+
+	// A stop logged just before it died (docker stop on the device that timed out): not an alert.
+	d := killedDevice(status)
+	d.Containers[0].ExitInspected, d.Containers[0].StopRequested = true, true
+	if v := s.view(d); v.Health != "ok" || len(v.ContainerIssues) != 0 {
+		t.Fatalf("manual stop: health %q issues %+v", v.Health, v.ContainerIssues)
+	}
+
+	// Docker's OOMKilled flag is the proof of an out-of-memory kill, even with no sampled stats.
+	d = killedDevice(status)
+	d.Containers[0].ExitInspected, d.Containers[0].OOMKilled = true, true
+	v := s.view(d)
+	if v.Health != "warning" || len(v.ContainerIssues) != 1 || v.ContainerIssues[0].Kind != "oom" {
+		t.Fatalf("oom: health %q issues %+v", v.Health, v.ContainerIssues)
+	}
+
+	// Neither flag nor a logged stop: listed with an explanation, but not a device warning, and no
+	// memory advice.
+	d = killedDevice(status)
+	d.Containers[0].ExitInspected = true
+	v = s.view(d)
+	if v.Health != "ok" || len(v.ContainerIssues) != 1 || v.ContainerIssues[0].SuggestMB != 0 || v.ContainerIssues[0].SuggestWhy != "" || strings.Contains(v.ContainerIssues[0].Cause, "RAM") {
+		t.Fatalf("unexplained 137: health %q issues %+v", v.Health, v.ContainerIssues)
+	}
+}
+
+func TestMemoryLimitSuggestionSaysWhatSettingItIs(t *testing.T) {
+	why := suggestWhy(2048, 1<<30, 900<<20, 4<<30, 0)
+	for _, want := range []string{"memory limit in the project settings", "not the device's RAM or swap", "1.0 GiB now", "no swap"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("missing %q in %q", want, why)
+		}
+	}
+	if suggestMemoryMB(0, 0, 4<<30) != 0 || !strings.Contains(suggestWhy(0, 0, 0, 4<<30, 0), "no memory limit") {
+		t.Error("no limit set: nothing to raise")
 	}
 }

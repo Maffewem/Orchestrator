@@ -54,7 +54,7 @@ export default function ContainerIssues({ d, onChanged }: { d: Device; onChanged
               <p className="font-medium">
                 {i.name}
                 <span className="ml-2 font-normal text-neutral-600">
-                  {i.kind === "oom" ? "killed: out of memory" : i.kind === "killed" ? "killed (exit 137)" : i.kind === "loop" ? "restarting repeatedly" : "dead"}
+                  {i.kind === "oom" ? "killed: out of memory" : i.kind === "killed" ? "stopped with exit 137 (killed)" : i.kind === "loop" ? "restarting repeatedly" : "dead"}
                 </span>
               </p>
               {i.acked && <span className="text-xs text-neutral-500">Acknowledged{i.acked_by ? ` by ${i.acked_by}` : ""}. It comes back if it fails again.</span>}
@@ -75,15 +75,16 @@ export default function ContainerIssues({ d, onChanged }: { d: Device; onChanged
                 ))}
               </ul>
             )}
+            {!i.acked && i.suggest_why && <p className="text-xs text-neutral-600">{i.suggest_why}</p>}
             <div className="flex flex-wrap gap-2">
-              {isAdmin && i.project_id && (i.kind === "oom" || i.kind === "killed") && (
+              {isAdmin && i.project_id && (i.kind === "oom" || (i.kind === "killed" && !!i.suggest_mb)) && (
                 <Link
                   to={`/projects/${i.project_id}/settings`}
                   className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 text-sm font-medium hover:bg-neutral-50"
                   title="Opens the project's settings, where the memory limit is set"
                 >
                   <Settings2 className="size-3.5" />
-                  {i.suggest_mb ? `Raise memory limit (try ${i.suggest_mb} MiB)` : "Open project settings"}
+                  {i.suggest_mb ? `Set container memory limit to ${i.suggest_mb} MiB` : "Open project settings"}
                 </Link>
               )}
               {canStop && (

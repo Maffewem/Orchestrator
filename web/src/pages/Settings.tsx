@@ -4,7 +4,7 @@ import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, K
 import { api, type Settings } from "../api";
 import { settingsSections, useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass, SecretInput } from "../components/ui";
-import { usePoll } from "../lib";
+import { bytes, usePoll } from "../lib";
 import { copyText } from "../clipboard";
 import { getTheme, setTheme, type ThemeChoice } from "../theme";
 import { HTTPSSettings } from "../components/HTTPSSettings";
@@ -112,6 +112,8 @@ export default function SettingsPage() {
     ssl: "ssl https certificates caddy",
     domains: "domains base domain wildcard",
     backups: "backup password encrypt",
+    images: "image retention docker prune build cache keep versions",
+    graphs: "graph history retention metrics cpu memory temperature sd card storage downsample days",
     serverbackup: "server backup restore database schedule download",
     mainserver: "main server move migrate promote device new server hand over standby",
     join: "join token devices register",
@@ -478,6 +480,16 @@ export default function SettingsPage() {
             <ImageRetentionSettings value={s.docker_gc} onSaved={() => settings.reload()} />
           </Collapsible>
         )}
+        {vis("graphs") && (
+          <Collapsible
+            id="graphs"
+            defaultOpen={false}
+            title={<span className="flex items-center gap-2"><Thermometer className="size-4" /> Graph history</span>}
+            subtitle="How long each device's CPU, memory, disk, temperature, network and power graphs are kept."
+          >
+            <GraphHistorySettings />
+          </Collapsible>
+        )}
         {vis("serverbackup") && (
           <Collapsible
             id="serverbackup"
@@ -673,6 +685,41 @@ function AppearanceChoice() {
 }
 
 const lifetimes: [number, string][] = [[1, "1 hour"], [8, "8 hours"], [24, "1 day"], [168, "7 days"], [336, "14 days"], [720, "30 days"], [2160, "90 days"]];
+
+function GraphHistorySettings() {
+  const cur = usePoll(() => api.deviceMetricsSettings(), 60000);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const v = cur.data;
+  if (!v) return <div className="p-5"><Loading /></div>;
+  const set = async (days: number) => {
+    setMsg(null);
+    try {
+      await api.setDeviceMetricsSettings(days);
+      setMsg({ ok: true, text: days < v.retention_days ? "Saved. History older than that has been removed." : "Saved." });
+      cur.reload();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  const label = (d: number) => (d === 1 ? "1 day" : `${d} days`);
+  return (
+    <div className="space-y-4 p-5">
+      <p className="text-sm text-neutral-500">
+        Every heartbeat is kept in memory for the live hour. It is also stored in the server's database as averages so graphs survive a restart and can look further back: one-minute points for
+        24 hours, five-minute points for 7 days, and hourly points for as long as you choose below (shorter choices also shorten the finer steps). Peaks are kept for temperature, kernel out-of-memory kills and power flags.
+        Container and request graphs have their own retention on each worker.
+      </p>
+      <Field label="Keep device history for" hint={`Using ${bytes(v.bytes)} now across ${v.rows.toLocaleString()} stored points. Estimated at most ${bytes(v.per_device_bytes[v.choices.indexOf(v.retention_days)] ?? 0)} per device at this setting.`}>
+        <select className={`${inputClass} max-w-xs`} value={v.retention_days} onChange={(e) => set(Number(e.target.value))}>
+          {v.choices.map((d, i) => (
+            <option key={d} value={d}>{label(d)} (about {bytes(v.per_device_bytes[i])} per device)</option>
+          ))}
+        </select>
+      </Field>
+      {msg && <p className={`text-sm ${msg.ok ? "text-emerald-700" : "text-red-700"}`}>{msg.text}</p>}
+    </div>
+  );
+}
 
 function ImageRetentionSettings({ value, onSaved }: { value: Settings["docker_gc"]; onSaved: () => void }) {
   const [v, setV] = useState(value);

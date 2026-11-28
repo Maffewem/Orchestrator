@@ -126,6 +126,8 @@ type ContainerIssue struct {
 	SwapUsed     uint64 `json:"swap_used,omitempty"`
 	// SuggestMB is a memory limit worth trying in the project settings; 0 when none is suggested.
 	SuggestMB int `json:"suggest_mb,omitempty"`
+	// SuggestWhy explains the suggested limit: which setting it is, what it is now, and why this value.
+	SuggestWhy string `json:"suggest_why,omitempty"`
 	// Acked is set when someone acknowledged it; it no longer counts towards the device's health.
 	Acked    bool   `json:"acked,omitempty"`
 	AckedBy  string `json:"acked_by,omitempty"`
@@ -134,31 +136,53 @@ type ContainerIssue struct {
 
 const mib = 1 << 20
 
-// suggestMemoryMB proposes the next limit to try: double a limit that was hit, or about half the
-// device when there is none, rounded up to 256 MiB and never above 80% of the device's RAM.
+// suggestMemoryMB proposes the next limit to try for a container that was killed for memory:
+// double a limit that was hit (or the peak use seen, when that was higher), rounded up to 256 MiB and
+// never above 80% of the device's RAM. With no limit set there is nothing to raise (the container was
+// already free to use all the RAM), so nothing is suggested.
 func suggestMemoryMB(limit, used, hostTotal uint64) int {
-	var want uint64
-	switch {
-	case limit > 0:
-		want = limit * 2
-		if used > limit {
-			want = used * 2
-		}
-	case hostTotal > 0:
-		want = hostTotal / 2
-	default:
+	if limit == 0 {
 		return 0
+	}
+	want := limit * 2
+	if used > limit {
+		want = used * 2
 	}
 	want = (want + 256*mib - 1) / (256 * mib) * (256 * mib)
 	if hostTotal > 0 {
 		if max := hostTotal / 10 * 8; want > max {
 			want = max / (64 * mib) * (64 * mib)
 		}
-		if limit > 0 && want <= limit {
+		if want <= limit {
 			return 0 // the container already may use nearly all the device's RAM; a bigger limit won't help
 		}
 	}
 	return int(want / mib)
+}
+
+// suggestWhy says exactly what setting a suggested limit refers to and where the number comes from.
+func suggestWhy(mb int, limit, used, hostTotal, swapTotal uint64) string {
+	if mb == 0 {
+		if limit == 0 {
+			return "This container has no memory limit, so it was free to use all of the device's RAM and the device itself ran out. A bigger limit would not help; free memory on the device (stop other containers, lower this one's worker counts) or add swap."
+		}
+		return fmt.Sprintf("The container's memory limit is already %s, close to all of the device's %s RAM, so raising it would not help. Free memory on the device, lower this container's own memory use, or add RAM.", memText(limit), memText(hostTotal))
+	}
+	why := fmt.Sprintf("This is the container's memory limit in the project settings (Docker's per-container cap), not the device's RAM or swap. It is %s now", memText(limit))
+	if used > limit {
+		why += fmt.Sprintf("; its peak use reached %s", memText(used))
+	} else if used > 0 {
+		why += fmt.Sprintf("; its last reading was %s", memText(used))
+	}
+	why += fmt.Sprintf(". %d MiB is double that so the same load fits with headroom", mb)
+	if hostTotal > 0 {
+		why += fmt.Sprintf(", and stays under 80%% of the device's %s RAM", memText(hostTotal))
+	}
+	why += "."
+	if swapTotal == 0 {
+		why += " The device has no swap, so a limit above its free RAM will still be killed; swap is separate and is set on the device itself."
+	}
+	return why
 }
 
 func memText(b uint64) string {
@@ -204,8 +228,12 @@ func (s *Server) describeContainerIssue(ctx context.Context, d *store.Device, c 
 			is.Cause = "Linux killed it for running out of memory. It has no memory limit, so the whole device ran out of RAM."
 		}
 	case "killed":
-		is.Cause = "It was killed (exit code 137, which is SIGKILL). The usual reason is Linux's out-of-memory killer, either because the container reached its memory limit or because the device ran out of RAM. Docker did not record an out-of-memory flag, so it may also have been stopped by hand or by a stop that timed out."
-		if hostLow {
+		if c.ExitInspected {
+			is.Cause = "It stopped with exit code 137 (SIGKILL). Docker did not mark it as killed for running out of memory, and its log shows no stop request, so this is probably not a memory problem. Something outside Docker sent it SIGKILL (for example kill -9 or a script). It is listed for information and does not count as a device warning."
+		} else {
+			is.Cause = "It was killed (exit code 137, which is SIGKILL). The usual reason is Linux's out-of-memory killer, but this device's agent is too old to tell that apart from a container stopped by hand (a stop that times out also ends in 137). Update the agent for a definite answer."
+		}
+		if hostLow && !c.ExitInspected {
 			is.Cause += " The device is low on memory, which makes an out-of-memory kill likely."
 		}
 	case "loop":
@@ -213,11 +241,12 @@ func (s *Server) describeContainerIssue(ctx context.Context, d *store.Device, c 
 	default:
 		is.Cause = "Docker marked it dead, which means it could not be stopped or removed cleanly."
 	}
-	if (kind == "oom" || kind == "killed") && host != "" {
+	if (kind == "oom" || (kind == "killed" && !c.ExitInspected)) && host != "" {
 		is.Cause += " " + host
 	}
-	if kind == "oom" || kind == "killed" {
+	if kind == "oom" || (kind == "killed" && !c.ExitInspected) {
 		is.SuggestMB = suggestMemoryMB(is.MemLimit, is.MemUsed, m.MemoryTotal)
+		is.SuggestWhy = suggestWhy(is.SuggestMB, is.MemLimit, is.MemUsed, m.MemoryTotal, m.SwapTotal)
 		is.Tips = []string{
 			"Check the container's logs for the last lines before it stopped.",
 			"On the device, `docker stats` shows live memory use per container, and `free -h` shows RAM and swap.",
@@ -233,7 +262,7 @@ func (s *Server) describeContainerIssue(ctx context.Context, d *store.Device, c 
 	case "oom":
 		is.Message = "Containers killed for running out of memory: " + c.Name
 	case "killed":
-		is.Message = "Containers killed (exit 137, often out of memory): " + c.Name
+		is.Message = "Containers killed (exit 137): " + c.Name
 	case "loop":
 		is.Message = "Containers restarting repeatedly: " + c.Name
 	default:

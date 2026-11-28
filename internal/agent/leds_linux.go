@@ -172,8 +172,11 @@ func (s *sysfsLEDs) Set(name, pattern string) error {
 			return err
 		}
 		half := 600 * time.Millisecond
-		if pattern == "fast" || pattern == "identify" {
+		switch pattern {
+		case "fast":
 			half = 120 * time.Millisecond
+		case "identify":
+			half = 400 * time.Millisecond // Pi LEDs cannot dim, so a calm blink is as close to a pulse as they get
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		s.stop[name] = cancel

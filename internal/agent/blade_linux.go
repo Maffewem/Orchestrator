@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -32,7 +33,7 @@ func bladeColour(pattern string) (c rgb, blink time.Duration) {
 	case "fast":
 		return rgb{255, 0, 0}, 120 * time.Millisecond // critical: red
 	case "identify":
-		return rgb{0, 0, 255}, 120 * time.Millisecond // blue, so it is not mistaken for a warning
+		return rgb{0, 0, 255}, 0 // blue, so it is not mistaken for a warning; it pulses (see pulse)
 	case "on":
 		return rgb{0, 160, 0}, 0
 	}
@@ -102,6 +103,16 @@ func (b *bladeLEDs) Set(name, pattern string) error {
 	}
 	col, blink := bladeColour(pattern)
 	b.cur[i] = col
+	if pattern == "identify" {
+		b.cur[i] = rgb{}
+		if err := b.push(); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		b.stop[i] = cancel
+		go b.pulse(ctx, i, col)
+		return nil
+	}
 	if err := b.push(); err != nil {
 		return err
 	}
@@ -133,6 +144,40 @@ func (b *bladeLEDs) Set(name, pattern string) error {
 		}()
 	}
 	return nil
+}
+
+const (
+	pulsePeriod = 2400 * time.Millisecond // one slow breath: fade up, fade down
+	pulseStep   = 60 * time.Millisecond   // frame spacing; each frame is a fresh PIO setup
+)
+
+// pulseLevel is the brightness (0..1) of a breath at time t into it: a raised cosine with a squared
+// curve, which looks even to the eye, starting and ending dark.
+func pulseLevel(t time.Duration) float64 {
+	x := float64(t%pulsePeriod) / float64(pulsePeriod)
+	v := (1 - math.Cos(2*math.Pi*x)) / 2
+	return v * v
+}
+
+// pulse breathes one LED in col until ctx ends.
+func (b *bladeLEDs) pulse(ctx context.Context, i int, col rgb) {
+	t := time.NewTicker(pulseStep)
+	defer t.Stop()
+	start := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		l := pulseLevel(time.Since(start))
+		b.mu.Lock()
+		if ctx.Err() == nil {
+			b.cur[i] = rgb{byte(float64(col[0]) * l), byte(float64(col[1]) * l), byte(float64(col[2]) * l)}
+			b.push()
+		}
+		b.mu.Unlock()
+	}
 }
 
 func (b *bladeLEDs) Restore() {

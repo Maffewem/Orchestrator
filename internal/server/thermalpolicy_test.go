@@ -19,11 +19,13 @@ func TestValidateThermal(t *testing.T) {
 		"minimum below safe":     func(p *api.ThermalPolicy) { p.MinPct = 10 },
 		"curve not reaching 100": func(p *api.ThermalPolicy) { p.Curve[1].Pct = 90 },
 		"curve past critical":    func(p *api.ThermalPolicy) { p.Curve[1].C = 90 },
-		"falling curve":          func(p *api.ThermalPolicy) { p.Curve = []api.CurvePoint{{C: 40, Pct: 60}, {C: 50, Pct: 40}, {C: 80, Pct: 100}} },
-		"no hysteresis":          func(p *api.ThermalPolicy) { p.Protect.ResumeBelowC = 74 },
-		"too short":              func(p *api.ThermalPolicy) { p.Protect.ForSeconds = 5 },
-		"no action":              func(p *api.ThermalPolicy) { p.Protect.FanFull, p.Protect.Stop = false, nil },
-		"bad mode":               func(p *api.ThermalPolicy) { p.FanMode = "turbo" },
+		"falling curve": func(p *api.ThermalPolicy) {
+			p.Curve = []api.CurvePoint{{C: 40, Pct: 60}, {C: 50, Pct: 40}, {C: 80, Pct: 100}}
+		},
+		"no hysteresis": func(p *api.ThermalPolicy) { p.Protect.ResumeBelowC = 74 },
+		"too short":     func(p *api.ThermalPolicy) { p.Protect.ForSeconds = 5 },
+		"no action":     func(p *api.ThermalPolicy) { p.Protect.FanFull, p.Protect.Stop = false, nil },
+		"bad mode":      func(p *api.ThermalPolicy) { p.FanMode = "turbo" },
 	}
 	for name, mut := range cases {
 		c := good

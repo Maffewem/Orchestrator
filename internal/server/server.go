@@ -365,6 +365,7 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/images", s.handleUploadImage)
 	admin("DELETE /api/images/{id}", s.handleDeleteImage)
 	admin("POST /api/devices/{id}/images/flash", s.handleFlashImage)
+	admin("POST /api/devices/{id}/power", s.handleDevicePower)
 	admin("GET /api/devices/{id}/boot", s.handleGetBoot)
 	admin("POST /api/devices/{id}/boot", s.handleSetBoot)
 	admin("GET /api/projects/{id}/migration", s.handleGetMigration)

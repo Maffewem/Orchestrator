@@ -14,6 +14,7 @@ import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib
 import { confirmDialog } from "../components/dialogs";
 import { DeviceHardwareActions, HardwareTab, useIdentifying } from "../components/DeviceHardware";
 import Disks from "../components/Disks";
+import DevicePower from "../components/DevicePower";
 import ContainerIssues, { isContainerIssueText } from "../components/ContainerIssues";
 import HardwareMetrics, { CompareCard, PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
 
@@ -52,6 +53,7 @@ function DeviceBody({ d, base, isAdmin, rows, dev, fleet }: { d: Device; base: s
             {d.name}
             <HealthBadge health={d.health} status={d.status} />
             {d.maintenance && <Badge tone="warn">Maintenance</Badge>}
+            {d.power && <Badge tone="warn">{d.power.mode === "restart" ? (d.status === "offline" ? "Restarting" : "Restart pending") : "Shutting down"}</Badge>}
           </h1>
           {d.maintenance && (
             <p className="mt-1 text-sm text-neutral-500">
@@ -613,6 +615,7 @@ function DeviceSettings({ d, onSaved }: { d: Device; onSaved: () => void }) {
         </form>
       </Card>
       <MaintenanceCard d={d} onSaved={onSaved} />
+      <DevicePower d={d} onChanged={onSaved} />
       <Card className="border-red-200">
         <CardHeader title="Remove device" subtitle="The agent will be disconnected. Its containers keep running. It can rejoin with the join token." />
         <div className="p-5">

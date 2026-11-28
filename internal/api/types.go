@@ -148,6 +148,7 @@ const (
 	CapConsole          = "console"            // a host terminal (stream kind "console")
 	CapSSH              = "ssh"                // ssh.status, ssh.check, ssh.config, ssh.confirm and ssh.key
 	CapHWMetrics        = "hw-metrics"         // heartbeats carry disk and network rates, load, swap, clock and Raspberry Pi power flags
+	CapPower            = "power"              // device.power: graceful shutdown or restart of the whole machine
 	CapDockerGC         = "docker-gc"          // docker.report and docker.prune, and DeploySpec.KeepImages (old worker images trimmed after a deploy)
 )
 
@@ -481,6 +482,12 @@ const (
 	ActionBootGet = "boot.get"
 	// ActionBootSet stages a new BOOT_ORDER (Args["order"], e.g. "0xf14") once Args["confirm"] equals it. It applies on the next reboot.
 	ActionBootSet = "boot.set"
+	// ActionDevicePower shuts the machine down (Args["mode"] == "poweroff") or restarts it ("reboot") once
+	// Args["confirm"] equals the mode. Admin only, sent by the server's power API, never by the generic commands API.
+	// The agent stops Docker (which stops every container gracefully and keeps their restart policies), syncs the
+	// disks and then asks systemd. The result is reported before any of that starts, because the machine may be
+	// the one the server runs on.
+	ActionDevicePower = "device.power"
 )
 
 // Image is a gold image stored on the server: a raw disk image, optionally compressed.

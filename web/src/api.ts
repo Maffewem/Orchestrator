@@ -270,6 +270,10 @@ export interface Device {
   agent_link: "https" | "http" | "unknown";
   /** Set while the device flashes its LEDs (RFC 3339). */
   identifying_until?: string;
+  /** A shutdown or restart that was asked for and has not finished. */
+  power?: { mode: "shutdown" | "restart"; by: string; at: string; exit_maintenance?: boolean };
+  /** Only on the single-device endpoint: what taking the device down affects. */
+  power_impact?: { hosts_server: boolean; running_workers: number; failover_workers: number; cluster_enabled: boolean; ha_paired: boolean };
 }
 
 export interface LED {
@@ -1562,6 +1566,8 @@ export const api = {
     request<Command>("POST", `/api/devices/${deviceId}/images/flash`, body),
   bootInfo: (deviceId: string) => request<BootInfo>("GET", `/api/devices/${deviceId}/boot`),
   setBootOrder: (deviceId: string, order: string, confirm: string) => request<Command>("POST", `/api/devices/${deviceId}/boot`, { order, confirm }),
+  powerDevice: (deviceId: string, mode: "shutdown" | "restart", confirm: string, exitMaintenance: boolean) =>
+    request<Command>("POST", `/api/devices/${deviceId}/power`, { mode, confirm, exit_maintenance: exitMaintenance }),
   getCommand: (id: string) => request<Command>("GET", `/api/commands/${id}`),
   events: (device?: string, limit = 100) =>
     request<Event[]>("GET", `/api/events?limit=${limit}${device ? `&device=${device}` : ""}`),

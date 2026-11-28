@@ -30,12 +30,17 @@ type DeviceView struct {
 	// NetworkNotice is a change to the device's addresses or to the address it reaches the server
 	// at, shown until someone acknowledges it.
 	NetworkNotice *NetNotice `json:"network_notice,omitempty"`
+	// Power is a shutdown or restart that was asked for and has not finished (the device has not come back).
+	Power *powerPending `json:"power,omitempty"`
+	// PowerImpact is set on the single-device endpoint: what taking the device down affects.
+	PowerImpact *PowerImpact `json:"power_impact,omitempty"`
 	// IdentifyingUntil is set while the device flashes its LEDs.
 	IdentifyingUntil *time.Time `json:"identifying_until,omitempty"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
 	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, ContainerIssues: []ContainerIssue{}, Proxy: proxyState(d), Link: s.agentLink(d.ID), IdentifyingUntil: s.flashing.get(d.ID)}
+	v.Power = s.loadPower(context.Background(), d.ID)
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"
@@ -244,6 +249,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if d.Offline {
 		s.event(ctx, d.ID, "info", "device.online", d.Name+" is back online")
 	}
+	s.powerReturned(ctx, d, req.Metrics)
 	s.diffContainers(r, d, req.Containers)
 	s.noteNetworkChanges(ctx, d, req.Host)
 
@@ -392,6 +398,8 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 			state, level = "failed ("+res.Error+")", "error"
 		}
 		s.event(r.Context(), d.ID, level, c.Action, fmt.Sprintf("%s: set boot order to %s %s on %s", c.Args["by"], c.Args["order"], state, d.Name))
+	case api.ActionDevicePower:
+		s.powerResult(r.Context(), d, c, res)
 	case api.ActionRemove:
 		if !res.OK {
 			s.event(r.Context(), d.ID, "error", "container.remove", fmt.Sprintf("Removing %s failed: %s", c.Target, res.Error))
@@ -509,7 +517,10 @@ func (s *Server) lookupDevice(w http.ResponseWriter, r *http.Request) (*store.De
 
 func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
 	if d, ok := s.lookupDevice(w, r); ok {
-		writeJSON(w, http.StatusOK, s.view(d))
+		v := s.view(d)
+		imp := s.powerImpact(r.Context(), d)
+		v.PowerImpact = &imp
+		writeJSON(w, http.StatusOK, v)
 	}
 }
 

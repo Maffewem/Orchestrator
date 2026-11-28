@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar } from "lucide-react";
+import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar, Thermometer } from "lucide-react";
 import { api, type Settings } from "../api";
 import { settingsSections, useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass, SecretInput } from "../components/ui";
@@ -101,6 +101,7 @@ export default function SettingsPage() {
 
   const keywords: Record<string, string> = {
     appearance: "appearance theme dark light",
+    temperature: "temperature heat thermal warning critical alert",
     security: "security session lifetime password length https redirect",
     https: "https tls certificate lets encrypt dashboard hsts",
     sso: "sso single sign-on oidc cloudflare access google github login",
@@ -152,6 +153,17 @@ export default function SettingsPage() {
             subtitle="Light, dark, or follow this device."
           >
             <AppearanceChoice />
+          </Collapsible>
+        )}
+        {vis("temperature") && (
+          <Collapsible
+            id="temperature"
+            defaultOpen={false}
+            title={<span className="flex items-center gap-2"><Thermometer className="size-4" /> Device temperature</span>}
+            subtitle="When a device raises a warning or critical alert for running hot."
+            action={<Badge tone="ok">{s.temperature.warn_c}° / {s.temperature.crit_c}°C</Badge>}
+          >
+            <TemperatureSettings value={s.temperature} onSaved={() => settings.reload()} />
           </Collapsible>
         )}
         {vis("security") && (
@@ -645,6 +657,38 @@ function AppearanceChoice() {
 }
 
 const lifetimes: [number, string][] = [[1, "1 hour"], [8, "8 hours"], [24, "1 day"], [168, "7 days"], [336, "14 days"], [720, "30 days"], [2160, "90 days"]];
+
+function TemperatureSettings({ value, onSaved }: { value: Settings["temperature"]; onSaved: () => void }) {
+  const [warn, setWarn] = useState(value.warn_c);
+  const [crit, setCrit] = useState(value.crit_c);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const save = async () => {
+    setMsg(null);
+    try {
+      await api.setTemperature({ warn_c: warn, crit_c: crit });
+      setMsg({ ok: true, text: "Saved. Applies to every device straight away." });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  return (
+    <div className="space-y-4 p-5">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Warning at (°C)" hint="The hottest sensor on a device reaching this raises a warning in Needs attention and the alerts bell.">
+          <input className={`${inputClass} max-w-[8rem]`} type="number" min={30} max={149} value={warn} onChange={(e) => setWarn(Number(e.target.value))} />
+        </Field>
+        <Field label="Critical at (°C)" hint="Raises a critical alert. A Raspberry Pi starts throttling near 80°C and shuts down near 85°C.">
+          <input className={`${inputClass} max-w-[8rem]`} type="number" min={31} max={150} value={crit} onChange={(e) => setCrit(Number(e.target.value))} />
+        </Field>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={save}>Save</Button>
+        {msg && (msg.ok ? <span className="text-sm text-ok">{msg.text}</span> : <ErrorNote>{msg.text}</ErrorNote>)}
+      </div>
+    </div>
+  );
+}
 
 function SecuritySettings({ value, onSaved }: { value: Settings["security"]; onSaved: () => void }) {
   const [hours, setHours] = useState(value.session_hours);

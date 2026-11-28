@@ -164,6 +164,14 @@ type Metrics struct {
 	UptimeSeconds uint64  `json:"uptime_seconds"`
 	// TempC is the hottest thermal zone in °C; 0 when the device has no sensor (or the agent predates it).
 	TempC float64 `json:"temp_c,omitempty"`
+	// Sensors lists every temperature sensor the device exposes (SoC, NVMe, and so on).
+	Sensors []TempSensor `json:"sensors,omitempty"`
+}
+
+// TempSensor is one temperature reading.
+type TempSensor struct {
+	Name string  `json:"name"`
+	C    float64 `json:"c"`
 }
 
 // Container is the agent's view of one container on its local engine.

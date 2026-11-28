@@ -104,16 +104,11 @@ export default function BackupsPage() {
                     {b.device_name}
                   </Link>
                 </Td>
-                <Td className="max-w-56 text-xs text-neutral-600">
-                  {storage.data ? (
-                    <>
-                      <code className="break-all">{storage.data.location.host_path ?? storage.data.dir}</code>
-                      <span className="block">{storage.data.location.device ? `on ${storage.data.location.device} (server)` : "on the server"}{b.encrypted ? ", encrypted" : ""}</span>
-                    </>
-                  ) : (
-                    "On the server"
-                  )}
-                  <span className="block text-neutral-500">Source: {b.device_name}</span>
+                <Td className="whitespace-nowrap text-xs text-neutral-600">
+                  <span title={storage.data ? `${storage.data.location.host_path ?? storage.data.dir}${storage.data.location.device ? ` on ${storage.data.location.device}` : ""}` : undefined}>
+                    {storage.data?.location.device ? `On ${storage.data.location.device}` : "On the server"}
+                    {b.encrypted ? ", encrypted" : ""}
+                  </span>
                 </Td>
                 <Td>
                   <Badge tone={tone[b.status]}>{b.status === "pending" ? "In progress" : b.status === "complete" ? "Complete" : "Failed"}</Badge>

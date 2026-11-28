@@ -100,9 +100,11 @@ func ws2812Config(pin, origin uint32, clockHz int) pioSMConfig {
 	}
 }
 
-// ws2812Word packs a pixel for the FIFO: green, red, blue in the top 24 bits.
+// ws2812Word packs a pixel for the FIFO: red, green, blue in the top 24 bits, so red goes out first.
+// Most WS2812 strips want green first, but the Compute Blade's LEDs showed green when sent red through
+// a green-first library, so they are red-first.
 func ws2812Word(r, g, b byte) uint32 {
-	return (uint32(g)<<16 | uint32(r)<<8 | uint32(b)) << 8
+	return (uint32(r)<<16 | uint32(g)<<8 | uint32(b)) << 8
 }
 
 type rp1PIO struct {

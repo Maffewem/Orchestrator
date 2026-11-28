@@ -466,8 +466,8 @@ func TestWS2812Setup(t *testing.T) {
 	if cfg.execctrl != 3<<12 || cfg.pinctrl != 1<<29|18<<10 || cfg.shiftctrl != 1<<17|24<<25|1<<30 {
 		t.Fatalf("config: %+v", cfg)
 	}
-	// FIFO word: green, red, blue in the top 24 bits.
-	if w := ws2812Word(0x11, 0x22, 0x33); w != 0x22113300 {
+	// FIFO word: red, green, blue in the top 24 bits.
+	if w := ws2812Word(0x11, 0x22, 0x33); w != 0x11223300 {
 		t.Fatalf("word: %#x", w)
 	}
 }

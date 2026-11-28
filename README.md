@@ -406,6 +406,27 @@ this change still include it; update them. The server also refuses to queue a ba
   443 to reach it; for a LAN-only name, connect Cloudflare and pick the Cloudflare DNS challenge
   under SSL, which needs no inbound access. It applies without a restart. Leave it off when you run your own
   proxy or tunnel.
+  The certificate is watched: Settings shows how long it has left, and the alerts bell and
+  activity feed warn 30 days ahead for an uploaded certificate (14 days for an automatic one,
+  which should have renewed at 30) and again when it is close to ending, and report a failed
+  renewal. Plain HTTP on port 8080 stays published, so the dashboard is always reachable.
+
+### Recovering from an expired certificate or an HSTS lockout
+
+With HSTS on, a browser refuses an expired certificate and offers no click-through. To get in:
+
+1. Open `http://<server IP address>:8080`. Use the **IP address**: browsers apply HSTS per
+   name, so the dashboard's hostname keeps being upgraded to HTTPS but an IP address is not.
+   The HTTP to HTTPS redirect is skipped automatically while the certificate is expired.
+   Then upload a new certificate (or fix the automatic renewal) under Settings.
+2. If the dashboard itself is unreachable or you want HSTS and the redirect off, run on the
+   server: `docker exec orchestrator orchestrator-server https-reset` (add `-off` to also switch
+   dashboard HTTPS off; `-db PATH` if the database is not at the default), then
+   `docker restart orchestrator`.
+3. Without shell access to the container, set `ORCH_HTTPS_RECOVERY=1` (or `off` to also turn
+   HTTPS off) in its environment and restart it. Remove the variable once you are back in.
+4. To clear a cached HSTS entry in Chrome or Edge, open `chrome://net-internals/#hsts` and
+   delete the domain; in Firefox, forget the site in its history.
 
 ## Security notes
 

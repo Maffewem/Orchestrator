@@ -106,6 +106,17 @@ func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The dashboard's own certificate, long before browsers start refusing it.
+	if id := identityFrom(r); id != nil && id.Role == store.RoleAdmin {
+		if h := s.certHealth(); h.Level != "ok" {
+			title := "Dashboard certificate needs attention"
+			if h.Days < 0 {
+				title = "Dashboard certificate has expired"
+			}
+			out = append(out, Alert{ID: "https-cert", Severity: h.Level, Title: title, Detail: h.Message, Link: "/settings"})
+		}
+	}
+
 	sort.SliceStable(out, func(i, j int) bool {
 		if a, b := severityRank[out[i].Severity], severityRank[out[j].Severity]; a != b {
 			return a < b

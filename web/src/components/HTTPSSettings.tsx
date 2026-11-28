@@ -78,6 +78,13 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
     <div className="space-y-4 p-5">
       {value.error && <ErrorNote>{value.error}</ErrorNote>}
       {value.challenge === "dns" && <p className="text-sm text-neutral-500">Using the Cloudflare DNS challenge (works for LAN-only names).</p>}
+      {value.expiry && value.expiry.level !== "ok" && (
+        <div className={`rounded-lg border p-3 text-sm ${value.expiry.level === "critical" ? "border-danger text-danger" : "border-amber-400 text-amber-700"}`}>
+          <p className="font-medium">{value.expiry.days < 0 ? "Certificate expired" : `Certificate ends in ${value.expiry.days} days`}</p>
+          <p>{value.expiry.message}</p>
+          {value.hsts && <p className="mt-1">HSTS is on, so browsers will not let anyone click through once it expires. If you are locked out, open <b>http://&lt;server IP address&gt;:8080</b> (by IP, not by name) and upload or renew the certificate, or see "Locked out?" below.</p>}
+        </div>
+      )}
       {value.listening && value.expires && (
         <p className="text-sm text-neutral-500">
           Certificate for <b>{value.subject}</b> expires {new Date(value.expires).toLocaleDateString()}.
@@ -125,6 +132,14 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
               </ul>
             </div>
           )}
+          <details className="text-neutral-600">
+            <summary className="cursor-pointer font-medium">Locked out? (expired certificate, HSTS)</summary>
+            <ul className="mt-1 list-disc space-y-1 pl-5">
+              <li>Plain HTTP on port 8080 keeps working. Open <b>http://&lt;server IP address&gt;:8080</b> using the <b>IP address</b>: browsers remember HSTS per name, so the name keeps forcing HTTPS but an IP address does not. The HTTP to HTTPS redirect is skipped automatically while the certificate is expired.</li>
+              <li>From a shell on the server: <code>docker exec orchestrator orchestrator-server https-reset</code> switches HSTS and the redirect off (add <code>-off</code> to turn dashboard HTTPS off), then <code>docker restart orchestrator</code>.</li>
+              <li>Without shell access to the container: set <code>ORCH_HTTPS_RECOVERY=1</code> (or <code>off</code>) in its environment and restart it. Remove it afterwards.</li>
+            </ul>
+          </details>
           <details className="text-neutral-600">
             <summary className="cursor-pointer font-medium">What should I expect in the browser?</summary>
             <ul className="mt-1 list-disc space-y-1 pl-5">

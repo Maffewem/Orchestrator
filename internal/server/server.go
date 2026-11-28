@@ -79,6 +79,7 @@ type Server struct {
 	githubAPI     string
 	cloudflareAPI string
 	metrics       *metricsHistory
+	thermal       thermalStatuses // each agent's last thermal report; see thermalpolicy.go
 	wstats        *workerStats
 	logins        limiter
 	gateOK        gateCache // recently verified worker-login credentials; see auth.go
@@ -303,6 +304,8 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/devices", s.handleListDevices)
 	admin("GET /api/devices/{id}", s.handleGetDevice)
 	admin("GET /api/devices/{id}/metrics", s.handleDeviceMetrics)
+	admin("GET /api/devices/{id}/thermal", s.handleGetThermal)
+	admin("PUT /api/devices/{id}/thermal", s.handleSetThermal)
 	admin("GET /api/devices/{id}/workers/{name}/metrics", s.handleWorkerMetrics)
 	admin("GET /api/devices/{id}/workers/{name}/metrics/prefs", s.handleGetWorkerMetricPrefs)
 	admin("PUT /api/devices/{id}/workers/{name}/metrics/prefs", s.handleSetWorkerMetricPrefs)

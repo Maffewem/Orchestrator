@@ -87,6 +87,14 @@ func (s *Server) view(d *store.Device) DeviceView {
 		raise("warning", fmt.Sprintf("Temperature is %.0f°C (warning at %.0f°C)", t, warn))
 	}
 
+	crit2, warn2 := s.thermalIssues(d.ID)
+	for _, m := range crit2 {
+		raise("critical", m)
+	}
+	for _, m := range warn2 {
+		raise("warning", m)
+	}
+
 	// Container failures that point at the device rather than the app: crash loops and kills
 	// by the kernel's out-of-memory killer (exit code 137).
 	var looping, killed []string
@@ -176,6 +184,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.metrics.add(d.ID, req.Metrics)
 	s.ingestStats(ctx, d, req.Containers, req.Stats)
 	s.noteStale(ctx, d.Name, d.ID, req.StaleServers)
+	s.ingestThermal(ctx, d.ID, req.Thermal)
 
 	// A server in standby has handed over: it gives out no work, only the new address.
 	if to := s.standby(); to != "" {
@@ -198,6 +207,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		IntervalSeconds: int(s.cfg.HeartbeatInterval / time.Second),
 		ServerKey:       s.serverKey(),
 		ServerURLs:      s.agentURLs(ctx),
+		Thermal:         s.policyForAgent(ctx, d.ID),
 	})
 }
 

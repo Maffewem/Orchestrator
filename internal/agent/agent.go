@@ -89,6 +89,8 @@ type Agent struct {
 
 	stats statsState // per-container samples waiting for the next heartbeat
 
+	thermal *thermalCtl // fan and protection controller; nil until thermalLoop starts
+
 	leases leaseTable // DHCP addresses held for workers with a dedicated address
 }
 
@@ -137,6 +139,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.streamLoop(ctx)
 	go a.statsLoop(ctx)
 	go a.dedicatedLoop(ctx)
+	go a.thermalLoop(ctx)
 
 	backoff := time.Second
 	for {
@@ -263,11 +266,22 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 		containers = nil
 	}
 	req := api.HeartbeatRequest{Host: host, Metrics: a.metrics(), Containers: containers, Stats: a.takeStats(), Epoch: a.epoch(), StaleServers: a.staleServers()}
+	var thermalSent int
+	if a.thermal != nil {
+		req.Thermal = a.thermal.Status()
+		thermalSent = len(req.Thermal.Events)
+	}
 	var res api.HeartbeatResponse
 	if err := a.post(ctx, "/api/agent/heartbeat", a.state.AgentToken, req, &res); err != nil {
 		return err
 	}
 	a.confirmUpdate()
+	if a.thermal != nil {
+		a.thermal.Ack(thermalSent)
+		if res.Thermal != nil {
+			a.thermal.SetPolicy(*res.Thermal)
+		}
+	}
 	a.learn(res)
 	if res.IntervalSeconds > 0 {
 		a.interval = time.Duration(res.IntervalSeconds) * time.Second

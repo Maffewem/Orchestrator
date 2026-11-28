@@ -13,6 +13,7 @@ import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 import Disks from "../components/Disks";
+import Thermal from "../components/Thermal";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -55,6 +56,7 @@ export default function DevicePage() {
             ...(isAdmin ? [{ to: `${base}/disks`, label: "Disks" }] : []),
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/activity`, label: "Activity" },
+            ...(isAdmin ? [{ to: `${base}/thermal`, label: "Thermal" }] : []),
             ...(isAdmin ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
@@ -79,6 +81,7 @@ export default function DevicePage() {
         {isAdmin && <Route path="disks" element={<Disks d={d} />} />}
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
         <Route path="activity" element={<DeviceActivity d={d} />} />
+        {isAdmin && <Route path="thermal" element={<Thermal d={d} />} />}
         {isAdmin && <Route path="settings" element={<DeviceSettings d={d} onSaved={dev.reload} />} />}
       </Routes>
     </>

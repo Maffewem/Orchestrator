@@ -199,7 +199,7 @@ const CANDIDATES: Candidate[] = [
   { id: "load", label: "Load (1 min)", color: "#7c3aed", kind: "scaled", get: (x) => x.load1, fmt: (v) => v.toFixed(2), has: (s) => s.some((x) => x.load1 > 0) },
   { id: "iowait", label: "I/O wait", color: "#c026d3", kind: "pct", get: (x) => x.iowait ?? 0, fmt: (v) => `${v.toFixed(0)}%`, has: (s) => s.some((x) => (x.iowait ?? 0) > 0) },
   { id: "swap", label: "Swap", color: "#a3a3a3", kind: "pct", get: (x) => x.swap ?? 0, fmt: (v) => `${v.toFixed(0)}%`, has: (_s, m) => (m.swap_total ?? 0) > 0 },
-  { id: "dread", label: "Disk read", color: "#0e7490", kind: "scaled", get: (x) => sumOf(x, (d) => d.read_bps), fmt: rate, has: (s) => s.some((x) => x.disks?.length) },
+  { id: "dread", label: "Disk read", color: "#0e7490", kind: "scaled", get: (x) => sumOf(x, (d) => d.read_bps), fmt: rate, has: (s) => s.some((x) => sumOf(x, (d) => d.read_bps + d.write_bps) > 0) },
   { id: "dwrite", label: "Disk write", color: "#b45309", kind: "scaled", get: (x) => sumOf(x, (d) => d.write_bps), fmt: rate, has: (s) => s.some((x) => x.disks?.length) },
   { id: "dbusy", label: "Disk busy", color: "#4d7c0f", kind: "pct", get: (x) => Math.max(0, ...(x.disks ?? []).map((d) => d.busy)), fmt: (v) => `${v.toFixed(0)}%`, has: (s) => s.some((x) => x.disks?.length) },
   { id: "rx", label: "Network in", color: "#16794c", kind: "scaled", get: (x) => sumNet(x, (d) => d.rx_bps), fmt: rate, has: (s) => s.some((x) => x.nets?.length) },

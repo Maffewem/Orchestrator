@@ -352,9 +352,16 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
       /* remembering the choice is optional */
     }
   };
+  // Disk, network and power graphs only exist once the agent reports them. Say why they are missing.
+  const hasHW = s.some((x) => x.disks?.length || x.nets?.length || x.has_power || (x.clock ?? 0) > 0);
+  const agentHasHW = d.host.capabilities?.includes("hw-metrics") ?? false;
+  const hwHint = d.status !== "online" || !samples.data || hasHW ? null : agentHasHW
+    ? "This device's kernel exposes no disk, network or power counters, so those graphs are not shown."
+    : "Disk I/O, network, power and clock graphs need a newer agent. Update the agent from the Updates page to see them.";
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
+        {hwHint && <p className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-sm text-neutral-600">{hwHint}</p>}
         {d.issues.length > 0 && (
           <Card className="border-amber-200 bg-amber-50/50">
             <CardHeader title="Needs attention" />

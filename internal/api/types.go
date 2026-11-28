@@ -141,6 +141,7 @@ const (
 	CapImages           = "images"             // image.flash, boot.get and boot.set (gold images, Raspberry Pi boot order)
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
+	CapHWMetrics        = "hw-metrics"         // heartbeats carry disk and network rates, load, swap, clock and Raspberry Pi power flags
 	CapDockerGC         = "docker-gc"          // docker.report and docker.prune, and DeploySpec.KeepImages (old worker images trimmed after a deploy)
 )
 

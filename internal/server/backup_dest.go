@@ -20,9 +20,9 @@ import (
 	"github.com/Maffewem/Orchestrator/internal/store"
 )
 
-// Destinations receive a copy of every server backup, so losing the server's disk does not
-// lose the backups. Retention only applies to the local copies and to folders; use a bucket
-// lifecycle rule to expire objects in S3.
+// Destinations receive a verified copy of every server backup (see backup_mirror.go), so
+// losing the server's disk does not lose the backups. Each destination keeps its own number of
+// backups (or the schedule's), S3 objects included.
 
 const settingBackupDests = "server_backup_destinations"
 
@@ -44,6 +44,9 @@ type BackupDest struct {
 
 	RcloneConf string `json:"rclone_conf,omitempty"` // rclone kind: the remote's config section (holds tokens)
 	Remote     string `json:"remote,omitempty"`      // rclone kind: remote name; defaults to the first section
+
+	// Keep is how many backups this destination holds; 0 follows the schedule's count.
+	Keep int `json:"keep,omitempty"`
 
 	LastAt    *time.Time `json:"last_at,omitempty"`
 	LastSize  int64      `json:"last_size,omitempty"` // size of the last copy sent
@@ -197,7 +200,7 @@ func (s *Server) handleSetBackupDests(w http.ResponseWriter, r *http.Request) {
 			if d.RcloneConf == "" {
 				d.RcloneConf = o.RcloneConf
 			}
-			d.LastAt, d.LastError = o.LastAt, o.LastError
+			d.LastAt, d.LastError, d.LastSize = o.LastAt, o.LastError, o.LastSize
 		}
 		if d.Name == "" {
 			d.Name = d.Kind
@@ -303,61 +306,27 @@ func copyFile(src, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
-// replicateServerBackup copies a fresh backup to every enabled destination and records each
-// outcome. It runs in the background so a slow bucket never delays the backup itself.
-func (s *Server) replicateServerBackup(name string, keep int) {
-	ctx := context.Background()
-	dests := s.backupDests(ctx)
-	if len(dests) == 0 {
-		return
-	}
-	src := filepath.Join(s.serverBackupDir(), name)
-	results := map[string]error{}
-	for _, d := range dests {
-		if !d.Enabled {
-			continue
-		}
-		results[d.ID] = s.sendToDest(ctx, d, name, src, keep)
-	}
-	// Re-read so edits made while uploading are kept; only the status fields change.
-	cur := s.backupDests(ctx)
-	now := time.Now().UTC()
-	for i := range cur {
-		if err, ok := results[cur[i].ID]; ok {
-			cur[i].LastAt = &now
-			if fi, e := os.Stat(src); e == nil && err == nil {
-				cur[i].LastSize = fi.Size()
-			}
-			cur[i].LastError = ""
-			if err != nil {
-				cur[i].LastError = err.Error()
-				s.event(ctx, "", "error", "serverbackup.copy_failed", fmt.Sprintf("Copy of %s to %s failed: %v", name, cur[i].Name, err))
-			}
-		}
-	}
-	s.saveBackupDests(ctx, cur)
-}
-
-func (s *Server) sendToDest(ctx context.Context, d BackupDest, name, src string, keep int) error {
+// sendToDest copies one backup to a destination. It returns the checksum the destination
+// computed itself when it can (devices), or "" when the caller must read the copy back.
+func (s *Server) sendToDest(ctx context.Context, d BackupDest, name, src string, keep int) (string, error) {
 	switch d.Kind {
 	case "s3":
-		return d.s3().PutFile(ctx, d.key(name), src)
+		return "", d.s3().PutFile(ctx, d.key(name), src)
 	case "folder":
 		if err := copyFile(src, filepath.Join(d.Path, name)); err != nil {
-			return err
+			return "", err
 		}
 		pruneFolder(d.Path, keep)
-		return nil
+		return "", nil
 	case "rclone":
-		return s.rcloneSend(ctx, d, name, src, keep)
+		return "", s.rcloneSend(ctx, d, name, src, keep)
 	case "device":
 		if err := s.deviceReady(ctx, d.DeviceID); err != nil {
-			return err
+			return "", err
 		}
-		_, err := s.store.CreateCommand(ctx, d.DeviceID, api.ActionFileStore, "", map[string]string{"name": name, "dir": d.Path, "keep": fmt.Sprint(keep)})
-		return err
+		return s.deviceCommand(ctx, d.DeviceID, api.ActionFileStore, map[string]string{"name": name, "dir": d.Path, "keep": fmt.Sprint(keep)})
 	}
-	return errors.New("unknown destination type")
+	return "", errors.New("unknown destination type")
 }
 
 func pruneFolder(dir string, keep int) {

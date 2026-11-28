@@ -1103,12 +1103,32 @@ export interface ServerBackupPolicy {
   weekday: number;
   tz: string;
   keep: number;
+  /** Destination ids to copy to; empty means every enabled destination. */
+  destinations?: string[];
+}
+export interface BackupCopy {
+  dest_id: string;
+  dest: string;
+  kind: string;
+  status: "ok" | "failed" | "pending" | "missing";
+  verified: boolean;
+  size?: number;
+  at?: string;
+  verified_at?: string;
+  error?: string;
+  note?: string;
 }
 export interface ServerBackup {
   name: string;
   size: number;
   encrypted: boolean;
   created_at: string;
+  /** False when the file is gone from this server but copies remain on destinations. */
+  local: boolean;
+  sha256?: string;
+  wanted: number;
+  mirrored: number;
+  copies?: BackupCopy[];
 }
 export interface SSOConfig {
   github: { enabled: boolean; client_id: string; client_secret?: string; orgs: string[]; default_role: string };
@@ -1146,6 +1166,8 @@ export interface BackupDest {
   device_id?: string;
   rclone_conf?: string;
   remote?: string;
+  /** Backups kept on this destination; 0 or unset follows the schedule. */
+  keep?: number;
   last_at?: string;
   last_size?: number;
   last_error?: string;
@@ -1400,7 +1422,9 @@ export const api = {
   createServerBackup: () => request<ServerBackup>("POST", "/api/server-backups"),
   setServerBackupPolicy: (p: ServerBackupPolicy) => request<ServerBackups>("PUT", "/api/server-backups/policy", p),
   deleteServerBackup: (name: string) => request<void>("DELETE", `/api/server-backups/${encodeURIComponent(name)}`),
-  restoreServerBackup: (name: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/restore`),
+  restoreServerBackup: (name: string, from?: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/restore${from ? `?from=${encodeURIComponent(from)}` : ""}`),
+  syncServerBackup: (name: string, destId?: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/sync`, destId ? { dest_id: destId } : undefined),
+  verifyServerBackup: (name: string) => request<void>("POST", `/api/server-backups/${encodeURIComponent(name)}/verify`),
   downloadServerBackup,
   restoreServerUpload,
   backupPolicy: (deviceId: string, name: string) =>

@@ -404,7 +404,11 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		output, err = a.installServer(ictx, c.Args)
 		icancel()
 	case api.ActionFileStore:
-		err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
+		output, err = a.storeServerBackup(cctx, c.Args["name"], c.Args["dir"], c.Args["keep"])
+	case api.ActionFileFetch:
+		fctx, fcancel := context.WithTimeout(ctx, 30*time.Minute)
+		output, err = a.fetchServerBackup(fctx, c.Args["name"], c.Args["dir"], c.Args["mode"])
+		fcancel()
 	case api.ActionStackStart, api.ActionStackStop, api.ActionStackDown:
 		sctx, scancel := context.WithTimeout(ctx, 10*time.Minute)
 		output, err = a.stackAction(sctx, c.Action, c.Target, c.Args["volumes"])

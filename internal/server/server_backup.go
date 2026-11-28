@@ -34,6 +34,8 @@ type ServerBackupPolicy struct {
 	Weekday int    `json:"weekday"`
 	TZ      string `json:"tz"`
 	Keep    int    `json:"keep"`
+	// Destinations lists the ids of the destinations to copy to; empty means every enabled one.
+	Destinations []string `json:"destinations"`
 }
 
 func defaultServerBackupPolicy() ServerBackupPolicy {
@@ -69,6 +71,12 @@ type serverBackup struct {
 	Size      int64     `json:"size"`
 	Encrypted bool      `json:"encrypted"`
 	CreatedAt time.Time `json:"created_at"`
+	// Local is false when the file is gone from this server but copies remain elsewhere.
+	Local    bool       `json:"local"`
+	SHA256   string     `json:"sha256,omitempty"`
+	Wanted   int        `json:"wanted"`   // destinations that should hold a copy
+	Mirrored int        `json:"mirrored"` // of those, how many hold a good one
+	Copies   []copyView `json:"copies,omitempty"`
 }
 
 func (s *Server) listServerBackups() []serverBackup {
@@ -194,7 +202,7 @@ type serverBackupsView struct {
 }
 
 func (s *Server) serverBackupsView(ctx context.Context) serverBackupsView {
-	v := serverBackupsView{Policy: s.serverBackupPolicy(ctx), Backups: s.listServerBackups(), PasswordSet: s.backupPassword(ctx) != "", Dir: s.serverBackupDir(), Destinations: s.destViews(ctx)}
+	v := serverBackupsView{Policy: s.serverBackupPolicy(ctx), Backups: s.backupsWithCopies(ctx), PasswordSet: s.backupPassword(ctx) != "", Dir: s.serverBackupDir(), Destinations: s.destViews(ctx)}
 	if next, ok := v.Policy.schedule().nextSlot(time.Now()); ok {
 		v.NextRun = &next
 	}
@@ -277,6 +285,10 @@ func (s *Server) handleDeleteServerBackup(w http.ResponseWriter, r *http.Request
 // handleRestoreServerBackup stages a stored backup as the next database and restarts the
 // server: POST /api/server-backups/{name}/restore.
 func (s *Server) handleRestoreServerBackup(w http.ResponseWriter, r *http.Request) {
+	if from := r.URL.Query().Get("from"); from != "" {
+		s.restoreFromCopy(w, r, from)
+		return
+	}
 	p, ok := s.serverBackupFile(w, r)
 	if !ok {
 		return
@@ -348,4 +360,35 @@ func (s *Server) stageRestore(w http.ResponseWriter, r *http.Request, src io.Rea
 		time.Sleep(500 * time.Millisecond)
 		s.cfg.Restart()
 	}()
+}
+
+// restoreFromCopy restores from the copy held by one destination, after checking it against
+// the checksum recorded when it was made: POST /api/server-backups/{name}/restore?from={dest}.
+func (s *Server) restoreFromCopy(w http.ResponseWriter, r *http.Request, destID string) {
+	name := r.PathValue("name")
+	if name != filepath.Base(name) || !strings.HasPrefix(name, serverBackupPrefix) {
+		writeError(w, http.StatusBadRequest, "invalid backup name")
+		return
+	}
+	for _, d := range s.backupDests(r.Context()) {
+		if d.ID != destID {
+			continue
+		}
+		rec := s.loadCopies(r.Context())[name]
+		tmp := filepath.Join(s.serverBackupDir(), ".fetch", "restore-"+name)
+		defer os.Remove(tmp)
+		if err := s.fetchVerified(r.Context(), d, name, rec.SHA256, tmp); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		f, err := os.Open(tmp)
+		if err != nil {
+			s.internal(w, err)
+			return
+		}
+		defer f.Close()
+		s.stageRestore(w, r, f, strings.HasSuffix(name, ".enc"))
+		return
+	}
+	writeError(w, http.StatusNotFound, "no such destination")
 }

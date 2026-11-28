@@ -275,6 +275,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agent/streams/{id}/output", s.agentAuth(s.handleAgentStreamOutput))
 	mux.Handle("GET /api/agent/streams/{id}/input", s.agentAuth(s.handleAgentStreamInput))
 	mux.Handle("GET /api/agent/server-backups/{name}", s.agentAuth(s.handleAgentServerBackup))
+	mux.Handle("PUT /api/agent/server-backups/{name}", s.agentAuth(s.handleAgentServerBackupUpload))
 	mux.Handle("GET /api/agent/images/{id}", s.agentAuth(s.handleAgentImage))
 	mux.Handle("GET /api/agent/update", s.agentAuth(s.handleAgentUpdateInfo))
 
@@ -450,6 +451,8 @@ func (s *Server) Handler() http.Handler {
 	admin("GET /api/server-backups/{name}/download", s.handleDownloadServerBackup)
 	admin("DELETE /api/server-backups/{name}", s.handleDeleteServerBackup)
 	admin("POST /api/server-backups/{name}/restore", s.handleRestoreServerBackup)
+	admin("POST /api/server-backups/{name}/sync", s.handleSyncServerBackup)
+	admin("POST /api/server-backups/{name}/verify", s.handleVerifyServerBackup)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 

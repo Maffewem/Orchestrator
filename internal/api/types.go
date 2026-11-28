@@ -129,6 +129,7 @@ const (
 	CapStream           = "stream"             // live log following and container shells
 	CapInspect          = "inspect"            // container.inspect, used to adopt existing containers
 	CapFileStore        = "filestore"          // file.store, receives server backups
+	CapFileFetch        = "filefetch"          // file.fetch, checksum or upload of a stored server backup; file.store reports the checksum
 	CapCompose          = "compose"            // deploy of a Compose stack, and stack.start/stop/down
 	CapTunnel           = "tunnel"             // tunnel.sync, runs cloudflared
 	CapTunnelUpdate     = "tunnel-update"      // tunnel.sync with Args["update"]: pull the newest cloudflared and recreate; reports its version
@@ -425,6 +426,9 @@ const (
 	ActionNetworkCheck = "network.check"
 	// ActionFileStore downloads the server backup Args["name"] into the folder Args["dir"], keeping the newest Args["keep"].
 	ActionFileStore = "file.store"
+	// ActionFileFetch reads a stored server backup (Args["name"] in folder Args["dir"]) and returns
+	// its SHA-256 as the output; Args["mode"] == "send" also uploads it to the server.
+	ActionFileFetch = "file.fetch"
 	// ActionServerInstall sets up a new Orchestrator server on this device from the transfer
 	// bundle the current server offers (Args: name, image, port, bundle, password).
 	ActionServerInstall = "server.install"

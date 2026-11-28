@@ -191,8 +191,8 @@ func BladeLEDTest(out interface{ Write([]byte) (int, error) }) error {
 		say("  NOW: top LED red? edge LED blue?")
 		time.Sleep(3 * time.Second)
 		w.Close()
-		say("  off.")
-		time.Sleep(time.Second)
+		say("  off. (3 second pause, both LEDs should be dark)")
+		time.Sleep(3 * time.Second)
 	}
 	say("")
 	say("Done. Tell me which attempt (if any) showed red on top and blue on the edge.")

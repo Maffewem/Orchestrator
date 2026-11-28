@@ -35,6 +35,8 @@ type HostInfo struct {
 	Network []NetAddr `json:"network,omitempty"`
 	// Tunnel describes the cloudflared container the agent runs, when there is one.
 	Tunnel *TunnelInfo `json:"tunnel,omitempty"`
+	// Power is the supply a Compute Blade reports (only sent while its LED profile is "blade").
+	Power *PowerSource `json:"power,omitempty"`
 }
 
 // TunnelInfo is what the agent knows about its cloudflared container.

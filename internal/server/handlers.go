@@ -80,6 +80,10 @@ func (s *Server) view(d *store.Device) DeviceView {
 			raise("warning", fmt.Sprintf("CPU is heavily loaded (load %.1f on %d cores)", d.Metrics.Load5, d.Host.CPUs))
 		}
 	}
+	// A blade on a 5 V-only supply can brown out under sustained load (it has about 15 W; PoE+ has 30 W).
+	if p := d.Host.Power; p != nil && p.Source == api.PowerBasic && d.Host.CPUs > 0 && d.Metrics.Load5/float64(d.Host.CPUs) >= 1 {
+		raise("warning", "Heavily loaded while powered by a 5 V-only supply (up to 15 W); PoE+ gives up to 30 W")
+	}
 	switch t := d.Metrics.TempC; {
 	case t >= 85:
 		raise("critical", fmt.Sprintf("Temperature is %.0f°C", t))

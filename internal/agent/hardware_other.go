@@ -25,3 +25,5 @@ func (a *Agent) serveConsole(context.Context, api.StreamRequest) error {
 func BladeLEDTest(interface{ Write([]byte) (int, error) }) error {
 	return errors.New("the blade LED test only runs on Linux")
 }
+
+func (a *Agent) powerSource() *api.PowerSource { return nil }

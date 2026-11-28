@@ -395,6 +395,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             <Prop k="Uptime" v={uptime(m.uptime_seconds)} />
             <Prop k="Load average" v={`${m.load1.toFixed(2)} ${m.load5.toFixed(2)} ${m.load15.toFixed(2)}`} />
             <Prop k="Temperature" v={m.temp_c ? `${m.temp_c.toFixed(0)}°C` : "Not reported (no sensor, or the agent needs updating)"} />
+            {d.host.power && <Prop k="Power source" v={d.host.power.source === "poe-plus" ? `PoE+ / PoE++ (up to ${d.host.power.max_watts} W)` : `5 V only: PoE or USB-C (up to ${d.host.power.max_watts} W)`} />}
             <Prop k="Last seen" v={ago(d.last_seen)} />
             <Prop k="Agent" v={d.host.agent_version} />
           </dl>

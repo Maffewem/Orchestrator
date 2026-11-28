@@ -23,8 +23,9 @@ func hardwareCaps() []string {
 
 // hw holds the hardware controllers, created on first use.
 type hardware struct {
-	leds *ledCtl
-	ssh  *sshCtl
+	leds  *ledCtl
+	ssh   *sshCtl
+	power powerCache
 }
 
 func (a *Agent) hardware() *hardware {
@@ -36,6 +37,21 @@ func (a *Agent) hardware() *hardware {
 		a.hw = &hardware{leds: newLEDCtl(dir, "/sys/class/leds", hostSampler()), ssh: newSSHCtl(dir)}
 	})
 	return a.hw
+}
+
+// powerSource is the blade's supply, read only while the LED profile says this device is a blade.
+func (a *Agent) powerSource() *api.PowerSource {
+	if InContainer() {
+		return nil
+	}
+	hw := a.hardware()
+	hw.leds.mu.Lock()
+	blade := hw.leds.cfg.Profile == api.LEDProfileBlade
+	hw.leds.mu.Unlock()
+	if !blade {
+		return nil
+	}
+	return hw.power.get()
 }
 
 // startHardware runs the LED rules and the SSH trial watcher.

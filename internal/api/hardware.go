@@ -116,3 +116,15 @@ type SSHCheck struct {
 	// Lockout is true when any warning is at level lockout.
 	Lockout bool `json:"lockout"`
 }
+
+// Power sources a blade can report (Compute Blade: GPIO23 low means PoE+ or PoE++, high means 5 V only).
+const (
+	PowerPoEPlus = "poe-plus" // PoE+ or PoE++ present, up to 30 W
+	PowerBasic   = "5v"       // 5 V present from PoE or USB-C, up to 15 W
+)
+
+// PowerSource is what a Compute Blade's GPIO23 says about its supply. It is not a measurement of use.
+type PowerSource struct {
+	Source   string `json:"source"`
+	MaxWatts int    `json:"max_watts"`
+}

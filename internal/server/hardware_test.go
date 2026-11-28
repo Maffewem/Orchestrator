@@ -140,3 +140,31 @@ func TestHardwareNeedsAdminAndIsAudited(t *testing.T) {
 		t.Fatal("agent saw no commands")
 	}
 }
+
+func TestBladeOnBasicSupplyWarnsUnderLoad(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("blade-2")
+	beat := func(src string, load float64) DeviceView {
+		h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{
+			Host:    api.HostInfo{CPUs: 4, Power: &api.PowerSource{Source: src, MaxWatts: 15}},
+			Metrics: api.Metrics{Load5: load},
+		}, &api.HeartbeatResponse{})
+		var v DeviceView
+		h.do("GET", "/api/devices/"+reg.DeviceID, adminToken, nil, &v)
+		return v
+	}
+	has := func(v DeviceView) bool {
+		for _, i := range v.Issues {
+			if strings.Contains(i, "5 V-only") {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(beat(api.PowerBasic, 5)) {
+		t.Fatal("a loaded blade on a 5 V supply should warn")
+	}
+	if has(beat(api.PowerBasic, 0.5)) || has(beat(api.PowerPoEPlus, 5)) {
+		t.Fatal("no warning when idle, or on PoE+")
+	}
+}

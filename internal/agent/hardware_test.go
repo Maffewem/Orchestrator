@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
 )
@@ -468,5 +469,37 @@ func TestWS2812Setup(t *testing.T) {
 	// FIFO word: green, red, blue in the top 24 bits.
 	if w := ws2812Word(0x11, 0x22, 0x33); w != 0x22113300 {
 		t.Fatalf("word: %#x", w)
+	}
+}
+
+// --- blade power source ---
+
+func TestGPIOUapiLayout(t *testing.T) {
+	// linux/gpio.h: gpio_v2_line_request is 592 bytes, gpio_v2_line_values 16, gpiochip_info 68.
+	if unsafe.Sizeof(gpioLineRequest{}) != 592 || unsafe.Sizeof(gpioLineValues{}) != 16 || unsafe.Sizeof(gpioChipInfo{}) != 68 {
+		t.Fatalf("sizes: %d %d %d", unsafe.Sizeof(gpioLineRequest{}), unsafe.Sizeof(gpioLineValues{}), unsafe.Sizeof(gpioChipInfo{}))
+	}
+	if reqGPIOGetLine != 0xc250b407 || reqGPIOGetValues != 0xc010b40e || reqGPIOChipInfo != 0x8044b401 {
+		t.Fatalf("requests: %#x %#x %#x", reqGPIOGetLine, reqGPIOGetValues, reqGPIOChipInfo)
+	}
+}
+
+func TestPowerSource(t *testing.T) {
+	if p := powerFromLevel(true); p.Source != "5v" || p.MaxWatts != 15 {
+		t.Fatalf("high: %+v", p)
+	}
+	if p := powerFromLevel(false); p.Source != "poe-plus" || p.MaxWatts != 30 {
+		t.Fatalf("low: %+v", p)
+	}
+	calls := 0
+	c := &powerCache{read: func() (bool, error) { calls++; return false, nil }}
+	c.get()
+	c.get()
+	if calls != 1 {
+		t.Fatalf("reads should be cached for a minute, got %d", calls)
+	}
+	c2 := &powerCache{read: func() (bool, error) { return false, fmt.Errorf("no chip") }}
+	if c2.get() != nil {
+		t.Fatal("an unreadable pin must report nothing, not a guess")
 	}
 }

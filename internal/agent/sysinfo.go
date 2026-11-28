@@ -69,6 +69,7 @@ func (a *Agent) hostInfo() api.HostInfo {
 	h.ServerVia = a.serverVia()
 	h.Network = a.network()
 	h.Tunnel = a.tunnelInfo()
+	h.Power = a.powerSource()
 	return h
 }
 

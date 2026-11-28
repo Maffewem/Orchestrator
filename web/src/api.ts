@@ -23,6 +23,8 @@ export interface HostInfo {
   docker?: DockerInfo;
   in_container?: boolean;
   capabilities?: string[];
+  /** A Compute Blade's supply, from GPIO23 (only while its LED profile is "blade"). */
+  power?: { source: "poe-plus" | "5v"; max_watts: number };
   /** Each address with its interface, subnet, gateway and whether it is on Wi-Fi. */
   network?: NetAddr[];
 }

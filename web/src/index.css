@@ -92,3 +92,13 @@ body {
   background-size: 28px 100%;
   animation: stripes 1s linear infinite;
 }
+
+/* iOS Safari zooms the page when a field under 16px gets focus (the sign-in
+   form autofocuses one) and stays zoomed. Keep fields at 16px on small screens. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

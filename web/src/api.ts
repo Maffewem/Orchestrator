@@ -103,6 +103,8 @@ export interface Container {
   volumes?: string[];
   /** Docker networks the container is on, with its address and MAC (a macvlan one is a dedicated address). */
   networks?: { name: string; ip?: string; mac?: string }[];
+  /** Docker has restarted it repeatedly in the last few minutes, even if it is running right now. */
+  unstable?: boolean;
 }
 
 export interface DiskVolume {

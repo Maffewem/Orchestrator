@@ -181,6 +181,9 @@ type Container struct {
 	Volumes []string `json:"volumes,omitempty"`
 	// Networks lists the Docker networks the container is attached to with its address and MAC on each.
 	Networks []ContainerNet `json:"networks,omitempty"`
+	// Unstable is set by the server (never the agent) when Docker has restarted the container
+	// repeatedly in the last few minutes, even if it is "running" at this instant.
+	Unstable bool `json:"unstable,omitempty"`
 }
 
 // ContainerNet is a container's attachment to one Docker network.

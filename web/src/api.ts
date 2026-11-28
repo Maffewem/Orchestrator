@@ -1075,6 +1075,7 @@ export interface HTTPSView {
   published_host?: string;
   can_publish: boolean;
   publish_note?: string;
+  hsts_blocked?: string;
 }
 
 export interface HTTPSTest {

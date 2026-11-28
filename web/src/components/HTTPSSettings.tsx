@@ -56,7 +56,16 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
       const r = await api.setHTTPS({ mode, host, addr, hsts, cert_pem: cert, key_pem: key });
       setCert("");
       setKey("");
-      setMsg({ ok: true, text: r.listening ? `Listening for HTTPS on ${r.addr}.` : "HTTPS is off." });
+      if (!r.hsts) setHsts(false);
+      setMsg({
+        ok: !r.hsts_blocked,
+        text: !r.listening
+          ? "HTTPS is off."
+          : r.can_publish
+            ? `Listening for HTTPS on ${r.addr}, but Docker does not publish port ${r.container_port} yet. Press "Publish port ${r.container_port}" in the status box to make it reachable (a previously published HTTPS port is removed).`
+            : `Listening for HTTPS on ${r.addr}.`,
+      });
+      if (r.hsts_blocked) setMsg({ ok: false, text: "Saved, but " + r.hsts_blocked.charAt(0).toLowerCase() + r.hsts_blocked.slice(1) });
       onSaved();
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
@@ -119,7 +128,7 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
           <details className="text-neutral-600">
             <summary className="cursor-pointer font-medium">What should I expect in the browser?</summary>
             <ul className="mt-1 list-disc space-y-1 pl-5">
-              <li>Always use <b>https://</b> with the HTTPS port (for example https://192.168.0.184:8443). Using https:// on the plain HTTP port gives an SSL protocol error.</li>
+              <li>Always use <b>https://</b> with the HTTPS port (for example https://this-server:{value.published_host || value.container_port || "8443"}). Using https:// on the plain HTTP port gives an SSL protocol error.</li>
               <li><b>Self-signed or private-CA certificate:</b> a "not private" warning is expected. Click through for your own server, or install the certificate on your devices.</li>
               <li><b>Real certificate</b> (Let's Encrypt or a purchased one): no warning, but only when you open the dashboard by the <b>name</b> on the certificate. An IP address never matches, so use the hostname.</li>
               <li>Plain HTTP keeps working as before. The "Redirect HTTP to HTTPS" setting is skipped automatically while the HTTPS port is not published, so you cannot lock yourself out.</li>
@@ -165,7 +174,7 @@ export function HTTPSSettings({ value, onSaved }: { value: HTTPSView; onSaved: (
           <span>
             <span className="font-medium">HSTS</span>
             <br />
-            <span className="text-neutral-500">Browsers refuse plain HTTP to this host for a year. Hard to undo, so leave it off until HTTPS works.</span>
+            <span className="text-neutral-500">Browsers refuse plain HTTP to this host for a year. Hard to undo, so it is only switched on when a test shows browsers would accept the certificate for the name you are using (not self-signed, name matches, port published); otherwise it stays off.</span>
           </span>
         </label>
       )}

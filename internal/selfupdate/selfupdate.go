@@ -157,12 +157,15 @@ func Check(ctx context.Context, d *agent.Docker, s *Self) (*Latest, error) {
 //
 // publish lists extra TCP ports ("host:container") the new container must publish; ports the
 // container already publishes are always carried over unchanged.
-func StartHelper(ctx context.Context, d *agent.Docker, s *Self, newImageID string, publish ...string) error {
+func StartHelper(ctx context.Context, d *agent.Docker, s *Self, newImageID string, publish []string, unpublish []string) error {
 	const helper = "orchestrator-updater"
 	d.RemoveIfExists(ctx, helper)
 	args := []string{"self-update", "-container", s.Name, "-image", s.ImageRef}
 	for _, p := range publish {
 		args = append(args, "-publish", p)
+	}
+	for _, p := range unpublish {
+		args = append(args, "-unpublish", p)
 	}
 	id, err := d.CreateHelper(ctx, helper, newImageID,
 		args,
@@ -180,6 +183,7 @@ type SwapOptions struct {
 	Timeout   time.Duration // how long the new container has to become healthy
 	Stable    time.Duration // without a healthcheck: how long it must stay running
 	Publish   []string      // extra TCP ports to publish, "host:container"
+	Unpublish []string      // container ports whose mapping is dropped
 	Log       func(string)
 }
 
@@ -249,7 +253,7 @@ func Swap(ctx context.Context, d *agent.Docker, o SwapOptions) error {
 	}
 
 	logf("starting the new version")
-	id, err := d.RecreateFromWith(ctx, inspect, o.Container, o.Image, o.Publish)
+	id, err := d.RecreateFromWith(ctx, inspect, o.Container, o.Image, o.Publish, o.Unpublish)
 	if err != nil {
 		return rollback(fmt.Errorf("create: %w", err))
 	}

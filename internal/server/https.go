@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,10 @@ import (
 // listens for HTTPS on a second port and applies changes without a restart.
 
 const settingHTTPS = "https_config"
+
+// settingHTTPSPublished remembers the container port this server last published for HTTPS, so
+// changing the port can drop the old mapping.
+const settingHTTPSPublished = "https_published_port"
 
 type HTTPSConfig struct {
 	Mode    string `json:"mode"` // off | upload | auto
@@ -62,6 +67,8 @@ type httpsView struct {
 	PublishedHost string `json:"published_host,omitempty"`
 	CanPublish    bool   `json:"can_publish"`
 	PublishNote   string `json:"publish_note,omitempty"`
+	// HSTSBlocked is set (and HSTS left off) when switching HSTS on was refused as unsafe.
+	HSTSBlocked string `json:"hsts_blocked,omitempty"`
 }
 
 type httpsState struct {
@@ -255,6 +262,12 @@ func (s *Server) handleSetHTTPS(w http.ResponseWriter, r *http.Request) {
 	if req.Addr == "" {
 		req.Addr = defaultHTTPSAddr
 	}
+	if req.Mode != "off" && req.Mode != "" {
+		if err := s.validateHTTPSAddr(ctx, req.Addr); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if req.Mode == "upload" && req.CertPEM == "" && req.KeyPEM == "" {
 		req.CertPEM, req.KeyPEM = old.CertPEM, old.KeyPEM
 	}
@@ -268,13 +281,43 @@ func (s *Server) handleSetHTTPS(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	b, _ := json.Marshal(req)
-	if err := s.store.SetSetting(ctx, settingHTTPS, string(b)); err != nil {
-		s.internal(w, err)
+	wantHSTS := req.HSTS && req.Mode != "off" && req.Mode != ""
+	if wantHSTS {
+		req.HSTS = false // switched on below, only after the test passes
+		s.https.mu.Lock()
+		s.https.cfg.HSTS = false
+		s.https.mu.Unlock()
+	}
+	save := func() bool {
+		b, _ := json.Marshal(req)
+		if err := s.store.SetSetting(ctx, settingHTTPS, string(b)); err != nil {
+			s.internal(w, err)
+			return false
+		}
+		return true
+	}
+	if !save() {
 		return
 	}
+	blocked := ""
+	if wantHSTS {
+		view := s.httpsView(ctx)
+		if why := hstsBlocker(s.probeHTTPS(ctx, view, requestHostName(r)), view); why != "" {
+			blocked = "HSTS was not switched on: " + why + "."
+		} else {
+			req.HSTS = true
+			s.https.mu.Lock()
+			s.https.cfg.HSTS = true
+			s.https.mu.Unlock()
+			if !save() {
+				return
+			}
+		}
+	}
 	s.event(ctx, "", "info", "settings.https", "Dashboard HTTPS set to "+req.Mode)
-	writeJSON(w, http.StatusOK, s.httpsView(ctx))
+	v := s.httpsView(ctx)
+	v.HSTSBlocked = blocked
+	writeJSON(w, http.StatusOK, v)
 }
 
 // redirectTarget is the HTTPS address for a plain-HTTP request.
@@ -386,14 +429,25 @@ type httpsTestResult struct {
 // reports what a browser would see, in terms an administrator can act on.
 func (s *Server) handleTestHTTPS(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	view := s.httpsView(ctx)
+	writeJSON(w, http.StatusOK, s.probeHTTPS(ctx, s.httpsView(ctx), requestHostName(r)))
+}
+
+// requestHostName is the host name (without port) the browser used to reach this request.
+func requestHostName(r *http.Request) string {
+	name := r.Host
+	if h, _, err := net.SplitHostPort(name); err == nil {
+		name = h
+	}
+	return name
+}
+
+// probeHTTPS connects to the HTTPS listener from inside the server and reports what a browser
+// would see for the given name (the configured hostname wins over fallback).
+func (s *Server) probeHTTPS(ctx context.Context, view httpsView, fallback string) httpsTestResult {
 	res := httpsTestResult{Listening: view.Listening, PortKnown: view.PortKnown, PortPublished: view.PublishedHost != ""}
 	name := view.Host
 	if name == "" {
-		name = r.Host
-		if h, _, err := net.SplitHostPort(name); err == nil {
-			name = h
-		}
+		name = fallback
 	}
 	res.TestedName = name
 	switch {
@@ -437,7 +491,7 @@ func (s *Server) handleTestHTTPS(w http.ResponseWriter, r *http.Request) {
 		}
 		res.Advice = append(res.Advice, httpsAdvice(res, view)...)
 	}
-	writeJSON(w, http.StatusOK, res)
+	return res
 }
 
 // httpsAdvice turns a test result into plain-language next steps.
@@ -493,15 +547,67 @@ func (s *Server) handlePublishHTTPSPort(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "port "+port+" is already published as host port "+self.Ports[port+"/tcp"])
 		return
 	}
+	// Make sure the host can really give out the port before touching the running server.
+	if err := s.docker.ProbePort(ctx, self.ImageID, port); err != nil {
+		writeError(w, http.StatusConflict, err.Error()+". Choose another port in the HTTPS listen address, save, and publish again.")
+		return
+	}
+	prev, _ := s.store.GetSetting(ctx, settingHTTPSPublished)
+	var unpublish []string
+	if prev != "" && prev != port && self.Ports[prev+"/tcp"] != "" {
+		unpublish = []string{prev}
+	}
 	if !s.begin("publish-port") {
 		writeError(w, http.StatusConflict, "another server update or restart is already running")
 		return
 	}
 	s.event(ctx, "", "info", "settings.https", "Publishing the dashboard HTTPS port "+port+"; the dashboard restarts shortly")
-	if err := selfupdate.StartHelper(ctx, s.docker, self, self.ImageID, port+":"+port); err != nil {
+	s.store.SetSetting(ctx, settingHTTPSPublished, port)
+	if err := selfupdate.StartHelper(ctx, s.docker, self, self.ImageID, []string{port + ":" + port}, unpublish); err != nil {
+		s.store.SetSetting(ctx, settingHTTPSPublished, prev)
 		s.finish()
 		writeError(w, http.StatusBadGateway, "could not start the updater: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting", "port": port})
+}
+
+// validateHTTPSAddr checks a custom HTTPS listen address: a port from 1024 to 65535 (or 443)
+// that does not clash with the dashboard's own HTTP port or another published port of the
+// server container. A port that is busy on the host is only found out when Docker starts the
+// container; the publish step then rolls back to the old one.
+func (s *Server) validateHTTPSAddr(ctx context.Context, addr string) error {
+	port := portOf(addr)
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("%q is not a listen address with a port from 1 to 65535, for example :8443", addr)
+	}
+	if n == 8080 {
+		return errors.New("port 8080 is the dashboard's own HTTP port; choose another one for HTTPS")
+	}
+	if n < 1024 && n != 443 {
+		return errors.New("ports below 1024 are reserved; use 443 or a port from 1024 up")
+	}
+	return nil
+}
+
+// hstsBlocker says why HSTS must not be switched on yet, or "" when it is safe. HSTS makes
+// browsers refuse plain HTTP and refuse to let anyone click through a certificate warning, so
+// it is only allowed once a browser using this name would accept the certificate.
+func hstsBlocker(res httpsTestResult, view httpsView) string {
+	switch {
+	case !res.Listening:
+		return "the HTTPS listener is not running"
+	case view.PortKnown && view.PublishedHost == "":
+		return "Docker does not publish port " + view.ContainerPort + " yet, so browsers could not reach HTTPS at all"
+	case !res.Handshake:
+		return "the HTTPS handshake failed (" + res.Error + ")"
+	case res.Expired:
+		return "the certificate has expired"
+	case !res.NameMatches:
+		return "the certificate is not valid for " + res.TestedName + " (it covers " + strings.Join(res.SANs, ", ") + "); open the dashboard by a name on the certificate, not an IP address"
+	case !res.Trusted:
+		return "the certificate is self-signed or from an authority browsers do not trust (" + res.TrustError + "); under HSTS the browser warning could not be clicked through and you would be locked out"
+	}
+	return ""
 }

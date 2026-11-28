@@ -132,6 +132,8 @@ func runSelfUpdate(args []string) int {
 	host := fs.String("docker-host", env("DOCKER_HOST", "unix:///var/run/docker.sock"), "Docker engine address")
 	var publish multiFlag
 	fs.Var(&publish, "publish", "extra TCP port to publish, HOST:CONTAINER (repeatable)")
+	var unpublish multiFlag
+	fs.Var(&unpublish, "unpublish", "container port whose published mapping is dropped (repeatable)")
 	fs.Parse(args)
 	d, err := agent.NewDocker(*host)
 	if err != nil || *container == "" || *image == "" {
@@ -139,7 +141,7 @@ func runSelfUpdate(args []string) int {
 		return 2
 	}
 	err = selfupdate.Swap(context.Background(), d, selfupdate.SwapOptions{
-		Container: *container, Image: *image, Publish: publish,
+		Container: *container, Image: *image, Publish: publish, Unpublish: unpublish,
 		Log: func(m string) { fmt.Fprintln(os.Stderr, "self-update:", m) },
 	})
 	if err != nil {

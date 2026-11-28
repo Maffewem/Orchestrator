@@ -33,11 +33,11 @@ func TestDashboardHTTPS(t *testing.T) {
 
 	// A mismatched pair is refused and nothing starts.
 	_, otherKey := selfSigned(t)
-	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Addr: "127.0.0.1:0", CertPEM: cert, KeyPEM: otherKey}, nil); code != http.StatusBadRequest {
+	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Addr: "127.0.0.1:18446", CertPEM: cert, KeyPEM: otherKey}, nil); code != http.StatusBadRequest {
 		t.Fatalf("mismatched pair: %d", code)
 	}
 	var v httpsView
-	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Addr: "127.0.0.1:0", HSTS: true, CertPEM: cert, KeyPEM: key}, &v); code != http.StatusOK || !v.Listening || v.Subject != "orch.test" || v.Expires == nil {
+	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Addr: "127.0.0.1:18444", HSTS: true, CertPEM: cert, KeyPEM: key}, &v); code != http.StatusOK || !v.Listening || v.Subject != "orch.test" || v.Expires == nil {
 		t.Fatalf("enable: %d %+v", code, v)
 	}
 	addr := h.srv.httpsAddr()
@@ -47,7 +47,8 @@ func TestDashboardHTTPS(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if resp.StatusCode != 200 || resp.Header.Get("Strict-Transport-Security") == "" {
+	// HSTS was requested but the self-signed certificate must keep it off.
+	if resp.StatusCode != 200 || resp.Header.Get("Strict-Transport-Security") != "" {
 		t.Fatalf("https response: %d hsts=%q", resp.StatusCode, resp.Header.Get("Strict-Transport-Security"))
 	}
 	// The saved certificate is never returned.
@@ -75,7 +76,7 @@ func TestDashboardHTTPS(t *testing.T) {
 func TestHTTPSTestEndpointExplainsSelfSigned(t *testing.T) {
 	h := newHarness(t)
 	cert, key := selfSigned(t)
-	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Host: "", Addr: "127.0.0.1:0", CertPEM: cert, KeyPEM: key}, nil); code != http.StatusOK {
+	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Host: "", Addr: "127.0.0.1:18445", CertPEM: cert, KeyPEM: key}, nil); code != http.StatusOK {
 		t.Fatalf("enable: %d", code)
 	}
 	var res httpsTestResult
@@ -109,5 +110,41 @@ func TestHTTPSTestEndpointExplainsSelfSigned(t *testing.T) {
 	}
 	if code := h.do("POST", "/api/settings/https/publish-port", adminToken, nil, nil); code != http.StatusBadRequest {
 		t.Fatalf("publish without docker: %d", code)
+	}
+}
+
+func TestCustomHTTPSPortValidation(t *testing.T) {
+	h := newHarness(t)
+	cert, key := selfSigned(t)
+	for _, addr := range []string{":8080", ":0", ":70000", ":abc", ":80", "nonsense"} {
+		if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Addr: addr, CertPEM: cert, KeyPEM: key}, nil); code != http.StatusBadRequest {
+			t.Fatalf("%q accepted: %d", addr, code)
+		}
+	}
+	// A custom port is accepted and is what the view reports (127.0.0.1 so it can bind).
+	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Addr: "127.0.0.1:18443", CertPEM: cert, KeyPEM: key}, nil); code != http.StatusOK {
+		t.Fatalf("custom port refused: %d", code)
+	}
+	var v httpsView
+	h.do("GET", "/api/settings", adminToken, nil, &struct {
+		HTTPS *httpsView `json:"https"`
+	}{&v})
+	if v.ContainerPort != "18443" || v.Addr != "127.0.0.1:18443" {
+		t.Fatalf("view ignores the custom port: %+v", v)
+	}
+}
+
+func TestHSTSRefusedWhileCertificateUntrusted(t *testing.T) {
+	h := newHarness(t)
+	cert, key := selfSigned(t)
+	var v httpsView
+	if code := h.do("PUT", "/api/settings/https", adminToken, HTTPSConfig{Mode: "upload", Addr: "127.0.0.1:18447", HSTS: true, CertPEM: cert, KeyPEM: key}, &v); code != http.StatusOK {
+		t.Fatalf("save: %d", code)
+	}
+	if v.HSTS || v.HSTSBlocked == "" || !strings.Contains(v.HSTSBlocked, "not valid for") {
+		t.Fatalf("HSTS should be refused for a self-signed certificate that doesn't match the name: %+v", v)
+	}
+	if h.srv.hstsEnabled() {
+		t.Fatal("HSTS header would be sent")
 	}
 }

@@ -273,6 +273,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/agent/streams/{id}/output", s.agentAuth(s.handleAgentStreamOutput))
 	mux.Handle("GET /api/agent/streams/{id}/input", s.agentAuth(s.handleAgentStreamInput))
 	mux.Handle("GET /api/agent/server-backups/{name}", s.agentAuth(s.handleAgentServerBackup))
+	mux.Handle("GET /api/agent/images/{id}", s.agentAuth(s.handleAgentImage))
 	mux.Handle("GET /api/agent/update", s.agentAuth(s.handleAgentUpdateInfo))
 
 	// GitHub push webhooks, authenticated by their HMAC signature.
@@ -351,6 +352,15 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/devices/{id}/dedicated/check", s.handleCheckDedicated)
 	admin("GET /api/devices/{id}/disks", s.handleListDisks)
 	admin("POST /api/devices/{id}/disks/{action}", s.handleDiskAction)
+	admin("GET /api/enrol-tokens", s.handleListEnrolTokens)
+	admin("POST /api/enrol-tokens", s.handleCreateEnrolToken)
+	admin("DELETE /api/enrol-tokens/{id}", s.handleRevokeEnrolToken)
+	admin("GET /api/images", s.handleListImages)
+	admin("POST /api/images", s.handleUploadImage)
+	admin("DELETE /api/images/{id}", s.handleDeleteImage)
+	admin("POST /api/devices/{id}/images/flash", s.handleFlashImage)
+	admin("GET /api/devices/{id}/boot", s.handleGetBoot)
+	admin("POST /api/devices/{id}/boot", s.handleSetBoot)
 	admin("GET /api/projects/{id}/migration", s.handleGetMigration)
 	admin("GET /api/cluster", s.handleGetCluster)
 	admin("PUT /api/cluster", s.handleSetCluster)

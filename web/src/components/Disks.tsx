@@ -5,12 +5,14 @@ import { bytes, pct, usePoll } from "../lib";
 import { Badge, Button, Card, CardHeader, ErrorNote, Field, Loading, Meter, Modal, WarnNote, inputClass } from "./ui";
 import { confirmDialog, notify } from "./dialogs";
 import { waitFor } from "./ContainerTable";
+import { BootCard, FlashDialog, ImageLibrary } from "./Rebuild";
 
 type Dialog =
   | { kind: "format"; vol: DiskVolume; disk: Disk }
   | { kind: "partition"; disk: Disk }
   | { kind: "mount"; vol: DiskVolume }
-  | { kind: "share" };
+  | { kind: "share" }
+  | { kind: "image"; disk: Disk };
 
 const name = (path: string) => path.replace(/^\/dev\//, "");
 
@@ -92,6 +94,10 @@ export default function Disks({ d }: { d: Device }) {
         </Card>
       )}
 
+      <ImageLibrary />
+      <BootCard d={d} />
+
+      {dialog?.kind === "image" && <FlashDialog d={d} disk={dialog.disk} onClose={() => { setDialog(null); list.reload(); }} />}
       {dialog?.kind === "format" && <FormatDialog d={d} {...dialog} onClose={() => { setDialog(null); list.reload(); }} />}
       {dialog?.kind === "partition" && <PartitionDialog d={d} disk={dialog.disk} onClose={() => { setDialog(null); list.reload(); }} />}
       {dialog?.kind === "mount" && <MountDialog d={d} vol={dialog.vol} onClose={() => { setDialog(null); list.reload(); }} />}
@@ -117,9 +123,14 @@ function DiskCard({ disk, busy, onUnmount, onDialog }: { disk: Disk; busy: strin
             <p className="mt-0.5 truncate text-xs text-neutral-500">{meta.join(" · ")}</p>
           </div>
         </div>
-        <Button disabled={!!disk.protected} title={disk.protected || "Erase the disk and create a new partition table"} onClick={() => onDialog({ kind: "partition", disk })}>
-          Partition…
-        </Button>
+        <div className="flex gap-2">
+          <Button disabled={!!disk.protected} title={disk.protected || "Erase the disk and write a gold image from the server onto it"} onClick={() => onDialog({ kind: "image", disk })}>
+            Write image…
+          </Button>
+          <Button disabled={!!disk.protected} title={disk.protected || "Erase the disk and create a new partition table"} onClick={() => onDialog({ kind: "partition", disk })}>
+            Partition…
+          </Button>
+        </div>
       </div>
       {disk.protected && <p className="border-b border-neutral-100 bg-neutral-50 px-5 py-2 text-xs text-neutral-600">🔒 {disk.protected}</p>}
       <div className="overflow-x-auto">

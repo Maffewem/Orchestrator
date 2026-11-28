@@ -196,7 +196,13 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	// An agent that lost its saved identity (reinstalled, state file wiped, token rejected) must not
 	// leave an offline twin behind: take over the matching offline device instead.
-	d, token, err := s.store.ReenrollDevice(r.Context(), name, req.Host)
+	// Taking over an existing device's identity is a power of the shared join token only: a scoped
+	// enrolment token (made to be left on a card or a disk) can only add new devices.
+	var d *store.Device
+	var token string
+	if enrolID == "" {
+		d, token, err = s.store.ReenrollDevice(r.Context(), name, req.Host)
+	}
 	if err == nil && d != nil {
 		s.event(r.Context(), d.ID, "info", "device.reenrolled", fmt.Sprintf("%s re-registered and kept its existing record", d.Name))
 	} else if err == nil {
@@ -264,6 +270,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 			cmds[i].Args["join_token"] = s.takePlain(r, cmds[i].ID)
 		}
 	}
+	s.signCommands(cmds)
 	cancel, _ := s.store.RecentlyCancelled(ctx, d.ID, time.Now().Add(-15*time.Minute))
 	writeJSON(w, http.StatusOK, api.HeartbeatResponse{
 		Cancel:          cancel,

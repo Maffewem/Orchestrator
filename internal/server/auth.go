@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,6 +30,9 @@ const (
 
 // pbkdf2Iterations is a variable so tests can use a cheap setting.
 var pbkdf2Iterations = 600_000
+
+// hashSlots bounds concurrent password checks to the number of CPUs.
+var hashSlots = make(chan struct{}, max(1, runtime.NumCPU()))
 
 var usernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
 
@@ -59,7 +63,11 @@ func checkPassword(pw, encoded string) bool {
 	if err1 != nil || err2 != nil {
 		return false
 	}
+	// Key derivation is deliberately slow, so the number running at once is capped: a flood of
+	// sign-in attempts queues here instead of taking every CPU from the rest of the server.
+	hashSlots <- struct{}{}
 	got, err := pbkdf2.Key(sha256.New, pw, salt, iters, len(want))
+	<-hashSlots
 	return err == nil && subtle.ConstantTimeCompare(got, want) == 1
 }
 

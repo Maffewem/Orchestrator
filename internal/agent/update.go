@@ -71,6 +71,11 @@ func (a *Agent) selfUpdate(ctx context.Context) (msg string, restart bool, err e
 	}
 	err = json.NewDecoder(resp.Body).Decode(&info)
 	resp.Body.Close()
+	if err == nil && resp.StatusCode == http.StatusOK {
+		if serr := a.acceptUpdate(archName(), info); serr != nil {
+			return "", false, serr
+		}
+	}
 	if err != nil || resp.StatusCode != http.StatusOK || info.SHA256 == "" {
 		return "", false, fmt.Errorf("the control plane has no build for %s (HTTP %d)", archName(), resp.StatusCode)
 	}

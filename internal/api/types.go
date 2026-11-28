@@ -2,6 +2,7 @@
 package api
 
 import (
+	"encoding/json"
 	"path"
 	"strings"
 	"time"
@@ -555,6 +556,7 @@ type AgentUpdateInfo struct {
 	Version string `json:"version"`
 	SHA256  string `json:"sha256"`
 	URL     string `json:"url"` // path on the control plane
+	Sig     string `json:"sig,omitempty"`
 }
 
 // Command is work queued by the control plane for a device's agent.
@@ -570,6 +572,10 @@ type Command struct {
 	Error     string            `json:"error,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
+	// Sig is the control plane's signature over the rest of the command (see sign.go).
+	Sig string `json:"sig,omitempty"`
+
+	raw json.RawMessage // the bytes this command arrived as; see UnmarshalJSON
 }
 
 // Command statuses.
@@ -772,6 +778,7 @@ type StreamRequest struct {
 	Tail      int    `json:"tail,omitempty"`
 	Cols      int    `json:"cols,omitempty"`
 	Rows      int    `json:"rows,omitempty"`
+	Sig       string `json:"sig,omitempty"`
 }
 
 // StreamPoll is the answer to the agent's long-poll for new streams.

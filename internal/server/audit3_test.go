@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Maffewem/Orchestrator/internal/api"
 	"github.com/Maffewem/Orchestrator/internal/store"
@@ -166,5 +167,65 @@ func TestPreviewBuildMustBeSingleLine(t *testing.T) {
 	}
 	if code := h.do("POST", "/api/projects", adminToken, body("npm run build:preview"), nil); code != http.StatusCreated {
 		t.Fatalf("single-line preview build: %d", code)
+	}
+}
+
+// Everything the server sends an agent to run carries a signature the agent can check.
+func TestHeartbeatCommandsAreSigned(t *testing.T) {
+	h := newHarness(t)
+	reg := h.register("pi")
+	var p ProjectView
+	h.do("POST", "/api/projects", adminToken, map[string]any{"name": "web", "device_id": reg.DeviceID,
+		"source": map[string]any{"type": "image", "image": "nginx"}, "runtime": map[string]any{"ports": []string{"8081:80"}}}, &p)
+	if code := h.do("POST", "/api/projects/"+p.ID+"/deployments", adminToken, map[string]any{}, nil); code >= 300 {
+		t.Fatalf("deploy: %d", code)
+	}
+	var hb api.HeartbeatResponse
+	h.do("POST", "/api/agent/heartbeat", reg.AgentToken, api.HeartbeatRequest{}, &hb)
+	if len(hb.Commands) == 0 || hb.ServerKey == "" {
+		t.Fatalf("no command or key: %+v", hb)
+	}
+	for _, c := range hb.Commands {
+		if c.Sig == "" || !api.VerifyCommand(hb.ServerKey, c) || hb.ServerKey != reg.ServerKey {
+			t.Fatalf("command %s not signed with the registered key", c.ID)
+		}
+	}
+}
+
+// A scoped enrolment token can add devices but never take over an existing offline one;
+// the shared join token still can (an agent that lost its state re-registers).
+func TestScopedTokenCannotReenrolExistingDevice(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	var settings struct {
+		JoinToken string `json:"join_token"`
+	}
+	h.do("GET", "/api/settings", adminToken, nil, &settings)
+	host := api.HostInfo{Hostname: "pi", Addresses: []string{"192.168.1.9"}}
+	var first api.RegisterResponse
+	h.do("POST", "/api/agent/register", "", api.RegisterRequest{JoinToken: settings.JoinToken, Name: "pi", Host: host}, &first)
+	h.srv.store.MarkOffline(ctx, time.Now().Add(time.Hour))
+	var tok EnrolTokenView
+	h.do("POST", "/api/enrol-tokens", adminToken, map[string]any{"label": "card", "max_uses": 2}, &tok)
+	var second api.RegisterResponse
+	if code := h.do("POST", "/api/agent/register", "", api.RegisterRequest{JoinToken: tok.Token, Name: "pi", Host: host}, &second); code != http.StatusCreated {
+		t.Fatalf("enrol: %d", code)
+	}
+	if second.DeviceID == first.DeviceID {
+		t.Fatal("a scoped token took over an existing device")
+	}
+	h.srv.store.MarkOffline(ctx, time.Now().Add(time.Hour))
+	var third api.RegisterResponse
+	h.do("POST", "/api/agent/register", "", api.RegisterRequest{JoinToken: settings.JoinToken, Name: "pi", Host: host}, &third)
+	if third.DeviceID != first.DeviceID && third.DeviceID != second.DeviceID {
+		t.Fatal("the shared join token should still re-enrol a known device")
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	for host, want := range map[string]bool{"localhost:8080": true, "127.0.0.1:8080": true, "[::1]:8080": true, "192.168.0.184:8080": false, "orch.example.com": false} {
+		if isLoopbackHost(host) != want {
+			t.Errorf("isLoopbackHost(%q) = %v", host, !want)
+		}
 	}
 }

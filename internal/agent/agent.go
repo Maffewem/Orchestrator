@@ -49,6 +49,8 @@ type state struct {
 	Found   string   `json:"found,omitempty"`
 	// Epoch is the highest server epoch seen (see fence.go); a server below it is ignored.
 	Epoch int `json:"epoch,omitempty"`
+	// SignedSeen is set once the server has sent a signed message; unsigned work is refused from then on.
+	SignedSeen bool `json:"signed_seen,omitempty"`
 }
 
 type Agent struct {
@@ -277,6 +279,11 @@ func (a *Agent) heartbeat(ctx context.Context) error {
 	}
 	a.cancelCommands(res.Cancel)
 	for _, c := range res.Commands {
+		if err := a.acceptCommand(c); err != nil {
+			a.log.Warn("command refused", "id", c.ID, "err", err)
+			a.report(ctx, c.ID, api.CommandResult{Error: err.Error()})
+			continue
+		}
 		select {
 		case a.work <- c:
 		default:

@@ -146,6 +146,10 @@ func (a *Agent) streamLoop(ctx context.Context) {
 		}
 		backoff = time.Second
 		for _, req := range poll.Streams {
+			if err := a.acceptStream(req); err != nil {
+				a.log.Warn("stream refused", "id", req.ID, "err", err)
+				continue
+			}
 			go a.serveStream(ctx, req)
 		}
 	}

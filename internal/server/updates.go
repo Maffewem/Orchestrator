@@ -664,7 +664,11 @@ func (s *Server) handleAgentUpdateInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no agent build for "+arch)
 		return
 	}
-	writeJSON(w, http.StatusOK, api.AgentUpdateInfo{Version: s.cfg.Version, SHA256: sum, URL: "/downloads/" + name})
+	info := api.AgentUpdateInfo{Version: s.cfg.Version, SHA256: sum, URL: "/downloads/" + name}
+	if s.identity != nil {
+		info.Sig = api.SignText(s.identity, api.UpdateSigningText(arch, info))
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) fileSum(path string) (string, error) {

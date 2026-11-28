@@ -132,3 +132,17 @@ func (s *Server) handleSetAgentURLs(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agent_urls": clean})
 }
+
+// signCommands signs the commands about to leave for an agent. It runs last, after anything
+// that adds to a command (credentials, one-time tokens), because the signature covers what the
+// agent receives.
+func (s *Server) signCommands(cmds []api.Command) {
+	if s.identity == nil {
+		return
+	}
+	for i := range cmds {
+		if err := api.SignCommand(s.identity, &cmds[i]); err != nil {
+			s.log.Error("sign command", "err", err)
+		}
+	}
+}

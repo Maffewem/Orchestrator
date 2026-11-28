@@ -76,7 +76,7 @@ export default function PreviewsPanel({ projectId }: { projectId: string }) {
                 </Td>
                 <Td className="font-mono text-xs">{p.branch}</Td>
                 <Td><Link to={`/deployments/${p.deployment_id}`}><PreviewStatus s={p.status} /></Link></Td>
-                <Td>{p.url ? <a href={p.url} target="_blank" rel="noreferrer" className="break-all text-primary hover:underline">{p.url.replace(/^https?:\/\//, "")}</a> : "—"}</Td>
+                <Td>{p.url ? <a href={p.url} target="_blank" rel="noreferrer" title={p.url} className="block max-w-[16rem] truncate text-primary hover:underline">{p.url.replace(/^https?:\/\//, "")}</a> : "—"}</Td>
                 <Td className="whitespace-nowrap text-neutral-500">{ago(p.updated_at)}</Td>
                 <Td>
                   {can && (

@@ -151,6 +151,10 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 			return fmt.Errorf("pull failed: %w", err)
 		}
 		st.logf("Success: image is up to date")
+		if dg := a.pulledDigest(ctx, spec.Image); dg != "" {
+			st.logf("Image digest: %s", dg)
+			a.digests.Store(deploymentID, dg)
+		}
 	}
 
 	st.begin(ctx, api.StepIndex(spec, api.StepDeploy))
@@ -276,6 +280,7 @@ func (a *Agent) deploy(ctx context.Context, deploymentID string, spec api.Deploy
 	if prevParent != "" && (att == nil || att.LAN.Parent != prevParent) {
 		a.releaseParent(ctx, prevParent) // the worker left this network or VLAN
 	}
+	a.trimOwnImages(ctx, st, spec)
 	return nil
 }
 
@@ -319,4 +324,42 @@ func (a *Agent) checkPorts(ctx context.Context, st *steps, spec api.DeploySpec) 
 		st.logf("Error: %s", b)
 	}
 	return fmt.Errorf("port conflict: %s", bad[0])
+}
+
+// trimOwnImages removes this worker's older built images beyond spec.KeepImages. It is best effort:
+// a failure never fails the deployment, and an image still in use is never removed.
+func (a *Agent) trimOwnImages(ctx context.Context, st *steps, spec api.DeploySpec) {
+	if spec.KeepImages <= 0 || spec.Build == nil {
+		return
+	}
+	repo, _ := splitImage(spec.Image)
+	if !strings.HasPrefix(repo, gcRepoPrefix) {
+		return
+	}
+	res, err := a.docker.Prune(context.WithoutCancel(ctx), PruneOptions{Keep: spec.KeepImages, Trim: true, Only: repo})
+	switch {
+	case err != nil:
+		st.logf("Warning: could not trim old images: %v", err)
+	case res.ImagesRemoved > 0:
+		st.logf("Removed %d older image(s) of %s, keeping the newest %d", res.ImagesRemoved, spec.Service, spec.KeepImages)
+	}
+}
+
+// pulledDigest returns the sha256 digest the engine resolved ref to, or "" when it has none
+// (an image that was only built locally has no registry digest).
+func (a *Agent) pulledDigest(ctx context.Context, ref string) string {
+	info, err := a.docker.ImageInspect(ctx, ref)
+	if err != nil {
+		return ""
+	}
+	repo, _ := splitImage(ref)
+	if i := strings.Index(repo, "@"); i >= 0 {
+		repo = repo[:i]
+	}
+	for _, rd := range info.RepoDigests {
+		if r, dg, ok := strings.Cut(rd, "@"); ok && r == repo && strings.HasPrefix(dg, "sha256:") {
+			return dg
+		}
+	}
+	return ""
 }

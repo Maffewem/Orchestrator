@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar, Thermometer } from "lucide-react";
+import { Archive, ArrowRightLeft, Cloud, Database, ShieldCheck, Github, Globe, KeyRound, Lock, Moon, Radar, Thermometer, HardDrive } from "lucide-react";
 import { api, type Settings } from "../api";
 import { settingsSections, useCrumbs } from "../components/Layout";
 import { Badge, Button, Card, CardHeader, CodeBlock, ErrorNote, Field, Loading, PageHeader, inputClass, SecretInput } from "../components/ui";
@@ -467,6 +467,17 @@ export default function SettingsPage() {
           </div>
         </Collapsible>
         )}
+        {vis("images") && (
+          <Collapsible
+            id="images"
+            defaultOpen={false}
+            title={<span className="flex items-center gap-2"><HardDrive className="size-4" /> Image retention</span>}
+            subtitle="How many old worker images each device keeps, and when unused Docker images and build cache are pruned."
+            action={<Badge tone="ok">keep {s.docker_gc.keep || "all"}{s.docker_gc.max_gb ? ` · ${s.docker_gc.max_gb} GB` : ""}</Badge>}
+          >
+            <ImageRetentionSettings value={s.docker_gc} onSaved={() => settings.reload()} />
+          </Collapsible>
+        )}
         {vis("serverbackup") && (
           <Collapsible
             id="serverbackup"
@@ -662,6 +673,71 @@ function AppearanceChoice() {
 }
 
 const lifetimes: [number, string][] = [[1, "1 hour"], [8, "8 hours"], [24, "1 day"], [168, "7 days"], [336, "14 days"], [720, "30 days"], [2160, "90 days"]];
+
+function ImageRetentionSettings({ value, onSaved }: { value: Settings["docker_gc"]; onSaved: () => void }) {
+  const [v, setV] = useState(value);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const save = async () => {
+    setMsg(null);
+    try {
+      const { next_run: _n, ...body } = v;
+      await api.setDockerGC(body);
+      setMsg({ ok: true, text: "Saved. Applies to the next deployment and the next scheduled prune." });
+      onSaved();
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  return (
+    <div className="space-y-4 p-5">
+      <p className="text-sm text-neutral-500">
+        Every commit of a GitHub project builds a new image on the device, and pulling a moved tag leaves the old layers behind. After each deployment the device removes
+        a worker's older built images beyond the limits below. The running image is never removed, and a removed version is rebuilt from its commit if you roll back to it.
+        Devices need the updated agent.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Versions to keep per worker" hint="0 keeps every version. 3 keeps the newest three, including the running one.">
+          <input className={`${inputClass} max-w-[8rem]`} type="number" min={0} max={100} value={v.keep} onChange={(e) => setV({ ...v, keep: Number(e.target.value) })} />
+        </Field>
+        <Field label="Size budget per device (GB)" hint="0 for none. Over the budget, the oldest versions go first; the newest of each worker always stays.">
+          <input className={`${inputClass} max-w-[8rem]`} type="number" min={0} value={v.max_gb} onChange={(e) => setV({ ...v, max_gb: Number(e.target.value) })} />
+        </Field>
+        <Field label="Scheduled prune">
+          <select className={`${inputClass} max-w-xs`} value={v.mode} onChange={(e) => setV({ ...v, mode: e.target.value as typeof v.mode })}>
+            <option value="off">Off</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </Field>
+        {v.mode !== "off" && (
+          <Field label="Time (HH:MM)" hint={`Time zone ${v.tz}.${value.next_run ? ` Next run ${new Date(value.next_run).toLocaleString()}.` : ""}`}>
+            <input className={`${inputClass} max-w-[8rem]`} value={v.time} onChange={(e) => setV({ ...v, time: e.target.value })} />
+          </Field>
+        )}
+        {v.mode === "weekly" && (
+          <Field label="Day">
+            <select className={`${inputClass} max-w-xs`} value={v.weekday} onChange={(e) => setV({ ...v, weekday: Number(e.target.value) })}>
+              {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d, i) => <option key={d} value={i}>{d}</option>)}
+            </select>
+          </Field>
+        )}
+      </div>
+      {v.mode !== "off" && (
+        <div className="space-y-2 text-sm">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={v.dangling} onChange={(e) => setV({ ...v, dangling: e.target.checked })} /> Remove untagged images</label>
+          <label className="flex flex-wrap items-center gap-2">
+            <input type="checkbox" checked={v.build_cache} onChange={(e) => setV({ ...v, build_cache: e.target.checked })} /> Remove build cache older than
+            <input className={`${inputClass} w-20`} type="number" min={1} value={v.cache_days} onChange={(e) => setV({ ...v, cache_days: Number(e.target.value) })} /> days
+          </label>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={save}>Save</Button>
+        {msg && (msg.ok ? <span className="text-sm text-ok">{msg.text}</span> : <ErrorNote>{msg.text}</ErrorNote>)}
+      </div>
+    </div>
+  );
+}
 
 function TemperatureSettings({ value, onSaved }: { value: Settings["temperature"]; onSaved: () => void }) {
   const [warn, setWarn] = useState(value.warn_c);

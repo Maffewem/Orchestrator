@@ -379,3 +379,15 @@ func (s *Store) QueuedPushDeployments(ctx context.Context, projectID string) ([]
 	}
 	return out, rows.Err()
 }
+
+// SetDeploymentDigest records the image digest a successful deployment pulled, so a later
+// rollback can ask the registry for exactly that version.
+func (s *Store) SetDeploymentDigest(ctx context.Context, id, digest string) error {
+	d, err := s.GetDeployment(ctx, id)
+	if err != nil {
+		return err
+	}
+	d.Spec.ImageDigest = digest
+	_, err = s.db.ExecContext(ctx, `UPDATE deployments SET spec = ? WHERE id = ?`, mustJSON(s.box.sealSpec(d.Spec)), id)
+	return err
+}

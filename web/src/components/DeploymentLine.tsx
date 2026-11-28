@@ -113,7 +113,7 @@ export function DeploymentLine({ d, live, onChanged, compact }: { d: Deployment;
             <button
               className="block w-full px-3 py-1.5 text-left hover:bg-neutral-50"
               onClick={async () => {
-                if (!(await confirmDialog({ title: `Roll back to ${versionId(d)}?`, message: "It becomes the live version.", confirmLabel: "Roll back" }))) return;
+                if (!(await confirmDialog({ title: `Roll back to ${versionId(d)}?`, message: "It becomes the live version. If its image was cleaned up, it is rebuilt from the commit (or pulled by its recorded digest).", confirmLabel: "Roll back" }))) return;
                 try {
                   const r = await api.rollbackDeployment(d.id);
                   onChanged();

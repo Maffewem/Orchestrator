@@ -338,6 +338,12 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 			state, level = "failed ("+res.Error+")", "error"
 		}
 		s.event(r.Context(), d.ID, level, c.Action, diskSummary(c.Args["by"], c.Action, c.Args, d.Name, state))
+	case api.ActionDockerPrune:
+		s.dockerPruneResult(r.Context(), d, c, res)
+	case api.ActionDockerReport:
+		if !res.OK {
+			s.event(r.Context(), d.ID, "error", "docker.report", fmt.Sprintf("Reading Docker storage on %s failed: %s", d.Name, res.Error))
+		}
 	case api.ActionImageFlash:
 		state, level := "succeeded", "info"
 		if !res.OK {
@@ -758,6 +764,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"ssl_mode":                   s.sslMode(r.Context()),
 		"security":                   s.securityView(r.Context()),
 		"temperature":                s.tempView(r.Context()),
+		"docker_gc":                  s.dockerGCView(r.Context()),
 		"sso":                        s.ssoView(r.Context()),
 		"https":                      s.httpsView(r.Context()),
 		"github": map[string]any{

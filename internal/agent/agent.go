@@ -408,6 +408,10 @@ func (a *Agent) execute(ctx context.Context, c api.Command) api.CommandResult {
 		dctx, dcancel := context.WithTimeout(ctx, 30*time.Minute)
 		output, err = a.diskAction(dctx, c)
 		dcancel()
+	case api.ActionImageFlash, api.ActionBootGet, api.ActionBootSet:
+		ictx, icancel := context.WithTimeout(ctx, 6*time.Hour) // large images over a slow link
+		output, err = a.imageAction(ictx, c)
+		icancel()
 	case api.ActionBackup, api.ActionRestore:
 		// Large volumes over a slow link can take a while.
 		bctx, bcancel := context.WithTimeout(ctx, 6*time.Hour)

@@ -138,6 +138,7 @@ const (
 	CapDedicatedIP      = "dedicated-ip"       // deploy with DeploySpec.Dedicated, and network.check
 	CapDisks            = "disks"              // disk.list/format/partition/mount/unmount and share.mount/unmount
 	CapLimits           = "limits"             // container.update, and DeploySpec.MaxRetries / MemoryMB
+	CapImages           = "images"             // image.flash, boot.get and boot.set (gold images, Raspberry Pi boot order)
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
 )
@@ -380,7 +381,39 @@ const (
 	ActionDiskUnmount = "disk.unmount"
 	// ActionShareMount mounts an SMB or NFS share (Args: kind, source, mountpoint, options, username, password, persist).
 	ActionShareMount = "share.mount"
+
+	// Rebuild from a pooled (gold) image. Admin only, sent by the server's image API, never by the generic commands API.
+	// ActionImageFlash streams the server image Args["image_id"] (checked against Args["sha256"]) onto the whole disk
+	// Args["device"] once Args["confirm"] equals the device path. With Args["enrol"] == "1" it also installs a first-boot
+	// job that runs the agent installer with Args["join_token"] so the rebuilt machine registers itself.
+	ActionImageFlash = "image.flash"
+	// ActionBootGet reports the Raspberry Pi boot order (a BootInfo as JSON). It never changes anything.
+	ActionBootGet = "boot.get"
+	// ActionBootSet stages a new BOOT_ORDER (Args["order"], e.g. "0xf14") once Args["confirm"] equals it. It applies on the next reboot.
+	ActionBootSet = "boot.set"
 )
+
+// Image is a gold image stored on the server: a raw disk image, optionally compressed.
+type Image struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Arch      string    `json:"arch,omitempty"` // amd64, arm64, armv7 or empty when unknown
+	Notes     string    `json:"notes,omitempty"`
+	Format    string    `json:"format"` // raw, gz, xz or zst
+	Size      int64     `json:"size"`   // bytes stored on the server
+	SHA256    string    `json:"sha256"` // of the stored bytes
+	CreatedBy string    `json:"created_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// BootInfo is the boot configuration of a Raspberry Pi.
+type BootInfo struct {
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"` // why not, when Supported is false
+	Model     string `json:"model,omitempty"`
+	Order     string `json:"order,omitempty"`  // BOOT_ORDER as stored, e.g. "0xf41"
+	Config    string `json:"config,omitempty"` // the whole EEPROM configuration
+}
 
 // DiskReport is what a device reports for disk.list.
 type DiskReport struct {

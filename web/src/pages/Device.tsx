@@ -6,7 +6,7 @@ import { useCrumbs } from "../components/Layout";
 import ContainerTable from "../components/ContainerTable";
 import { ImportContainers } from "../components/Adopt";
 import { useCan } from "../components/auth";
-import { Badge, Button, Card, CardHeader, ErrorNote, Field, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass, SecretInput } from "../components/ui";
+import { Badge, Button, Card, CardHeader, ErrorNote, Field, FoldCard, HealthBadge, LineChart, Loading, Meter, Modal, StatusDot, Tabs, inputClass, SecretInput } from "../components/ui";
 import { EventList } from "./Activity";
 import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
@@ -109,8 +109,7 @@ function ProxyCard({ d }: { d: Device }) {
     agent_too_old: "This agent is too old to run the proxy. Re-run the install command on the device to update it.",
   };
   return (
-    <Card>
-      <CardHeader title="Domain proxy" />
+    <FoldCard title="Domain proxy">
       <div className="space-y-3 p-5 text-sm">
         <p className="flex items-center gap-2">
           <Badge>{d.proxy === "agent_too_old" ? "agent too old" : d.proxy}</Badge>
@@ -137,7 +136,7 @@ function ProxyCard({ d }: { d: Device }) {
           </Button>
         )}
       </div>
-    </Card>
+    </FoldCard>
   );
 }
 
@@ -172,8 +171,7 @@ function TunnelCard({ d }: { d: Device }) {
     }
   };
   return (
-    <Card>
-      <CardHeader title="Cloudflare Tunnel" subtitle="Publish workers on this device through Cloudflare without opening ports." />
+    <FoldCard title="Cloudflare Tunnel" subtitle="Publish workers on this device through Cloudflare without opening ports.">
       <div className="space-y-3 p-5 text-sm">
         {!t ? (
           <p className="text-neutral-500">Loading…</p>
@@ -305,7 +303,7 @@ function TunnelCard({ d }: { d: Device }) {
           <p key={w} className="text-xs text-amber-700">{w}</p>
         ))}
       </div>
-    </Card>
+    </FoldCard>
   );
 }
 
@@ -331,7 +329,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
   const s = samples.data ?? [];
   const m = d.metrics;
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
         {d.issues.length > 0 && (
           <Card className="border-amber-200 bg-amber-50/50">
@@ -392,14 +390,12 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             </div>
           </Card>
         )}
-        <Card>
-          <CardHeader title="Recent activity" />
+        <FoldCard title="Recent activity">
           <DeviceActivity d={d} limit={8} bare />
-        </Card>
+        </FoldCard>
       </div>
       <div className="space-y-4">
-        <Card>
-          <CardHeader title="Properties" />
+        <FoldCard title="Properties">
           <dl className="divide-y divide-neutral-100 px-5 py-1">
             <Prop k="Hostname" v={d.host.hostname} />
             <Prop k="Model" v={d.host.model} />
@@ -416,9 +412,8 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             <Prop k="Last seen" v={ago(d.last_seen)} />
             <Prop k="Agent" v={d.host.agent_version} />
           </dl>
-        </Card>
-        <Card>
-          <CardHeader title="Docker" />
+        </FoldCard>
+        <FoldCard title="Docker">
           <dl className="divide-y divide-neutral-100 px-5 py-1">
             {d.host.docker?.error ? (
               <p className="py-3 text-sm text-bad">{d.host.docker.error}</p>
@@ -430,7 +425,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
               </>
             )}
           </dl>
-        </Card>
+        </FoldCard>
         <ProxyCard d={d} />
         <TunnelCard d={d} />
         {d.labels.length > 0 && (
@@ -749,7 +744,7 @@ function MaintenanceModal({ d, onClose, onDone }: { d: Device; onClose: () => vo
           <p>No workers are running on this device. New workers will be placed on other devices.</p>
         )}
         {!moving && (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Reason (optional)">
               <input className={inputClass} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Replacing the SD card" />
             </Field>

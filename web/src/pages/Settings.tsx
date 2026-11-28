@@ -14,6 +14,7 @@ import { AgentAddresses } from "../components/AgentAddresses";
 import { MoveServerPanel } from "./MoveServer";
 import { ServerBackupsPanel } from "../components/ServerBackups";
 import { confirmDialog } from "../components/dialogs";
+import { EnrolTokens } from "../components/Rebuild";
 import { CloudflareDeploy } from "../components/CloudflareDeploy";
 
 export default function SettingsPage() {
@@ -523,6 +524,10 @@ export default function SettingsPage() {
         </Collapsible>
         )}
 
+        <Collapsible id="enrol" defaultOpen={false} title={<span className="flex items-center gap-2"><KeyRound className="size-4" /> Enrolment tokens</span>} subtitle="Tokens that expire, can be used only a set number of times and can be revoked. Use these instead of the join token for cards, drives and rebuilt disks.">
+          <EnrolTokens />
+        </Collapsible>
+
         <Card>
           <CardHeader title="About" />
           <dl className="space-y-2 p-5 text-sm">
@@ -604,11 +609,11 @@ function SecretBlock({ value }: { value: string }) {
   return (
     <div className="flex items-center gap-2 code-surface rounded-lg py-2 pl-3 pr-2 font-mono text-xs">
       <span className="min-w-0 flex-1 break-all">{shown ? value : "•".repeat(28)}</span>
-      <button className="shrink-0 rounded-md bg-white/10 px-2.5 py-1.5 hover:bg-white/20" onClick={() => setShown(!shown)}>
+      <button className="shrink-0 rounded-md bg-white/10 px-3 py-3 sm:px-2.5 sm:py-1.5 hover:bg-white/20" onClick={() => setShown(!shown)}>
         {shown ? "Hide" : "Reveal"}
       </button>
       <button
-        className="shrink-0 rounded-md bg-white/10 px-2.5 py-1.5 hover:bg-white/20"
+        className="shrink-0 rounded-md bg-white/10 px-3 py-3 sm:px-2.5 sm:py-1.5 hover:bg-white/20"
         onClick={async () => {
           if (await copyText(value)) {
             setCopied(true);

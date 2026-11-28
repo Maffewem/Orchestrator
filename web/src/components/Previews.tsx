@@ -82,7 +82,7 @@ export default function PreviewsPanel({ projectId }: { projectId: string }) {
                   {can && (
                     <button
                       aria-label={`Delete preview ${p.branch}`}
-                      className="rounded p-1 text-neutral-500 hover:bg-neutral-100 hover:text-bad"
+                      className="rounded p-2.5 text-neutral-500 hover:bg-neutral-100 hover:text-bad sm:p-1"
                       onClick={async () => {
                         if (!(await confirmDialog({ title: `Delete the preview for ${p.branch}?`, confirmLabel: "Delete", danger: true }))) return;
                         await api.deletePreview(projectId, p.id);

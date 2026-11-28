@@ -151,10 +151,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, err)
 		return
 	}
+	enrolID := ""
 	if join == "" || subtle.ConstantTimeCompare([]byte(req.JoinToken), []byte(join)) != 1 {
-		s.logins.fail(key)
-		writeError(w, http.StatusUnauthorized, "invalid join token")
-		return
+		// Not the shared join token: it may be a scoped enrolment token (expiring, limited, revocable).
+		if enrolID = s.useEnrol(r, req.JoinToken); enrolID == "" {
+			s.logins.fail(key)
+			writeError(w, http.StatusUnauthorized, "invalid join token")
+			return
+		}
 	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -175,8 +179,15 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
+		if enrolID != "" {
+			s.releaseEnrol(r, enrolID)
+		}
 		s.internal(w, err)
 		return
+	}
+	if enrolID != "" {
+		s.noteEnrolDevice(r, enrolID, d.Name)
+		s.event(r.Context(), d.ID, "info", "enrol.used", d.Name+" registered with an enrolment token")
 	}
 	s.applyDeviceSetup(r.Context(), d, req.Setup)
 	writeJSON(w, http.StatusCreated, api.RegisterResponse{DeviceID: d.ID, AgentToken: token, ServerKey: s.serverKey()})
@@ -218,6 +229,13 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withCredentials(cmds, s.githubToken(ctx))
+	// A one-use enrolment token for a rebuilt machine is added only here, in the response to the device that will
+	// write the image, so it is never kept in the command history that dashboard users can read.
+	for i := range cmds {
+		if cmds[i].Action == api.ActionImageFlash && cmds[i].Args["enrol"] == "1" {
+			cmds[i].Args["join_token"] = s.takePlain(r, cmds[i].ID)
+		}
+	}
 	cancel, _ := s.store.RecentlyCancelled(ctx, d.ID, time.Now().Add(-15*time.Minute))
 	writeJSON(w, http.StatusOK, api.HeartbeatResponse{
 		Cancel:          cancel,
@@ -320,6 +338,18 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 			state, level = "failed ("+res.Error+")", "error"
 		}
 		s.event(r.Context(), d.ID, level, c.Action, diskSummary(c.Args["by"], c.Action, c.Args, d.Name, state))
+	case api.ActionImageFlash:
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, imageSummary(c.Args["by"], c.Args, d.Name, state))
+	case api.ActionBootSet:
+		state, level := "succeeded", "info"
+		if !res.OK {
+			state, level = "failed ("+res.Error+")", "error"
+		}
+		s.event(r.Context(), d.ID, level, c.Action, fmt.Sprintf("%s: set boot order to %s %s on %s", c.Args["by"], c.Args["order"], state, d.Name))
 	case api.ActionRemove:
 		if !res.OK {
 			s.event(r.Context(), d.ID, "error", "container.remove", fmt.Sprintf("Removing %s failed: %s", c.Target, res.Error))

@@ -30,10 +30,12 @@ type DeviceView struct {
 	// NetworkNotice is a change to the device's addresses or to the address it reaches the server
 	// at, shown until someone acknowledges it.
 	NetworkNotice *NetNotice `json:"network_notice,omitempty"`
+	// IdentifyingUntil is set while the device flashes its LEDs.
+	IdentifyingUntil *time.Time `json:"identifying_until,omitempty"`
 }
 
 func (s *Server) view(d *store.Device) DeviceView {
-	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, ContainerIssues: []ContainerIssue{}, Proxy: proxyState(d), Link: s.agentLink(d.ID)}
+	v := DeviceView{Device: d, Status: "online", Health: "ok", Issues: []string{}, ContainerIssues: []ContainerIssue{}, Proxy: proxyState(d), Link: s.agentLink(d.ID), IdentifyingUntil: s.flashing.get(d.ID)}
 	if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
 		v.Status = "offline"
 		v.Health = "critical"
@@ -82,6 +84,10 @@ func (s *Server) view(d *store.Device) DeviceView {
 		}
 	}
 	warn, crit := s.tempThresholds(context.Background())
+	// A blade on a 5 V-only supply can brown out under sustained load (it has about 15 W; PoE+ has 30 W).
+	if p := d.Host.Power; p != nil && p.Source == api.PowerBasic && d.Host.CPUs > 0 && d.Metrics.Load5/float64(d.Host.CPUs) >= 1 {
+		raise("warning", "Heavily loaded while powered by a 5 V-only supply (up to 15 W); PoE+ gives up to 30 W")
+	}
 	switch t := d.Metrics.TempC; {
 	case t >= crit:
 		raise("critical", fmt.Sprintf("Temperature is %.0f°C (critical at %.0f°C)", t, crit))

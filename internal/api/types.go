@@ -35,6 +35,8 @@ type HostInfo struct {
 	Network []NetAddr `json:"network,omitempty"`
 	// Tunnel describes the cloudflared container the agent runs, when there is one.
 	Tunnel *TunnelInfo `json:"tunnel,omitempty"`
+	// Power is the supply a Compute Blade reports (only sent while its LED profile is "blade").
+	Power *PowerSource `json:"power,omitempty"`
 }
 
 // TunnelInfo is what the agent knows about its cloudflared container.
@@ -141,6 +143,9 @@ const (
 	CapImages           = "images"             // image.flash, boot.get and boot.set (gold images, Raspberry Pi boot order)
 	CapFence            = "fence"              // refuses servers whose epoch is lower than one it has seen, and reports them
 	CapStats            = "stats"              // sends per-container StatsReport with heartbeats, and proxy metrics
+	CapLED              = "led"                // led.list, led.identify and led.config
+	CapConsole          = "console"            // a host terminal (stream kind "console")
+	CapSSH              = "ssh"                // ssh.status, ssh.check, ssh.config, ssh.confirm and ssh.key
 	CapHWMetrics        = "hw-metrics"         // heartbeats carry disk and network rates, load, swap, clock and Raspberry Pi power flags
 	CapDockerGC         = "docker-gc"          // docker.report and docker.prune, and DeploySpec.KeepImages (old worker images trimmed after a deploy)
 )
@@ -431,6 +436,16 @@ const (
 	// ActionTunnelSync runs (or, with an empty Args["token"], removes) the device's cloudflared container.
 	// With Args["update"] == "1" it also pulls the newest image and recreates the container if that changed it.
 	ActionTunnelSync = "tunnel.sync"
+
+	// LED, SSH: see internal/agent/leds.go and sshctl.go. Not part of the generic commands API.
+	ActionLEDList     = "led.list"
+	ActionLEDIdentify = "led.identify"
+	ActionLEDConfig   = "led.config"
+	ActionSSHStatus   = "ssh.status"
+	ActionSSHCheck    = "ssh.check"
+	ActionSSHConfig   = "ssh.config"
+	ActionSSHConfirm  = "ssh.confirm"
+	ActionSSHKey      = "ssh.key"
 	// Disk management (admin only, always sent by the server's disk API, never by the generic commands API).
 	// ActionDiskList reports a DiskReport as JSON. It never changes anything.
 	ActionDiskList = "disk.list"
@@ -762,6 +777,8 @@ type LogLine struct {
 const (
 	StreamLogs  = "logs"
 	StreamShell = "shell"
+	// StreamConsole is a terminal on the device itself, not inside a container.
+	StreamConsole = "console"
 )
 
 // StreamRequest is a stream the control plane wants the agent to open.

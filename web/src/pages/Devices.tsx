@@ -1,4 +1,5 @@
 import { useCan } from "../components/auth";
+import { IdentifyToggle } from "../components/DeviceHardware";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Plus, Server } from "lucide-react";
@@ -197,7 +198,7 @@ export function DeviceSummary({ d }: { d: Device }) {
 
 export default function DevicesPage() {
   useCrumbs([{ label: "Devices" }]);
-  const { data } = usePoll(api.devices, 5000);
+  const { data, reload } = usePoll(api.devices, 5000);
   const [adding, setAdding] = useState(false);
   const isAdmin = useCan("admin");
 
@@ -231,7 +232,7 @@ export default function DevicesPage() {
       ) : (
         <Card className="divide-y divide-neutral-100">
           {data.map((d) => (
-            <Link key={d.id} to={`/devices/${d.id}`} className="grid grid-cols-1 items-center gap-4 px-5 py-4 hover:bg-neutral-50 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_auto]">
+            <Link key={d.id} to={`/devices/${d.id}`} className={`grid grid-cols-1 items-center gap-4 px-5 py-4 hover:bg-neutral-50 md:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_auto] ${d.identifying_until && new Date(d.identifying_until) > new Date() ? "animate-pulse bg-amber-50 ring-2 ring-inset ring-amber-400" : ""}`}>
               <div className="min-w-0">
                 <p className="flex items-center gap-2 font-medium">
                   <StatusDot status={d.status} />
@@ -259,6 +260,9 @@ export default function DevicesPage() {
                 <p>{d.containers.filter((c) => c.state === "running").length}/{d.containers.length} containers</p>
                 <p className="mt-0.5">{d.metrics.temp_c ? `${d.metrics.temp_c.toFixed(0)}°C · ` : ""}Load {d.metrics.load5.toFixed(2)}</p>
                 <p className="mt-0.5">Seen {ago(d.last_seen)}</p>
+                <div className="mt-2 md:flex md:justify-end">
+                  <IdentifyToggle d={d} onChanged={reload} compact />
+                </div>
               </div>
             </Link>
           ))}

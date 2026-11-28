@@ -122,8 +122,11 @@ export function LiveLogs({ deviceId, container, name, onClose }: { deviceId: str
   );
 }
 
-/** An interactive shell inside a container. Administrators only; the server enforces that. */
-export function Shell({ deviceId, container, name, onClose }: { deviceId: string; container: string; name: string; onClose: () => void }) {
+/**
+ * An interactive shell inside a container, or (with no container) a console on the device itself.
+ * Administrators only; the server enforces that and records both.
+ */
+export function Shell({ deviceId, container, name, onClose }: { deviceId: string; container?: string; name: string; onClose: () => void }) {
   const host = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<"connecting" | "live" | "ended">("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -162,7 +165,7 @@ export function Shell({ deviceId, container, name, onClose }: { deviceId: string
 
     (async () => {
       try {
-        id = (await api.openStream(deviceId, { kind: "shell", container, cols: term.cols, rows: term.rows })).id;
+        id = (await api.openStream(deviceId, { kind: container ? "shell" : "console", container, cols: term.cols, rows: term.rows })).id;
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
         setState("ended");
@@ -190,10 +193,10 @@ export function Shell({ deviceId, container, name, onClose }: { deviceId: string
         <div className="flex items-center justify-between border-b border-neutral-700 px-4 py-2.5 text-sm text-neutral-200">
           <span className="flex items-center gap-2 font-medium">
             <span className={`size-2 rounded-full ${state === "live" ? "bg-ok" : "bg-neutral-500"}`} />
-            Shell: {name}
+            {container ? "Shell" : "Console"}: {name}
             {state === "connecting" && <span className="font-normal text-neutral-400">connecting…</span>}
           </span>
-          <button onClick={onClose} className="rounded-md p-1 text-neutral-300 hover:bg-neutral-700" aria-label="Close shell">
+          <button onClick={onClose} className="rounded-md p-1 text-neutral-300 hover:bg-neutral-700" aria-label={container ? "Close shell" : "Close console"}>
             <X className="size-4" />
           </button>
         </div>

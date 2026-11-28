@@ -26,6 +26,20 @@ const (
 
 // stream is one open pipe. Output is buffered with an absolute offset so the browser can
 // long-poll "everything after N" and never miss or repeat bytes.
+// interactive reports whether the stream is a terminal (a container shell or the device console):
+// typed input is audited and an idle one is closed.
+func (st *stream) interactive() bool {
+	return st.Kind == api.StreamShell || st.Kind == api.StreamConsole
+}
+
+// where names what a terminal is attached to, for the audit trail.
+func (st *stream) where() string {
+	if st.Kind == api.StreamConsole {
+		return "on the device"
+	}
+	return "in " + st.Container
+}
+
 type stream struct {
 	api.StreamRequest
 	deviceID string
@@ -124,7 +138,7 @@ func (st *stream) expire(now time.Time) {
 		st.finish("the device's agent did not answer. Update it from the Updates page if it is old.")
 	case now.Sub(st.lastClient) > streamClientIdle:
 		st.finish("")
-	case st.Kind == api.StreamShell && now.Sub(st.lastInput) > streamShellIdle:
+	case st.interactive() && now.Sub(st.lastInput) > streamShellIdle:
 		st.finish("the shell was closed after 15 minutes without input")
 	}
 }
@@ -213,9 +227,9 @@ func (s *Server) streamFor(w http.ResponseWriter, r *http.Request) (*stream, boo
 		writeError(w, http.StatusNotFound, "no such stream (it may have ended)")
 		return nil, false
 	}
-	if st.Kind == api.StreamShell {
+	if st.interactive() {
 		if id := identityFrom(r); id == nil || store.RoleRank(id.Role) < store.RoleRank(store.RoleAdmin) {
-			writeError(w, http.StatusForbidden, "only administrators can use a container shell")
+			writeError(w, http.StatusForbidden, "only administrators can use a shell or the console")
 			return nil, false
 		}
 	}
@@ -241,17 +255,38 @@ func (s *Server) handleOpenStream(w http.ResponseWriter, r *http.Request) {
 	id := identityFrom(r)
 	switch req.Kind {
 	case api.StreamLogs:
-	case api.StreamShell:
+	case api.StreamShell, api.StreamConsole:
 		if id == nil || store.RoleRank(id.Role) < store.RoleRank(store.RoleAdmin) {
-			writeError(w, http.StatusForbidden, "only administrators can open a container shell")
+			writeError(w, http.StatusForbidden, "only administrators can open a shell or the device console")
 			return
 		}
 	default:
-		writeError(w, http.StatusBadRequest, "kind must be logs or shell")
+		writeError(w, http.StatusBadRequest, "kind must be logs, shell or console")
 		return
 	}
 	if !hasCap(d, api.CapStream) {
 		writeError(w, http.StatusConflict, errAgentTooOld(d, "live logs and shells").Error())
+		return
+	}
+	if req.Kind == api.StreamConsole {
+		// A terminal on the device itself, not in a container.
+		if !hasCap(d, api.CapConsole) {
+			writeError(w, http.StatusConflict, errAgentTooOld(d, "the device console").Error())
+			return
+		}
+		if d.Offline || time.Since(d.LastSeen) > s.offlineAfter() {
+			writeError(w, http.StatusConflict, d.Name+" is offline")
+			return
+		}
+		cols, rows := min(max(req.Cols, 20), 500), min(max(req.Rows, 5), 200)
+		who := actorName(r)
+		st, err := s.streams.open(api.StreamRequest{ID: newStreamID(), Kind: api.StreamConsole, Cols: cols, Rows: rows}, d.ID, who)
+		if err != nil {
+			writeError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
+		s.event(r.Context(), d.ID, "warning", "console.opened", fmt.Sprintf("%s opened a root console on %s", who, d.Name))
+		writeJSON(w, http.StatusCreated, map[string]string{"id": st.ID})
 		return
 	}
 	var target *api.Container
@@ -334,7 +369,7 @@ func (s *Server) handleStreamInput(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if st.Kind != api.StreamShell {
+	if !st.interactive() {
 		writeError(w, http.StatusBadRequest, "only shells take input")
 		return
 	}
@@ -358,7 +393,7 @@ func (s *Server) handleStreamInput(w http.ResponseWriter, r *http.Request) {
 		}
 		st.in = append(st.in, in.Data...)
 		for _, l := range st.auditInput(in.Data) {
-			s.event(r.Context(), st.deviceID, "info", "shell.input", fmt.Sprintf("%s ran in %s: %s", st.user, st.Container, l))
+			s.event(r.Context(), st.deviceID, "info", "shell.input", fmt.Sprintf("%s ran %s: %s", st.user, st.where(), l))
 		}
 	}
 	if in.Cols > 0 && in.Rows > 0 && (in.Cols != st.cols || in.Rows != st.rows) {
@@ -411,7 +446,7 @@ func (s *Server) handleAgentStreamOutput(w http.ResponseWriter, r *http.Request)
 	st.expire(time.Now())
 	if !st.closed {
 		st.out = append(st.out, out.Data...)
-		if st.Kind == api.StreamShell {
+		if st.interactive() {
 			st.noteOutput(out.Data)
 		}
 		if over := len(st.out) - streamBuffer; over > 0 {

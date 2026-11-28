@@ -171,6 +171,8 @@ func (a *Agent) serveStream(ctx context.Context, req api.StreamRequest) {
 		err = a.serveLogs(ctx, req)
 	case api.StreamShell:
 		err = a.serveShell(ctx, req)
+	case api.StreamConsole:
+		err = a.serveConsole(ctx, req)
 	default:
 		err = fmt.Errorf("unknown stream kind %q", req.Kind)
 	}
@@ -276,6 +278,18 @@ func (a *Agent) serveShell(ctx context.Context, req api.StreamRequest) error {
 	if err != nil {
 		return err
 	}
+	return a.pumpTerminal(ctx, req, sess)
+}
+
+// termSession is an interactive terminal: a shell in a container, or on the device itself.
+type termSession interface {
+	io.ReadWriteCloser
+	Resize(ctx context.Context, cols, rows int) error
+}
+
+// pumpTerminal connects a terminal to the stream until either side ends.
+func (a *Agent) pumpTerminal(ctx context.Context, req api.StreamRequest, sess termSession) error {
+	var err error
 	defer sess.Close()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

@@ -12,6 +12,7 @@ import { DeploymentRow } from "./Projects";
 import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
+import { DeviceHardwareActions, HardwareTab, useIdentifying } from "../components/DeviceHardware";
 import Disks from "../components/Disks";
 import ContainerIssues, { isContainerIssueText } from "../components/ContainerIssues";
 import HardwareMetrics, { CompareCard, PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
@@ -28,9 +29,14 @@ export default function DevicePage() {
   if (dev.error && !d) return <ErrorNote>{dev.error}</ErrorNote>;
   if (!d) return <Loading />;
   const base = `/devices/${d.id}`;
+  return <DeviceBody d={d} base={base} isAdmin={isAdmin} rows={rows} dev={dev} fleet={fleet} />;
+}
+
+function DeviceBody({ d, base, isAdmin, rows, dev, fleet }: { d: Device; base: string; isAdmin: boolean; rows: any; dev: { reload: () => void }; fleet: { reload: () => void } }) {
+  const flashing = useIdentifying(d);
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className={`mb-6 flex flex-wrap items-start justify-between gap-4 rounded-xl ${flashing ? "animate-pulse bg-amber-50 p-3 ring-2 ring-amber-400" : ""}`}>
         <div className="min-w-0">
           <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
             <StatusDot status={d.status} />
@@ -48,6 +54,7 @@ export default function DevicePage() {
             <DeviceSummary d={d} />
           </p>
         </div>
+        <DeviceHardwareActions d={d} onChanged={dev.reload} />
       </div>
       <div className="mb-6">
         <Tabs
@@ -57,6 +64,7 @@ export default function DevicePage() {
             ...(isAdmin ? [{ to: `${base}/disks`, label: "Disks" }] : []),
             { to: `${base}/deployments`, label: "Deployments" },
             { to: `${base}/activity`, label: "Activity" },
+            ...(isAdmin ? [{ to: `${base}/hardware`, label: "Hardware" }] : []),
             ...(isAdmin ? [{ to: `${base}/settings`, label: "Settings" }] : []),
           ]}
         />
@@ -81,6 +89,7 @@ export default function DevicePage() {
         {isAdmin && <Route path="disks" element={<Disks d={d} />} />}
         <Route path="deployments" element={<DeviceDeployments d={d} />} />
         <Route path="activity" element={<DeviceActivity d={d} />} />
+        {isAdmin && <Route path="hardware" element={<HardwareTab d={d} />} />}
         {isAdmin && <Route path="settings" element={<DeviceSettings d={d} onSaved={dev.reload} />} />}
       </Routes>
     </>
@@ -465,6 +474,7 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             <Prop k="Uptime" v={uptime(m.uptime_seconds)} />
             <Prop k="Load average" v={`${m.load1.toFixed(2)} ${m.load5.toFixed(2)} ${m.load15.toFixed(2)}`} />
             <Prop k="Temperature" v={m.temp_c ? `${m.temp_c.toFixed(0)}°C` : "Not reported (no sensor, or the agent needs updating)"} />
+            {d.host.power && <Prop k="Power source" v={d.host.power.source === "poe-plus" ? `PoE+ / PoE++ (up to ${d.host.power.max_watts} W)` : `5 V only: PoE or USB-C (up to ${d.host.power.max_watts} W)`} />}
             <Prop k="Last seen" v={ago(d.last_seen)} />
             <Prop k="Agent" v={d.host.agent_version} />
           </dl>

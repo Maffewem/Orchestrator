@@ -21,14 +21,26 @@ func (s *Store) Snapshot(ctx context.Context, path string, withKey bool) error {
 	return nil
 }
 
-// CheckSnapshot opens the database file at path and confirms it is an Orchestrator database.
+// CheckSnapshot opens the database file at path and confirms it is an intact Orchestrator
+// database. It deliberately does not go through Open: opening a store adopts the secret key a
+// protected backup carries and re-seals values under a throwaway key file, which would strip the
+// key out of the very file that is about to be restored.
 func CheckSnapshot(path string) error {
-	st, err := Open(path)
+	db, err := sql.Open("sqlite", "file:"+path)
 	if err != nil {
 		return err
 	}
-	defer st.Close()
-	if _, err := st.CountUsers(context.Background()); err != nil {
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	var res string
+	if err := db.QueryRow(`PRAGMA quick_check(1)`).Scan(&res); err != nil {
+		return fmt.Errorf("not an Orchestrator database: %w", err)
+	}
+	if res != "ok" {
+		return fmt.Errorf("the database is damaged: %s", res)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
 		return fmt.Errorf("not an Orchestrator database: %w", err)
 	}
 	return nil

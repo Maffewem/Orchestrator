@@ -24,6 +24,14 @@ const sampleLsblk = `{"blockdevices":[
  {"name":"sdd","path":"/dev/sdd","type":"disk","size":1000000000,"mountpoints":[null],
   "children":[{"name":"sdd1","path":"/dev/sdd1","type":"part","size":900000000,"fstype":"LVM2_member","mountpoints":[null],
     "children":[{"name":"vg-root","path":"/dev/mapper/vg-root","type":"lvm","size":800000000,"fstype":"ext4","mountpoints":["/mnt/lvm"]}]}]},
+ {"name":"mmcblk0","path":"/dev/mmcblk0","type":"disk","size":31268536320,"tran":null,"mountpoints":[null],
+  "children":[
+   {"name":"mmcblk0p1","path":"/dev/mmcblk0p1","type":"part","size":536870912,"fstype":"vfat","mountpoints":["/boot/firmware"]},
+   {"name":"mmcblk0p2","path":"/dev/mmcblk0p2","type":"part","size":30000000000,"fstype":"ext4","mountpoints":["/"]}]},
+ {"name":"mmcblk0boot0","path":"/dev/mmcblk0boot0","type":"disk","size":4194304,"mountpoints":[null]},
+ {"name":"mmcblk0boot1","path":"/dev/mmcblk0boot1","type":"disk","size":4194304,"mountpoints":[null]},
+ {"name":"mmcblk0rpmb","path":"/dev/mmcblk0rpmb","type":"disk","size":4194304,"mountpoints":[null]},
+ {"name":"mmcblk1","path":"/dev/mmcblk1","type":"disk","size":63864569856,"mountpoints":[null]},
  {"name":"zram0","path":"/dev/zram0","type":"disk","size":1000,"mountpoints":["[SWAP]"]}
 ]}`
 
@@ -152,5 +160,44 @@ func TestFstabKeepsForeignLines(t *testing.T) {
 func TestFormatNeedsConfirmation(t *testing.T) {
 	if _, err := diskFormat(t.Context(), map[string]string{"device": "/dev/sdc", "fstype": "ext4", "confirm": "yes"}); err == nil || !strings.Contains(err.Error(), "not confirmed") {
 		t.Errorf("want a confirmation error, got %v", err)
+	}
+}
+
+func TestEMMCHardwarePartitionsAreLocked(t *testing.T) {
+	old := readSys
+	defer func() { readSys = old }()
+	readSys = func(p string) string {
+		switch p {
+		case "/sys/block/mmcblk0/device/type":
+			return "MMC"
+		case "/sys/block/mmcblk1/device/type":
+			return "SD"
+		}
+		return ""
+	}
+	rep := sampleReport(t)
+	got := map[string]api.Disk{}
+	for _, d := range rep.Disks {
+		got[d.Path] = d
+	}
+	for _, n := range []string{"mmcblk0boot0", "mmcblk0boot1", "mmcblk0rpmb"} {
+		d, ok := got["/dev/"+n]
+		if !ok || d.Protected == "" || !strings.Contains(d.Protected, "/dev/mmcblk0") {
+			t.Errorf("%s must be listed as locked, part of mmcblk0: %+v", n, d)
+		}
+		if d.Medium != "emmc" {
+			t.Errorf("%s medium %q, want emmc", n, d.Medium)
+		}
+		for _, op := range []string{api.ActionDiskFormat, api.ActionDiskPartition} {
+			if err := guardWrite(rep, "/dev/"+n, op); err == nil || !strings.Contains(err.Error(), "eMMC hardware partition") {
+				t.Errorf("%s %s should be refused as eMMC hardware: %v", op, n, err)
+			}
+		}
+	}
+	if got["/dev/mmcblk0"].Medium != "emmc" || got["/dev/mmcblk1"].Medium != "sd" {
+		t.Errorf("medium: %q / %q", got["/dev/mmcblk0"].Medium, got["/dev/mmcblk1"].Medium)
+	}
+	if got["/dev/mmcblk1"].Protected != "" {
+		t.Error("a blank SD card stays free")
 	}
 }

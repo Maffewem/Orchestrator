@@ -127,6 +127,8 @@ export interface Disk {
   transport?: string;
   removable?: boolean;
   rotational?: boolean;
+  /** "emmc" or "sd" for MMC-bus devices; absent when unknown. */
+  medium?: "emmc" | "sd";
   volume: DiskVolume;
   partitions?: DiskVolume[];
   protected?: string;
@@ -143,6 +145,8 @@ export interface DiskShare {
 export interface DiskReport {
   disks: Disk[];
   shares: DiskShare[];
+  /** Device model such as "Raspberry Pi Compute Module 5", when the system reports one. */
+  board?: string;
 }
 
 export type Health = "ok" | "warning" | "critical";

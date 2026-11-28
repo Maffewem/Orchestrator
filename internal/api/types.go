@@ -378,18 +378,22 @@ const (
 type DiskReport struct {
 	Disks  []Disk      `json:"disks"`
 	Shares []DiskShare `json:"shares"`
+	// Board is the device model (for example "Raspberry Pi Compute Module 5"), when the system reports one.
+	Board string `json:"board,omitempty"`
 }
 
 // Disk is a block device (a whole disk or loop device) with its partitions.
 type Disk struct {
-	Path        string   `json:"path"`
-	Kind        string   `json:"kind"` // disk, loop
-	SizeBytes   int64    `json:"size_bytes"`
-	Model       string   `json:"model,omitempty"`
-	Serial      string   `json:"serial,omitempty"`
-	Transport   string   `json:"transport,omitempty"`
-	Removable   bool     `json:"removable,omitempty"`
-	Rotational  bool     `json:"rotational,omitempty"`
+	Path       string `json:"path"`
+	Kind       string `json:"kind"` // disk, loop
+	SizeBytes  int64  `json:"size_bytes"`
+	Model      string `json:"model,omitempty"`
+	Serial     string `json:"serial,omitempty"`
+	Transport  string `json:"transport,omitempty"`
+	Removable  bool   `json:"removable,omitempty"`
+	Rotational bool   `json:"rotational,omitempty"`
+	// Medium is "emmc" or "sd" for MMC-bus devices (from the kernel), empty when unknown.
+	Medium      string   `json:"medium,omitempty"`
 	BackingFile string   `json:"backing_file,omitempty"`
 	Volume      Volume   `json:"volume"`
 	Partitions  []Volume `json:"partitions,omitempty"`

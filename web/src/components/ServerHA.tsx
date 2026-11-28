@@ -54,6 +54,23 @@ export default function ServerHA() {
               <Button variant="danger" disabled={busy || !data.ready || !data.can_restart} onClick={promote}>Promote to active</Button>
               <Button disabled={busy} onClick={async () => { if (await confirmDialog({ title: "Leave the pair?", message: "This server becomes a standalone server again and keeps its own data. It restarts.", confirmLabel: "Leave" })) run(() => api.haLeave()); }}>Leave the pair</Button>
             </div>
+            <div className="rounded-md border border-neutral-200 p-3">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={!!data.auto_promote}
+                  disabled={busy}
+                  onChange={async (e) => {
+                    const on = e.target.checked;
+                    if (on && !(await confirmDialog({ title: "Promote automatically?", message: "If the active server stops answering for the wait below and a majority of at least 3 devices also cannot reach it, this server takes over by itself and restarts. With fewer than 3 devices it never promotes by itself.", confirmLabel: "Turn on", danger: true }))) return;
+                    run(() => api.haAuto(on, data.auto_after || 45));
+                  }}
+                />
+                Promote automatically when the active server is down
+              </label>
+              <p className="mt-1 text-xs text-neutral-500">Waits {data.auto_after || 45} s without a copy, then needs a majority of devices (at least 3) to confirm they cannot reach the active server. It never promotes when only the link between the two servers is broken.</p>
+              {data.auto_note && <p className="mt-1 text-xs text-amber-700">{data.auto_note}</p>}
+            </div>
             <p className="text-xs text-neutral-500">After promotion, devices need this server's address to follow it: add it under Settings &gt; Server addresses on the active server beforehand, and repoint the dashboard address (DNS or tunnel) by hand.</p>
           </>
         ) : (

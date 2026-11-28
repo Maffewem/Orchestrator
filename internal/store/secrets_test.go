@@ -172,6 +172,8 @@ func TestCheckSnapshotKeepsBackupKey(t *testing.T) {
 	os.WriteFile(bad, []byte("not a database at all, just text padding padding padding"), 0o600)
 	if CheckSnapshot(bad) == nil {
 		t.Fatal("a non-database must be refused")
+	}
+}
 
 func TestStepLogIsCappedAndEventsPruned(t *testing.T) {
 	st, err := Open(":memory:")

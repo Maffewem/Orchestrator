@@ -103,6 +103,7 @@ type Server struct {
 	stale            staleServers           // stale servers agents reported, see fence.go
 	haLastPull       atomic.Int64           // unix time the standby last fetched a copy
 	haTick           time.Duration          // test hook; 15s when zero
+	haAuto           haAutoState            // standby: agents seen knocking, see ha_auto.go
 	haRestartIn      time.Duration          // test hook: overrides the delay before an HA restart
 	lastHousekeeping atomic.Int64           // unix time of the last hourly cleanup
 
@@ -484,6 +485,7 @@ func (s *Server) Handler() http.Handler {
 	admin("POST /api/server-backups/{name}/verify", s.handleVerifyServerBackup)
 	admin("PUT /api/settings/backup-password", s.handleSetBackupPassword)
 	admin("PUT /api/settings/backup-plain-key", s.handleSetBackupPlainKey)
+	admin("PUT /api/server-ha/auto", s.handleHASetAuto)
 	admin("POST /api/settings/join-token/rotate", s.handleRotateJoinToken)
 
 	mux.HandleFunc("GET /install.sh", s.handleInstallScript)

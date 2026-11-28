@@ -78,6 +78,12 @@ func (d *Docker) Health(ctx context.Context, id string) (running bool, health st
 // RecreateFrom creates (without starting) a container called name that copies the settings
 // of the inspected container, running image instead. It returns the new container's ID.
 func (d *Docker) RecreateFrom(ctx context.Context, inspect json.RawMessage, name, image string) (string, error) {
+	return d.RecreateFromWith(ctx, inspect, name, image, nil, nil)
+}
+
+// RecreateFromWith is RecreateFrom that also publishes extra TCP ports, each "host:container"
+// (for example "8443:8443"). A container port that is already published keeps its mapping.
+func (d *Docker) RecreateFromWith(ctx context.Context, inspect json.RawMessage, name, image string, publish, unpublish []string) (string, error) {
 	var src struct {
 		Config          map[string]any `json:"Config"`
 		HostConfig      map[string]any `json:"HostConfig"`
@@ -94,6 +100,11 @@ func (d *Docker) RecreateFrom(ctx context.Context, inspect json.RawMessage, name
 	body["Image"] = image
 	delete(body, "Hostname") // the old container's ID would stick
 	body["HostConfig"] = src.HostConfig
+	if len(publish) > 0 || len(unpublish) > 0 {
+		if err := addPortBindings(body, src.HostConfig, publish, unpublish); err != nil {
+			return "", err
+		}
+	}
 
 	first, _ := src.HostConfig["NetworkMode"].(string)
 	if _, ok := src.NetworkSettings.Networks[first]; !ok {
@@ -254,4 +265,64 @@ func (d *Docker) ExecOutput(ctx context.Context, container string, cmd ...string
 	}
 	defer resp.Body.Close()
 	return demux(io.LimitReader(resp.Body, 64<<10))
+}
+
+// addPortBindings adds "host:container" TCP mappings to a create body's HostConfig and ExposedPorts.
+//
+// unpublish lists container ports ("8443") whose mapping is dropped, such as an HTTPS port
+// that has since been changed.
+func addPortBindings(body, host map[string]any, publish, unpublish []string) error {
+	pb, _ := host["PortBindings"].(map[string]any)
+	if pb == nil {
+		pb = map[string]any{}
+	}
+	exposed, _ := body["ExposedPorts"].(map[string]any)
+	if exposed == nil {
+		exposed = map[string]any{}
+	}
+	for _, c := range unpublish {
+		delete(pb, c+"/tcp")
+		delete(exposed, c+"/tcp")
+	}
+	for _, m := range publish {
+		h, c, ok := strings.Cut(m, ":")
+		if !ok || h == "" || c == "" {
+			return fmt.Errorf("port mapping %q should look like 8443:8443", m)
+		}
+		key := c + "/tcp"
+		if _, have := pb[key]; !have {
+			pb[key] = []any{map[string]any{"HostPort": h}}
+		}
+		exposed[key] = map[string]any{}
+	}
+	host["PortBindings"] = pb
+	body["ExposedPorts"] = exposed
+	return nil
+}
+
+// ProbePort checks that a TCP port can be published on the host: it starts a short-lived
+// container (which exits straight away) that publishes host:port and removes it again. Docker
+// refuses to start it when something already listens on the port.
+func (d *Docker) ProbePort(ctx context.Context, image, port string) error {
+	const name = "orchestrator-port-probe"
+	d.RemoveIfExists(ctx, name)
+	body := map[string]any{
+		"Image":        image,
+		"Entrypoint":   []string{"orchestrator-server"},
+		"Cmd":          []string{"decrypt-backup"}, // exits at once with a usage message
+		"Labels":       map[string]string{"orchestrator.role": "port-probe"},
+		"ExposedPorts": map[string]any{port + "/tcp": map[string]any{}},
+		"HostConfig":   map[string]any{"PortBindings": map[string]any{port + "/tcp": []any{map[string]any{"HostPort": port}}}},
+	}
+	var out struct {
+		ID string `json:"Id"`
+	}
+	if err := d.call(ctx, http.MethodPost, "/containers/create", url.Values{"name": {name}}, body, &out); err != nil {
+		return err
+	}
+	defer d.RemoveIfExists(ctx, out.ID)
+	if err := d.Start(ctx, out.ID); err != nil {
+		return fmt.Errorf("port %s is not available on the host: %w", port, err)
+	}
+	return nil
 }

@@ -140,7 +140,7 @@ func (s *Server) httpsRedirect(next http.Handler) http.Handler {
 			writeError(w, http.StatusUpgradeRequired, "this server only accepts agents over HTTPS: re-run the install command from the HTTPS dashboard")
 			return
 		}
-		if !exempt && !requestIsHTTPS(r) && s.forceHTTPS(r.Context()) {
+		if !exempt && !requestIsHTTPS(r) && s.forceHTTPS(r.Context()) && s.httpsRedirectSafe(r.Context()) {
 			http.Redirect(w, r, s.redirectTarget(r), http.StatusMovedPermanently)
 			return
 		}

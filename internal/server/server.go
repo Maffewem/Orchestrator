@@ -441,6 +441,8 @@ func (s *Server) Handler() http.Handler {
 	admin("PUT /api/backup-oauth", s.handleSetBackupOAuth)
 	admin("POST /api/backup-oauth/{provider}/start", s.handleBackupOAuthStart)
 	admin("PUT /api/settings/https", s.handleSetHTTPS)
+	admin("POST /api/settings/https/test", s.handleTestHTTPS)
+	admin("POST /api/settings/https/publish-port", s.handlePublishHTTPSPort)
 	admin("GET /api/server-backups", s.handleListServerBackups)
 	admin("POST /api/server-backups", s.handleCreateServerBackup)
 	admin("PUT /api/server-backups/destinations", s.handleSetBackupDests)

@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { copyText } from "../clipboard";
 import { Link, NavLink } from "react-router";
-import { AlertTriangle, Check, CircleDashed, Eye, EyeOff, Loader2, Minus, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, CircleDashed, Eye, EyeOff, Loader2, Minus, RefreshCw, X } from "lucide-react";
 import type { DeploymentStatus, Health, StepStatus } from "../api";
 import { cx } from "../lib";
 
@@ -43,6 +43,26 @@ export function Button({
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
   return <div className={cx("rounded-xl border border-neutral-200 bg-white", className)}>{children}</div>;
+}
+
+/** A card that starts collapsed on phones (tap the header to open) and is always open from `sm` up, so long pages stay short. */
+export function FoldCard({ title, subtitle, defaultOpen = false, className, children }: { title: ReactNode; subtitle?: ReactNode; defaultOpen?: boolean; className?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Card className={className}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="flex min-h-11 w-full items-center justify-between gap-3 px-5 py-3 text-left sm:hidden">
+        <span className="text-sm font-semibold">{title}</span>
+        <ChevronDown className={cx("size-4 shrink-0 text-neutral-500 transition-transform", open && "rotate-180")} />
+      </button>
+      <div className="hidden sm:block">
+        <CardHeader title={title} subtitle={subtitle} />
+      </div>
+      <div className={cx(open ? "border-t border-neutral-200 sm:border-t-0" : "hidden sm:block")}>
+        {open && subtitle && <p className="px-5 pt-3 text-xs text-neutral-500 sm:hidden">{subtitle}</p>}
+        {children}
+      </div>
+    </Card>
+  );
 }
 
 export function CardHeader({ title, action, subtitle }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode }) {

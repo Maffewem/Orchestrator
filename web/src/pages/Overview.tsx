@@ -133,7 +133,7 @@ export default function OverviewPage() {
         <div className="min-w-0 lg:col-span-2">
           <Section title="Activity" action={<Link to="/activity" className="text-sm text-primary hover:underline">View all</Link>}>
             <Card>
-              <EventList events={o.recent_events} devices={devices.data} compact />
+              <EventList events={typeof matchMedia === "function" && matchMedia("(max-width: 639px)").matches ? o.recent_events.slice(0, 4) : o.recent_events} devices={devices.data} compact />
             </Card>
           </Section>
         </div>

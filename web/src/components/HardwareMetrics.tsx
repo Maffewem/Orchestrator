@@ -81,7 +81,7 @@ export default function HardwareMetrics({ s, m, only }: { s: MetricSample[]; m: 
     const busy = s.map((x) => Math.max(0, ...(x.disks ?? []).map((d) => d.busy)));
     return (
       <Card>
-        <CardHeader title="Disk I/O" subtitle="Read and write speed of all disks together (last hour); the busiest disk's busy % is the line underneath." />
+        <CardHeader title="Disk I/O" subtitle="Read and write speed of all disks together over the selected range; the busiest disk's busy % is the line underneath." />
         <div className="space-y-4 p-5">
           <LineChart max={niceMax(Math.max(...read, ...write), 1024 * 1024)} unit="B/s" format={rate} series={[{ label: "Read", color: COLORS.read, values: read }, { label: "Write", color: COLORS.write, values: write }]} />
           <LineChart height={64} series={[{ label: "Busiest disk", color: COLORS.busy, values: busy }]} />
@@ -110,7 +110,7 @@ export default function HardwareMetrics({ s, m, only }: { s: MetricSample[]; m: 
     const tx = s.map((x) => sum((x.nets ?? []).map((d) => d.tx_bps)));
     return (
       <Card>
-        <CardHeader title="Network" subtitle="Traffic of all interfaces together (last hour), with each interface's current figures below." />
+        <CardHeader title="Network" subtitle="Traffic of all interfaces together over the selected range, with each interface's current figures below." />
         <div className="space-y-4 p-5">
           <LineChart max={niceMax(Math.max(...rx, ...tx), 100 * 1024)} unit="B/s" format={rate} series={[{ label: "Received", color: COLORS.rx, values: rx }, { label: "Sent", color: COLORS.tx, values: tx }]} />
           <Table head={["Interface", "Received", "Sent", "Errors and drops", "Wi-Fi signal"]} compact>
@@ -136,7 +136,7 @@ export default function HardwareMetrics({ s, m, only }: { s: MetricSample[]; m: 
   if (only === "power" && (p || hasClock)) {
     return (
       <Card>
-        <CardHeader title="Power and CPU clock" subtitle="Under-voltage and throttling reported by the Raspberry Pi firmware, and the CPU clock (last hour)." />
+        <CardHeader title="Power and CPU clock" subtitle="Under-voltage and throttling reported by the Raspberry Pi firmware, and the CPU clock over the selected range." />
         <div className="space-y-4 p-5">
           {p && (
             <ul className="space-y-1.5 text-sm">
@@ -182,7 +182,7 @@ interface Candidate {
   id: string;
   label: string;
   color: string;
-  kind: Kind; // pct: already 0-100; scaled: shown as a share of its own highest value in the hour
+  kind: Kind; // pct: already 0-100; scaled: shown as a share of its own highest value in the range
   get: (x: MetricSample) => number;
   fmt: (v: number) => string;
   has: (s: MetricSample[], m: Metrics) => boolean;
@@ -247,7 +247,7 @@ export function CompareCard({ s, m }: { s: MetricSample[]; m: Metrics }) {
           ))}
         </div>
         )}
-        <p className="text-xs text-neutral-500">Each line is scaled to its own range (percentages as they are, the rest as a share of the hour's highest value). The legend shows the real latest value.</p>
+        <p className="text-xs text-neutral-500">Each line is scaled to its own range (percentages as they are, the rest as a share of the range's highest value). The legend shows the real latest value.</p>
       </div>
     </Card>
   );

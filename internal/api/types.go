@@ -263,6 +263,14 @@ type Container struct {
 	// Unstable is set by the server (never the agent) when Docker has restarted the container
 	// repeatedly in the last few minutes, even if it is "running" at this instant.
 	Unstable bool `json:"unstable,omitempty"`
+	// Exit details, set by the agent for stopped containers that exited with 137 or 143. OOMKilled is
+	// Docker's own record that the kernel killed it for running out of memory. StopRequested is set
+	// when Docker logged a stop or kill request just before it died (docker stop, docker kill, a
+	// compose down), which is what a person doing it by hand looks like. A real out-of-memory kill
+	// logs neither.
+	ExitInspected bool `json:"exit_inspected,omitempty"`
+	OOMKilled     bool `json:"oom_killed,omitempty"`
+	StopRequested bool `json:"stop_requested,omitempty"`
 }
 
 // ContainerNet is a container's attachment to one Docker network.

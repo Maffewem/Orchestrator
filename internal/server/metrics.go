@@ -33,8 +33,8 @@ type MetricSample struct {
 	Nets     []api.NetIO  `json:"nets,omitempty"`
 }
 
-// metricsHistory keeps recent samples per device in memory. It is lost on restart, which
-// is fine for live graphs; long-term metrics belong in a proper TSDB later.
+// metricsHistory keeps the last hour of live samples per device in memory (refilled from the stored
+// one-minute samples after a restart). Longer history is stored in SQLite; see devicehistory.go.
 type metricsHistory struct {
 	mu   sync.Mutex
 	size int
@@ -52,7 +52,7 @@ func pct(used, total uint64) float64 {
 	return float64(used) / float64(total) * 100
 }
 
-func (h *metricsHistory) add(deviceID string, m api.Metrics) {
+func (h *metricsHistory) add(deviceID string, m api.Metrics) MetricSample {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	smp := MetricSample{
@@ -79,6 +79,7 @@ func (h *metricsHistory) add(deviceID string, m api.Metrics) {
 		s = s[len(s)-h.size:]
 	}
 	h.data[deviceID] = s
+	return smp
 }
 
 func (h *metricsHistory) get(deviceID string) []MetricSample {
@@ -92,7 +93,23 @@ func (s *Server) handleDeviceMetrics(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.metrics.get(d.ID))
+	// ?range= picks how far back to look: 1h (the default) is the live, per-heartbeat data in memory;
+	// longer ranges come from the stored history at 1 minute, 5 minute or 1 hour resolution.
+	res, span, ok := rangeTier(r.URL.Query().Get("range"))
+	if !ok {
+		writeError(w, http.StatusBadRequest, "range must be 1h, 6h, 24h, 7d, 30d or 90d")
+		return
+	}
+	if res == 0 {
+		writeJSON(w, http.StatusOK, s.metrics.get(d.ID))
+		return
+	}
+	smp, err := s.storedHistory(r.Context(), d.ID, res, span)
+	if err != nil {
+		s.internal(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, smp)
 }
 
 // hardwareIssues turns recent samples and the latest report into issues for Needs attention and

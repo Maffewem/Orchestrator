@@ -119,12 +119,14 @@ func (s *Server) view(d *store.Device) DeviceView {
 	for _, c := range marked {
 		kind := ""
 		switch {
-		case oomed[c.Name]:
+		case oomed[c.Name], c.State == "exited" && c.OOMKilled:
 			kind = "oom"
 		case isUnstable[c.Name]:
 			kind = "loop"
 		case c.State == "dead":
 			kind = "dead"
+		case c.State == "exited" && c.StopRequested:
+			// docker stop / kill / compose down on the device: not a failure, whatever the exit code
 		case c.State == "exited" && strings.Contains(c.Status, "(137)"):
 			kind = "killed"
 		}
@@ -146,7 +148,9 @@ func (s *Server) view(d *store.Device) DeviceView {
 		is := s.describeContainerIssue(context.Background(), d, c, kinds[c.Name], projects)
 		if dm, ok := s.dismissedFor(d.ID, c); ok && dm.Reason == "ack" {
 			is.Acked, is.AckedBy = true, dm.By
-		} else {
+		} else if !(is.Kind == "killed" && c.ExitInspected) {
+			// An exit 137 that Docker did not blame on memory and did not log a stop for is listed
+			// with its explanation but is not a device warning.
 			byKind[is.Kind] = append(byKind[is.Kind], c.Name)
 		}
 		v.ContainerIssues = append(v.ContainerIssues, is)
@@ -161,7 +165,7 @@ func (s *Server) view(d *store.Device) DeviceView {
 		raise("warning", "Containers killed for running out of memory: "+strings.Join(n, ", ")+". Raise the memory limit in the project settings, or free memory on the device")
 	}
 	if n := byKind["killed"]; len(n) > 0 {
-		raise("warning", "Containers killed (exit 137, often out of memory): "+strings.Join(n, ", "))
+		raise("warning", "Containers killed (exit 137, possibly out of memory): "+strings.Join(n, ", "))
 	}
 	return v
 }
@@ -243,7 +247,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	s.diffContainers(r, d, req.Containers)
 	s.noteNetworkChanges(ctx, d, req.Host)
 
-	s.metrics.add(d.ID, req.Metrics)
+	s.recordHistory(ctx, d.ID, s.metrics.add(d.ID, req.Metrics))
 	s.ingestStats(ctx, d, req.Containers, req.Stats)
 	s.noteStale(ctx, d.Name, d.ID, req.StaleServers)
 

@@ -13,7 +13,7 @@ import { DeviceSummary } from "./Devices";
 import { ago, bytes, bytesOrDash, freeSpace, pct, uptime, usePoll } from "../lib";
 import { confirmDialog } from "../components/dialogs";
 import Disks from "../components/Disks";
-import HardwareMetrics from "../components/HardwareMetrics";
+import HardwareMetrics, { PressureStats, availableGraphs, pressureSeries, type GraphKey } from "../components/HardwareMetrics";
 
 export default function DevicePage() {
   const { id = "" } = useParams();
@@ -329,6 +329,28 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
   const thresholds = usePoll(async () => (await api.settings()).temperature, 60000);
   const s = samples.data ?? [];
   const m = d.metrics;
+  const hwTabs = availableGraphs(s, m);
+  const graphs: { key: "perf" | "temp" | GraphKey; label: string }[] = [
+    { key: "perf", label: "Performance" },
+    ...(s.some((x) => x.temp > 0) || hwTabs.some((g) => g.key === "power") ? [{ key: "temp" as const, label: hwTabs.some((g) => g.key === "power") ? "Temperature & power" : "Temperature" }] : []),
+    ...hwTabs.filter((g) => g.key !== "power"),
+  ];
+  const [picked, setPicked] = useState<string>(() => {
+    try {
+      return localStorage.getItem("orch.deviceGraph") ?? "perf";
+    } catch {
+      return "perf";
+    }
+  });
+  const graph = (graphs.find((g) => g.key === picked)?.key ?? "perf") as (typeof graphs)[number]["key"];
+  const pickGraph = (k: string) => {
+    setPicked(k);
+    try {
+      localStorage.setItem("orch.deviceGraph", k);
+    } catch {
+      /* remembering the choice is optional */
+    }
+  };
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <div className="space-y-4 lg:col-span-2">
@@ -351,6 +373,22 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             {ackError && <div className="px-5 pb-3"><ErrorNote>{ackError}</ErrorNote></div>}
           </Card>
         )}
+        <div role="tablist" aria-label="Graphs" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+          {graphs.map((g) => (
+            <button
+              key={g.key}
+              type="button"
+              role="tab"
+              aria-selected={graph === g.key}
+              onClick={() => pickGraph(g.key)}
+              className={`min-h-9 shrink-0 rounded-full border px-3.5 text-sm ${graph === g.key ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white text-neutral-700"}`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        {graph === "perf" && (
+          <>
         <Card>
           <CardHeader title="Performance" subtitle="Live samples from the agent (last hour)." />
           <div className="space-y-6 p-5">
@@ -364,11 +402,15 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
                 { label: "CPU", color: "#0051c3", values: s.map((x) => x.cpu) },
                 { label: "Memory", color: "#f6821f", values: s.map((x) => x.mem) },
                 { label: "Disk", color: "#16794c", values: s.map((x) => x.disk) },
+                ...pressureSeries(s, m, d.host.cpus),
               ]}
             />
+            <PressureStats m={m} />
           </div>
         </Card>
-        {s.some((x) => x.temp > 0) && (
+          </>
+        )}
+        {graph === "temp" && s.some((x) => x.temp > 0) && (
           <Card>
             <CardHeader title="Temperature" subtitle={thresholds.data ? `Hottest sensor, last hour. Alerts at ${thresholds.data.warn_c}°C (warning) and ${thresholds.data.crit_c}°C (critical).` : "Hottest sensor, last hour."} />
             <div className="p-5">
@@ -391,7 +433,8 @@ function DeviceOverview({ d, onChanged }: { d: Device; onChanged: () => void }) 
             </div>
           </Card>
         )}
-        <HardwareMetrics s={s} m={m} cores={d.host.cpus} />
+        {graph === "temp" && <HardwareMetrics s={s} m={m} only="power" />}
+        {(graph === "disk" || graph === "net") && <HardwareMetrics s={s} m={m} only={graph} />}
         <FoldCard title="Recent activity">
           <DeviceActivity d={d} limit={8} bare />
         </FoldCard>
